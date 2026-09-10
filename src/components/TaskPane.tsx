@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PenTool, AlertCircle, Loader2 } from 'lucide-react';
-import { editDocumentText } from '../services/aiService';
+import { editDocumentTextStream } from '../services/aiService';
 
 interface Message {
   id: string;
@@ -68,10 +68,23 @@ export default function TaskPane() {
         const documentContext = body.text ? body.text.substring(0, 40000) : "";
         
         const loadingId = Date.now().toString() + 'load';
-        setMessages(prev => [...prev, { id: loadingId, role: 'assistant', content: 'Gondolkodom (az egész dokumentum tartalmát figyelembe véve)...', isLoading: true }]);
+        setMessages(prev => [...prev, { id: loadingId, role: 'assistant', content: '', isLoading: true }]);
 
-        // Hívjuk meg a saját backendünket a szolgáltatáson keresztül, átadva a teljes dokumentumot kontextusként és a módot
-        const newText = await editDocumentText(originalText, userInstruction, documentContext, mode);
+        // Hívjuk meg a saját backendünket a szolgáltatáson keresztül streaminggel
+        const newText = await editDocumentTextStream(
+          originalText, 
+          userInstruction, 
+          documentContext, 
+          mode, 
+          (chunk) => {
+            // Frissítsük az UI-t folyamatosan, ahogy jönnek a szavak
+            setMessages(prev => prev.map(m => 
+              m.id === loadingId 
+                ? { ...m, content: m.content + chunk, isLoading: false } 
+                : m
+            ));
+          }
+        );
 
         try {
           if (mode === 'comment') {
