@@ -1,0 +1,6 @@
+{
+  "name": "Word Writer Add-in",
+  "description": "A Microsoft Word add-in that allows users to insert and read text from their documents.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
