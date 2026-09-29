@@ -292,7 +292,7 @@ export default function TaskPane() {
           },
           onRateLimit: setRateLimit,
           onMeta: meta => updateMessage(loadingId, m => ({ ...m, details: m.details && { ...m.details, model: meta.model, location: meta.location } })),
-        }, { accessKey: settings.accessKey, signal: controller.signal });
+        }, { accessKey: settings.accessKey, userId: settings.userId, signal: controller.signal });
       } catch (aiError) {
         // Hibás, félbeszakadt vagy leállított válasz esetén a dokumentumhoz nem nyúlunk
         if (controller.signal.aborted) {
@@ -690,6 +690,7 @@ export default function TaskPane() {
           {!isSending && (
             <DictationButton
               accessKey={settings.accessKey}
+              userId={settings.userId}
               engine={settings.dictation.engine}
               localModel={settings.dictation.localModel}
               disabled={isBusy}

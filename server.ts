@@ -3,7 +3,8 @@ import path from "path";
 import { createHash, timingSafeEqual } from "crypto";
 import { createServer as createViteServer } from "vite";
 import rateLimit from "express-rate-limit";
-import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE } from "./src/shared/aiConfig";
+import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
+import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
 import { accessKeyProblem, parseTrustProxy } from "./server/config";
 import { providerFromEnv } from "./server/ai";
@@ -50,6 +51,9 @@ async function startServer() {
   const keyProblem = accessKeyProblem(accessKey ?? undefined);
   if (keyProblem) console.warn(`${keyProblem} Every /api request will be refused.`);
 
+  const audit = createAuditLogger(process.env.AUDIT_LOG_FILE);
+  const auditBase = (req: Request) => ({ user: readUserId(req.get(USER_ID_HEADER)), ip: req.ip ?? "" });
+
   const ai = providerFromEnv(process.env);
   if ("problem" in ai) console.warn(ai.problem);
   else console.log(`AI: ${ai.provider.model} via ${ai.provider.location}`);
@@ -80,11 +84,32 @@ async function startServer() {
       return res.status(500).json({ error: ai.problem, code: "SERVER_ERROR" });
     }
 
+    const startedAt = Date.now();
     const parsed = parseRequest(req.body);
     if ("error" in parsed) {
+      audit({ ...auditBase(req), action: String(req.body?.mode ?? "unknown").slice(0, 20), status: "rejected", detail: parsed.error, model: ai.provider.model, location: ai.provider.location, durationMs: 0 });
       return res.status(400).json({ error: parsed.error, code: "BAD_REQUEST" });
     }
-    const { systemInstruction, prompt, responseJsonSchema } = buildPrompt(parsed.value);
+    const request = parsed.value;
+    const { systemInstruction, prompt, responseJsonSchema } = buildPrompt(request);
+    // Metadata only: sizes and flags, never the texts
+    const logResult = (status: AuditEntry["status"], extra: Partial<AuditEntry> = {}) => audit({
+      ...auditBase(req),
+      action: request.mode,
+      status,
+      chars: {
+        selection: request.originalText.length,
+        context: request.documentContext.length,
+        history: (request.history ?? []).reduce((n, turn) => n + turn.instruction.length + turn.result.length, 0),
+      },
+      masked: !!request.masked,
+      maskedValues: request.maskedValues,
+      wholeDocument: !!request.wholeDocument,
+      model: ai.provider.model,
+      location: ai.provider.location,
+      durationMs: Date.now() - startedAt,
+      ...extra,
+    });
 
     // Stop generating (and spending tokens) as soon as the task pane disconnects, e.g. the user pressed Stop
     const abortController = new AbortController();
@@ -108,16 +133,22 @@ async function startServer() {
 
       // A cut-off answer must never look complete: no [DONE], so the task pane won't insert it
       if (finish.reason !== "stop") {
+        logResult("incomplete", { tokens: finish.usage, detail: finish.detail ?? finish.reason });
         console.warn(`AI answer incomplete: ${finish.reason} (${finish.detail ?? "no detail"})`);
         res.write(sseEvent({ error: `The model stopped before finishing the answer (${finish.detail ?? finish.reason}).`, code: "INCOMPLETE", reason: finish.reason }));
         return res.end();
       }
 
+      logResult("ok", { tokens: finish.usage });
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (error) {
       // The client went away on purpose, there is nobody left to tell
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted) {
+        logResult("aborted");
+        return;
+      }
+      logResult("error", { detail: "SERVER_ERROR" });
       console.error("AI Generation Stream Error:", error);
       res.write(sseEvent({ error: "Failed to generate text.", code: "SERVER_ERROR" }));
       res.end();
@@ -129,8 +160,20 @@ async function startServer() {
     if ("problem" in ai) {
       return res.status(500).json({ error: ai.problem, code: "SERVER_ERROR" });
     }
+    const startedAt = Date.now();
+    const logDictation = (status: AuditEntry["status"], extra: Partial<AuditEntry> = {}) => audit({
+      ...auditBase(req),
+      action: "dictation",
+      status,
+      audioBytes: typeof req.body?.audio === "string" ? Math.floor(req.body.audio.length * 0.75) : 0,
+      model: ai.provider.model,
+      location: ai.provider.location,
+      durationMs: Date.now() - startedAt,
+      ...extra,
+    });
     // A recording can't be masked: it may only go to the cloud when it stays in the EU (Vertex AI, europe-* region)
     if (!ai.provider.euResident) {
+      logDictation("rejected", { detail: "DICTATION_NOT_ALLOWED" });
       return res.status(403).json({
         error: "Cloud dictation is only allowed with Vertex AI in an EU region (AI_PROVIDER=vertex, GOOGLE_CLOUD_LOCATION=europe-…).",
         code: "DICTATION_NOT_ALLOWED",
@@ -138,6 +181,7 @@ async function startServer() {
     }
     const parsed = parseTranscribeRequest(req.body);
     if ("error" in parsed) {
+      logDictation("rejected", { detail: parsed.error });
       return res.status(400).json({ error: parsed.error, code: "BAD_REQUEST" });
     }
     const abortController = new AbortController();
@@ -145,10 +189,15 @@ async function startServer() {
       if (!res.writableEnded) abortController.abort();
     });
     try {
-      const text = await ai.provider.transcribe({ ...parsed.value, signal: abortController.signal });
+      const { text, usage } = await ai.provider.transcribe({ ...parsed.value, signal: abortController.signal });
+      logDictation("ok", { tokens: usage });
       res.json({ text });
     } catch (error) {
-      if (abortController.signal.aborted) return;
+      if (abortController.signal.aborted) {
+        logDictation("aborted");
+        return;
+      }
+      logDictation("error", { detail: "SERVER_ERROR" });
       console.error("Transcription error:", error);
       res.status(502).json({ error: "Failed to transcribe the recording.", code: "SERVER_ERROR" });
     }

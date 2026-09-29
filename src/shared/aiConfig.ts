@@ -25,6 +25,8 @@ export const MAX_REVIEW_FINDINGS = 15;
 export const RATE_LIMIT_PER_MINUTE = 20;
 
 export const ACCESS_KEY_HEADER = 'X-Access-Key';
+/** Who sends the request, for the server's audit log (URI-encoded, entered in the settings) */
+export const USER_ID_HEADER = 'X-User-Id';
 
 // Single source of the allowed values; the server, the settings and the review schema all use these
 export const ADDRESSING_VALUES = ['', 'formal', 'informal'] as const;
@@ -58,6 +60,8 @@ export interface AIRequestBody {
   masked?: boolean;
   /** Edit or comment without a selection: originalText is the whole document */
   wholeDocument?: boolean;
+  /** How many values the client replaced by placeholders; only its count goes into the audit log */
+  maskedValues?: number;
 }
 
 export interface ReviewFinding {

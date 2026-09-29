@@ -39,8 +39,9 @@ function microphoneError(error: unknown): string {
  * Mikrofon gomb: felvesz egy rövid diktálást, szöveggé írja, és az utasítás mezőbe teszi. Alapból helyben
  * (Whisper a gépen, a hang nem megy sehova); felhőben csak akkor, ha a szerver EU-ban dolgoz fel.
  */
-export default function DictationButton({ accessKey, engine, localModel, disabled, onText, onError }: {
+export default function DictationButton({ accessKey, userId, engine, localModel, disabled, onText, onError }: {
   accessKey: string;
+  userId: string;
   engine: 'local' | 'cloud';
   localModel: LocalModel;
   disabled: boolean;
@@ -95,7 +96,7 @@ export default function DictationButton({ accessKey, engine, localModel, disable
       try {
         const text = engine === 'local'
           ? await transcribeLocally(recording, localModel, ({ download }) => setState({ kind: 'transcribing', download }), controller.signal)
-          : await transcribeAudio(recording, accessKey, controller.signal);
+          : await transcribeAudio(recording, accessKey, userId, controller.signal);
         if (text) onText(text);
         else onError('Nem értettem beszédet a felvételen. Próbáld újra, közelebb a mikrofonhoz.');
       } catch (error) {

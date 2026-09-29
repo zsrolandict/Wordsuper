@@ -11,6 +11,8 @@ export interface CustomPreset {
 export interface Settings {
   /** Must match APP_ACCESS_KEY on the server */
   accessKey: string;
+  /** Name or e-mail for the server's audit log (who ran what); optional */
+  userId: string;
   styleProfile: StyleProfile;
   customPresets: CustomPreset[];
   /** Insert without the preview step */
@@ -28,6 +30,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   accessKey: '',
+  userId: '',
   styleProfile: { addressing: '', tone: '', notes: '' },
   customPresets: [],
   autoApply: false,
@@ -44,6 +47,7 @@ function sanitize(raw: unknown): Settings {
   const style = (value.styleProfile ?? {}) as Partial<StyleProfile>;
   return {
     accessKey: typeof value.accessKey === 'string' ? value.accessKey : '',
+    userId: typeof value.userId === 'string' ? value.userId : '',
     styleProfile: {
       addressing: (ADDRESSING_VALUES as readonly string[]).includes(style.addressing as string) ? style.addressing as Addressing : '',
       tone: (TONE_VALUES as readonly string[]).includes(style.tone as string) ? style.tone as Tone : '',

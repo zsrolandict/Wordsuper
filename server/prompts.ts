@@ -68,7 +68,7 @@ export function parseRequest(body: unknown): ParseResult {
     notes: asString(rawStyle.notes).trim().substring(0, MAX_STYLE_NOTES_CHARS),
   };
 
-  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, masked: raw.masked === true, wholeDocument: raw.wholeDocument === true } };
+  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
 }
 
 // Standard JSON Schema, so any provider that supports structured output can use it

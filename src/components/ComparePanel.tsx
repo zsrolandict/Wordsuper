@@ -139,7 +139,7 @@ export default function ComparePanel({
           onMeta: meta => updateDetails(d => ({ ...d, model: meta.model, location: meta.location })),
           onRateLimit,
         },
-        { accessKey: settings.accessKey, signal: controller.signal }
+        { accessKey: settings.accessKey, userId: settings.userId, signal: controller.signal }
       );
       const parsed = parseCompareResult(result, new Set(comparison.changes.map(c => c.id)));
       if (!parsed) throw new Error('Az elemzés eredményét nem tudtam értelmezni.');

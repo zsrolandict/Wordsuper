@@ -1,5 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
-import type { ModelProvider, StreamFinish } from "./types";
+import type { ModelProvider, StreamFinish, TokenUsage } from "./types";
+
+const toUsage = (u: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number }): TokenUsage => ({
+  prompt: u.promptTokenCount ?? 0,
+  output: u.candidatesTokenCount ?? 0,
+  thoughts: u.thoughtsTokenCount ?? 0,
+  total: u.totalTokenCount ?? 0,
+});
 
 const TRANSCRIBE_INSTRUCTION = `Transcribe the speech in the recording word for word, in the language spoken (usually Hungarian).
 Return only the transcript with proper punctuation: no comments, no quotation marks, no timestamps.
@@ -50,15 +57,18 @@ export function createGeminiProvider(config: GeminiConfig): ModelProvider {
 
       let finishReason: string | undefined;
       let blockReason: string | undefined;
+      let usage: TokenUsage | undefined;
       for await (const chunk of stream) {
         blockReason ??= chunk.promptFeedback?.blockReason;
+        // Reported with the last chunk; kept for the audit log
+        if (chunk.usageMetadata) usage = toUsage(chunk.usageMetadata);
         const candidate = chunk.candidates?.[0];
         for (const part of candidate?.content?.parts ?? []) {
           if (part.text) onEvent({ type: part.thought ? "thought" : "text", text: part.text });
         }
         finishReason = candidate?.finishReason ?? finishReason;
       }
-      return mapGeminiFinish(finishReason, blockReason);
+      return { ...mapGeminiFinish(finishReason, blockReason), usage };
     },
 
     async transcribe({ audio, mimeType, signal }) {
@@ -67,7 +77,7 @@ export function createGeminiProvider(config: GeminiConfig): ModelProvider {
         contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: audio } }, { text: "Transcribe this recording." }] }],
         config: { systemInstruction: TRANSCRIBE_INSTRUCTION, abortSignal: signal },
       });
-      return (response.text ?? "").trim();
+      return { text: (response.text ?? "").trim(), usage: response.usageMetadata && toUsage(response.usageMetadata) };
     },
   };
 }

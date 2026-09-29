@@ -14,6 +14,15 @@ export interface StreamFinish {
   reason: FinishReason;
   /** The provider's own reason code, for logs and the error message */
   detail?: string;
+  /** Token counts for the audit log, when the provider reports them */
+  usage?: TokenUsage;
+}
+
+export interface TokenUsage {
+  prompt: number;
+  output: number;
+  thoughts: number;
+  total: number;
 }
 
 export interface GenerateOptions {
@@ -34,7 +43,7 @@ export interface ModelProvider {
   readonly euResident: boolean;
   generate(options: GenerateOptions, onEvent: (event: StreamEvent) => void): Promise<StreamFinish>;
   /** Speech to text, for dictating instructions */
-  transcribe(options: TranscribeOptions): Promise<string>;
+  transcribe(options: TranscribeOptions): Promise<{ text: string; usage?: TokenUsage }>;
 }
 
 export interface TranscribeOptions {

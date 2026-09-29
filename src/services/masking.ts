@@ -166,6 +166,8 @@ export function maskRequest(request: AIRequestBody, masker: Masker): AIRequestBo
     history: request.history?.map(turn => ({ instruction: masker.mask(turn.instruction), result: masker.mask(turn.result) })),
     styleProfile: request.styleProfile && { ...request.styleProfile, notes: masker.mask(request.styleProfile.notes) },
     masked: true,
+    // Only the count; the server's audit log never sees the values
+    get maskedValues() { return masker.count; },
   };
 }
 

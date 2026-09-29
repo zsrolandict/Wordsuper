@@ -114,6 +114,17 @@ export default function SettingsPanel({
             </button>
           </div>
           {keyStatus.state === 'ok' && <p className="text-xs text-green-700">✅ A kulcs rendben van.</p>}
+          <label className="block text-xs font-medium text-neutral-700 pt-1">
+            Felhasználói azonosító <span className="font-normal text-neutral-400">(nem kötelező)</span>
+            <input
+              value={settings.userId}
+              onChange={e => onChange(s => ({ ...s, userId: e.target.value }))}
+              maxLength={100}
+              placeholder="Pl. dr. Kovács Anna vagy kovacs.anna@iroda.hu"
+              className={`${inputClass} mt-1 font-normal`}
+            />
+            <span className="block text-[10px] text-neutral-400 font-normal">A szerver auditnaplója ezzel jegyzi fel, ki mikor milyen műveletet futtatott. A dokumentum tartalma sosem kerül a naplóba, csak méretek, időpont, modell és tokenszám.</span>
+          </label>
           {keyStatus.state === 'error' && <p className="text-xs text-red-700 whitespace-pre-wrap">{keyStatus.message}</p>}
         </Card>
 

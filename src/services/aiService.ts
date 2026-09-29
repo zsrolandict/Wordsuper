@@ -1,4 +1,4 @@
-import { ACCESS_KEY_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
+import { ACCESS_KEY_HEADER, USER_ID_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
 
 export class AIRequestError extends Error {
   code?: ApiErrorCode;
@@ -39,8 +39,15 @@ export interface StreamHandlers {
 
 export interface StreamOptions {
   accessKey: string;
+  /** For the server's audit log; accented names are URI-encoded, headers only carry plain characters */
+  userId?: string;
   signal?: AbortSignal;
 }
+
+export const authHeaders = (accessKey: string, userId = '') => ({
+  [ACCESS_KEY_HEADER]: accessKey,
+  ...(userId.trim() ? { [USER_ID_HEADER]: encodeURIComponent(userId.trim()) } : {}),
+});
 
 // express-rate-limit's draft-6 headers
 function readRateLimit(headers: Headers): RateLimitInfo | null {
@@ -69,7 +76,7 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        [ACCESS_KEY_HEADER]: options.accessKey,
+        ...authHeaders(options.accessKey, options.userId),
       },
       body: JSON.stringify(request),
       signal: options.signal,
@@ -159,14 +166,14 @@ export async function checkAccessKey(accessKey: string): Promise<{ ok: boolean; 
 
 /** Hungarian explanation of a failed request, for the chat */
 /** Sends a dictated recording to the server and returns the transcript */
-export async function transcribeAudio(recording: Blob, accessKey: string, signal?: AbortSignal): Promise<string> {
+export async function transcribeAudio(recording: Blob, accessKey: string, userId: string, signal?: AbortSignal): Promise<string> {
   const bytes = new Uint8Array(await recording.arrayBuffer());
   let binary = '';
   // In chunks: String.fromCharCode with a huge argument list overflows the stack
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   const response = await fetch('/api/transcribe', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', [ACCESS_KEY_HEADER]: accessKey },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(accessKey, userId) },
     body: JSON.stringify({ audio: btoa(binary), mimeType: recording.type }),
     signal,
   });
