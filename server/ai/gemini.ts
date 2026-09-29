@@ -1,6 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ModelProvider, StreamFinish } from "./types";
 
+const TRANSCRIBE_INSTRUCTION = `Transcribe the speech in the recording word for word, in the language spoken (usually Hungarian).
+Return only the transcript with proper punctuation: no comments, no quotation marks, no timestamps.
+The speaker dictates an instruction for editing a legal or business document. If there is no intelligible speech, return an empty answer.`;
+
 export interface GeminiConfig {
   model: string;
   /** Gemini Developer API key; used when no Vertex AI project is given */
@@ -54,6 +58,15 @@ export function createGeminiProvider(config: GeminiConfig): ModelProvider {
         finishReason = candidate?.finishReason ?? finishReason;
       }
       return mapGeminiFinish(finishReason, blockReason);
+    },
+
+    async transcribe({ audio, mimeType, signal }) {
+      const response = await ai.models.generateContent({
+        model: config.model,
+        contents: [{ role: "user", parts: [{ inlineData: { mimeType, data: audio } }, { text: "Transcribe this recording." }] }],
+        config: { systemInstruction: TRANSCRIBE_INSTRUCTION, abortSignal: signal },
+      });
+      return (response.text ?? "").trim();
     },
   };
 }

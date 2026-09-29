@@ -15,6 +15,7 @@ import {
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
 import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
+import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
 import { useDocumentStats } from '../services/useDocumentStats';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
@@ -23,6 +24,8 @@ import LimitsBar from './LimitsBar';
 import SettingsPanel from './SettingsPanel';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
+import DictationButton from './DictationButton';
+import Logo from './Logo';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 
 interface Message {
@@ -164,6 +167,8 @@ export default function TaskPane() {
   const handleSend = async (instructionOverride?: string, modeOverride?: Mode) => {
     const typed = (instructionOverride ?? input).trim();
     if (!typed || !tryLock()) return;
+    if (settings.sound) primeSound();
+    const chime = (kind: 'done' | 'error') => { if (settings.sound) playSound(kind); };
     // A built-in quick button can stand for a longer instruction; the chat shows the short label
     const preset = matchPreset(typed, modeOverride ?? mode, settings.customPresets);
     const instruction = (preset && !preset.custom && PRESET_INSTRUCTIONS[preset.label]) || typed;
@@ -274,12 +279,15 @@ export default function TaskPane() {
         if (controller.signal.aborted) {
           finishLoadingMessage({ status: { text: '⏹️ Leállítottad. A dokumentumot nem módosítottam.', tone: 'neutral' } });
         } else {
+          chime('error');
           const authProblem = aiError instanceof AIRequestError && aiError.code === 'UNAUTHORIZED';
           finishLoadingMessage({ role: 'system', content: describeRequestError(aiError), showSettingsLink: authProblem });
         }
         return;
       }
 
+      // The answer is here: a soft chime, so the user can work elsewhere meanwhile
+      chime('done');
       let findings: ReviewFinding[] | undefined;
       let explanation = '';
       if (requestMode === 'edit') {
@@ -446,13 +454,14 @@ export default function TaskPane() {
       )}
 
       {/* Header */}
-      <div className="bg-blue-600 px-4 py-4 text-white shrink-0 shadow-md z-10 flex items-start justify-between">
-        <div>
-          <h1 className="text-lg font-bold flex items-center">
-            <PenTool className="w-5 h-5 mr-2" />
+      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 shrink-0 shadow-sm z-10 flex items-center justify-between">
+        <div className="min-w-0">
+          <Logo className="h-5 max-w-full" />
+          <h1 className="text-xs font-semibold text-[#0f2350] flex items-center mt-1">
+            <PenTool className="w-3.5 h-3.5 mr-1 text-[#29abe2]" />
             Word Writer
+            <span className="ml-1.5 font-normal text-neutral-500 truncate">· szerkessz, véleményezz, generálj</span>
           </h1>
-          <p className="text-blue-100 text-xs mt-1">Szerkessz, véleményezz, vagy generálj!</p>
         </div>
         <div className="flex items-center space-x-1.5 shrink-0">
           {tab === 'assistant' && messages.length > 1 && (
@@ -460,7 +469,7 @@ export default function TaskPane() {
               onClick={goToMainMenu}
               disabled={isBusy}
               title={isBusy ? 'Várd meg, amíg befejeződik a művelet' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
-              className="flex items-center px-2.5 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-400 disabled:opacity-50 disabled:hover:bg-blue-500 rounded-lg transition-colors"
+              className="flex items-center px-2.5 py-1.5 text-xs font-medium text-[#0f2350] bg-neutral-100 hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-neutral-100 rounded-lg transition-colors"
             >
               <House className="w-4 h-4 mr-1" />
               Főmenü
@@ -470,7 +479,7 @@ export default function TaskPane() {
             onClick={() => setView('settings')}
             title="Beállítások"
             aria-label="Beállítások"
-            className="p-1.5 bg-blue-500 hover:bg-blue-400 rounded-lg transition-colors"
+            className="p-1.5 text-[#0f2350] bg-neutral-100 hover:bg-neutral-200 rounded-lg transition-colors"
           >
             <SettingsIcon className="w-4 h-4" />
           </button>
@@ -636,6 +645,14 @@ export default function TaskPane() {
             className="flex-1 max-h-32 min-h-[44px] p-2.5 border border-neutral-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none bg-neutral-50"
             rows={1}
           />
+          {!isSending && (
+            <DictationButton
+              accessKey={settings.accessKey}
+              disabled={isBusy}
+              onText={text => setInput(current => (current.trim() ? `${current.trimEnd()} ${text}` : text))}
+              onError={message => addMessage({ role: 'system', content: message })}
+            />
+          )}
           {isSending ? (
             <button
               onClick={() => abortRef.current?.abort()}
@@ -656,7 +673,7 @@ export default function TaskPane() {
             </button>
           )}
         </div>
-        <p className="text-[10px] text-center text-neutral-400 mt-2">Nyomj Entert a küldéshez{isSending ? ' · a piros gombbal leállíthatod' : ''}</p>
+        <p className="text-[10px] text-center text-neutral-400 mt-2">Nyomj Entert a küldéshez{isSending ? ' · a piros gombbal leállíthatod' : ' · a mikrofonnal diktálhatsz'}</p>
       </div>
       </div>
     </div>

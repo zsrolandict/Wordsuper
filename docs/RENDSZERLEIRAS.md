@@ -63,6 +63,15 @@ Szerver (Node.js + Express)
 - Saját gyorsgombok módhoz rendelve.
 - Ha a felhasználó begépeli egy gyorsgomb szövegét, a rendszer felismeri, és a beszélgetésben „⚡ Saját gyorsgomb” címke jelzi. A más módhoz mentett saját gyorsgomb a saját módjában fut.
 
+**Diktálás (mikrofon):**
+- Az utasítás mező mellett mikrofon gomb van: a felhasználó elmondja, mit szeretne, a felvételt az AI (ugyanaz a Gemini / Vertex szolgáltató) szöveggé írja, és az utasítás mezőbe teszi.
+- A szöveget elküldés előtt még át lehet javítani.
+- Egy felvétel legfeljebb kb. 2 perc. Felvétel közben futó óra és leállítás gomb látszik.
+- Word Online-ban az első használatkor az Office engedélyt kér a mikrofonhoz, utána a bővítmény egyszer újratöltődik.
+- **Korlát:** a hangfelvételt nem lehet maszkolni; a diktált szöveg viszont a küldéskor már maszkolva megy tovább.
+
+**Hangjelzés:** halk, kéthangú csengés, ha elkészült a válasz, és egy mélyebb hang hiba esetén, így közben nyugodtan lehet a dokumentumban dolgozni. A Beállításokban ki- és bekapcsolható, és ki is próbálható.
+
 **Finomítás:** amíg egy javaslat döntésre vár, az új utasítás azt módosítja („legyen rövidebb”). Az AI az első és a legutóbbi köröket látja, legfeljebb 5-öt.
 
 ### 3.2 Szerkezet fül (AI nélkül, azonnal)
@@ -134,9 +143,7 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 ## 7. Folyamatban / tervezett
 
 - **Szerkezet fül javaslatai:** hibánként „Javaslat” gomb (az AI a hibás hivatkozásra vagy definícióra ad korrektúrás javítást), „Definíció létrehozása”, „Fogalommeghatározások fejezet készítése”.
-- **Halk hangjelzés,** ha elkészült egy művelet (beállítható).
-- **Diktálás:** mikrofon gomb az utasításhoz (hangfelvétel → átírás a választott AI-szolgáltatónál).
-  - *Nyitott kérdés:* a hangfelvételt nem lehet maszkolni.
+- **Arculat:** az ICT Europa Legal logó a fejlécben (most még a mintája alapján rajzolt változat; az eredeti fájlból kerül be végleg, a Word szalag ikonjával együtt).
 - **Egykattintásos helyi indító** Windowsra (`INDITAS.bat`: tanúsítvány, szerver, Word megnyitása a bővítménnyel).
 
 ## 8. Kérdések, amiket érdemes megbeszélni
@@ -145,4 +152,5 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 2. Maszkolás: elég-e a szabályalapú felismerés, vagy kell helyi névfelismerő modell? Melyik adatkategóriák hiányoznak még (pl. rendszám, személyi igazolvány szám formátumai, cégek rövid nevei)?
 3. Átvizsgálás: hány észrevétel a hasznos? Kell-e súlyosság szerinti szűrés, vagy kategóriák (jogi / pénzügyi / nyelvi)?
 4. Ügyféltörténet, sablontár, saját záradékkönyvtár: melyik hozna a legtöbbet egy tanácsadónak?
-5. Üzemeltetés: Vertex AI EU (adatrezidencia) vagy Gemini API (egyszerűbb)? Kell-e naplózás vagy auditnyom?
+5. Diktálás: elég-e a felvétel utáni átírás, vagy kell élő (valós idejű) felirat? Kell-e hangutasítás a módváltáshoz (pl. „átvizsgálás: kockázatok”)?
+6. Üzemeltetés: Vertex AI EU (adatrezidencia) vagy Gemini API (egyszerűbb)? Kell-e naplózás vagy auditnyom?

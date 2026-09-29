@@ -4,7 +4,7 @@ import { createHash, timingSafeEqual } from "crypto";
 import { createServer as createViteServer } from "vite";
 import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE } from "./src/shared/aiConfig";
-import { buildPrompt, parseRequest } from "./server/prompts";
+import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
 import { accessKeyProblem, parseTrustProxy } from "./server/config";
 import { providerFromEnv } from "./server/ai";
 
@@ -121,6 +121,29 @@ async function startServer() {
       console.error("AI Generation Stream Error:", error);
       res.write(sseEvent({ error: "Failed to generate text.", code: "SERVER_ERROR" }));
       res.end();
+    }
+  });
+
+  // Dictation: a short recording in, the transcript out
+  app.post("/api/transcribe", async (req, res) => {
+    if ("problem" in ai) {
+      return res.status(500).json({ error: ai.problem, code: "SERVER_ERROR" });
+    }
+    const parsed = parseTranscribeRequest(req.body);
+    if ("error" in parsed) {
+      return res.status(400).json({ error: parsed.error, code: "BAD_REQUEST" });
+    }
+    const abortController = new AbortController();
+    res.on("close", () => {
+      if (!res.writableEnded) abortController.abort();
+    });
+    try {
+      const text = await ai.provider.transcribe({ ...parsed.value, signal: abortController.signal });
+      res.json({ text });
+    } catch (error) {
+      if (abortController.signal.aborted) return;
+      console.error("Transcription error:", error);
+      res.status(502).json({ error: "Failed to transcribe the recording.", code: "SERVER_ERROR" });
     }
   });
 

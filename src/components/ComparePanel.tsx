@@ -9,6 +9,7 @@ import { SEVERITY_LABELS } from '../services/review';
 import { describeStyle, type Settings } from '../services/settings';
 import { formatNumber } from '../services/format';
 import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
+import { playSound, primeSound } from '../services/sound';
 import { DiffView, SEVERITY_STYLES } from './Proposal';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import { DEFAULT_PRESETS, PLACEHOLDERS } from './modes';
@@ -110,6 +111,7 @@ export default function ComparePanel({
       thoughts: '',
       startedAt,
     };
+    if (settings.sound) primeSound();
     const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
     const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile };
     const sentRequest = masker ? maskRequest(request, masker) : request;
@@ -144,12 +146,14 @@ export default function ComparePanel({
       // Parsed with the placeholders in it, then each text is unmasked
       const assessments = new Map([...parsed.assessments].map(([id, a]) => [id, { ...a, summary: unmask(a.summary), recommendation: unmask(a.recommendation) }]));
       setSelected(new Set(assessments.keys()));
+      if (settings.sound) playSound('done');
       setAnalysis(a => a && { ...a, running: false, overview: unmask(parsed.overview), assessments, details: { ...a.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt } });
     } catch (e) {
       const message = controller.signal.aborted
         ? '⏹️ Leállítottad az elemzést.'
         : e instanceof Error && e.message.startsWith('Az elemzés') ? e.message : describeRequestError(e);
       const authProblem = e instanceof AIRequestError && e.code === 'UNAUTHORIZED';
+      if (settings.sound && !controller.signal.aborted) playSound('error');
       setAnalysis(a => a && { ...a, running: false, error: message, authProblem, details: { ...a.details, durationMs: Date.now() - startedAt } });
     } finally {
       abortRef.current = null;

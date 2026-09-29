@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPrompt, parseRequest } from './prompts';
+import { buildPrompt, parseRequest, parseTranscribeRequest } from './prompts';
 import { MAX_CONTEXT_CHARS, MAX_HISTORY_TURNS, MAX_REVIEW_CHARS, MAX_SELECTION_CHARS } from '../src/shared/aiConfig';
 
 const valid = { mode: 'edit', instruction: 'Javítsd', originalText: 'szöveg', documentContext: '' };
@@ -88,4 +88,11 @@ test('review findings carry a fix', () => {
   const review = buildPrompt({ mode: 'review', instruction: 'Ellentmondások', originalText: '', documentContext: 'doc' });
   assert.match(review.systemInstruction, /"suggestion" is the fix/);
   assert.ok(JSON.stringify(review.responseJsonSchema).includes('"suggestion"'));
+});
+
+test('dictation uploads are validated', () => {
+  assert.deepEqual(parseTranscribeRequest({ audio: 'AAAA', mimeType: 'audio/webm;codecs=opus' }), { value: { audio: 'AAAA', mimeType: 'audio/webm' } });
+  assert.ok('error' in parseTranscribeRequest({ audio: 'AAAA', mimeType: 'video/webm' }));
+  assert.ok('error' in parseTranscribeRequest({ audio: 'not base64!', mimeType: 'audio/ogg' }));
+  assert.ok('error' in parseTranscribeRequest({ audio: 'A'.repeat(4_000_004), mimeType: 'audio/ogg' }));
 });

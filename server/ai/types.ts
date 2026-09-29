@@ -31,4 +31,14 @@ export interface ModelProvider {
   /** Where the request is processed, e.g. "Gemini API" or "Vertex AI (europe-west1)" */
   readonly location: string;
   generate(options: GenerateOptions, onEvent: (event: StreamEvent) => void): Promise<StreamFinish>;
+  /** Speech to text, for dictating instructions */
+  transcribe(options: TranscribeOptions): Promise<string>;
+}
+
+export interface TranscribeOptions {
+  /** Base64 encoded recording */
+  audio: string;
+  /** e.g. audio/webm, audio/ogg, audio/mp4 */
+  mimeType: string;
+  signal: AbortSignal;
 }

@@ -16,6 +16,8 @@ export interface Settings {
   autoApply: boolean;
   /** Replace sensitive values with placeholders before anything is sent to the AI */
   masking: { enabled: boolean; extraTerms: string };
+  /** A soft chime when an answer is ready */
+  sound: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -24,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
   customPresets: [],
   autoApply: false,
   masking: { enabled: true, extraTerms: '' },
+  sound: true,
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -48,6 +51,7 @@ function sanitize(raw: unknown): Settings {
       enabled: value.masking?.enabled !== false,
       extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
     },
+    sound: value.sound !== false,
   };
 }
 

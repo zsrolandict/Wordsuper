@@ -234,3 +234,18 @@ RULES:
     prompt: `${contextBlock("for your reference only to understand the surrounding context. DO NOT output this, only use it to make better decisions for the selection")}ORIGINAL TEXT TO MODIFY (You must rewrite ONLY this part):\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
   };
 }
+
+/** Largest accepted recording (base64): about two minutes of compressed speech */
+export const MAX_AUDIO_BASE64_CHARS = 4_000_000;
+const AUDIO_TYPES = /^audio\/(webm|ogg|mp4|mpeg|mp3|wav|x-wav|aac|flac|aiff)$/;
+
+/** Validates a dictation upload; the codec parameters are dropped from the type */
+export function parseTranscribeRequest(raw: any): { value: { audio: string; mimeType: string } } | { error: string } {
+  const audio = typeof raw?.audio === "string" ? raw.audio : "";
+  const mimeType = (typeof raw?.mimeType === "string" ? raw.mimeType : "").split(";")[0].trim().toLowerCase();
+  if (!audio) return { error: "Missing audio" };
+  if (audio.length > MAX_AUDIO_BASE64_CHARS) return { error: "Recording too long" };
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(audio)) return { error: "Audio must be base64" };
+  if (!AUDIO_TYPES.test(mimeType)) return { error: "Unsupported audio type" };
+  return { value: { audio, mimeType } };
+}

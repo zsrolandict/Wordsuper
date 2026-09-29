@@ -158,6 +158,23 @@ export async function checkAccessKey(accessKey: string): Promise<{ ok: boolean; 
 }
 
 /** Hungarian explanation of a failed request, for the chat */
+/** Sends a dictated recording to the server and returns the transcript */
+export async function transcribeAudio(recording: Blob, accessKey: string, signal?: AbortSignal): Promise<string> {
+  const bytes = new Uint8Array(await recording.arrayBuffer());
+  let binary = '';
+  // In chunks: String.fromCharCode with a huge argument list overflows the stack
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  const response = await fetch('/api/transcribe', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', [ACCESS_KEY_HEADER]: accessKey },
+    body: JSON.stringify({ audio: btoa(binary), mimeType: recording.type }),
+    signal,
+  });
+  if (!response.ok) throw await errorFromResponse(response);
+  const data = await response.json();
+  return typeof data?.text === 'string' ? data.text.trim() : '';
+}
+
 export function describeRequestError(error: unknown): string {
   if (error instanceof AIRequestError) {
     switch (error.code) {

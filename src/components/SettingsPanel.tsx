@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2 } from 'lucide-react';
+import { playSound } from '../services/sound';
 import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
@@ -74,8 +75,8 @@ export default function SettingsPanel({
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
-      <div className="bg-blue-600 px-4 py-4 text-white shrink-0 shadow-md flex items-center">
-        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-blue-500 transition-colors" aria-label="Vissza">
+      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 text-[#0f2350] shrink-0 shadow-sm flex items-center">
+        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-neutral-100 transition-colors" aria-label="Vissza">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-lg font-bold">Beállítások</h1>
@@ -128,6 +129,26 @@ export default function SettingsPanel({
               <span className="block text-xs text-neutral-500">Előbb megmutatom a javaslatot, és te döntöd el, hogy bekerül-e a dokumentumba. Kikapcsolva azonnal beszúrom.</span>
             </span>
           </label>
+        </Card>
+
+        <Card title="Hangjelzés">
+          <div className="flex items-start justify-between">
+            <label className="flex items-start space-x-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={settings.sound}
+                onChange={e => onChange(s => ({ ...s, sound: e.target.checked }))}
+                className="mt-0.5"
+              />
+              <span>
+                Halk hang, ha elkészültem
+                <span className="block text-xs text-neutral-500">Két halk, emelkedő hang, ha kész a válasz; egy mélyebb, ha hiba történt. Így közben nyugodtan dolgozhatsz a dokumentumban.</span>
+              </span>
+            </label>
+            <button onClick={() => playSound('done')} className="ml-2 shrink-0 flex items-center px-2 py-1 text-xs border border-neutral-300 rounded-lg hover:bg-neutral-100">
+              <Volume2 className="w-3.5 h-3.5 mr-1" />Kipróbálás
+            </button>
+          </div>
         </Card>
 
         <Card title="Adatvédelem">
