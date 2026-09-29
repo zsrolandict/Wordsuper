@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDocumentGraph, findAt, sectionPreview, termPattern, type ParagraphInfo } from './structure';
+import { withAutoNumbers } from './structure';
 
 const contract: ParagraphInfo[] = [
   { text: 'MEGBÍZÁSI SZERZŐDÉS' },                                                                                  // 0
@@ -50,9 +51,9 @@ test('cross-references resolve; missing targets and external law are handled', (
   assert.ok(!graph.references.some(r => r.paragraph === 12));
 });
 
-test('issues: unused term, broken reference, quoted but undefined term', () => {
+test('issues: unused term, broken reference (a quotation used only once is not an issue)', () => {
   const kinds = graph.issues.map(i => `${i.kind}@${i.at.paragraph}`);
-  assert.deepEqual(kinds, ['unused@2', 'unused@5', 'broken-reference@8', 'undefined-quoted@10']);
+  assert.deepEqual(kinds, ['unused@2', 'unused@5', 'broken-reference@8']);
   assert.match(graph.issues[0].message, /Fél/);
   assert.match(graph.issues[1].message, /Titoktartási Időszak/);
 });
@@ -86,4 +87,52 @@ test('sectionPreview shows a section with its own subsections only', () => {
   const preview = sectionPreview(contract, graph, 11);
   assert.equal(preview, '5. Határidők\n5.2. A teljesítési határidő 30 nap; a Ptk. 6:142. §-a szerinti felelősség kizárt.');
   assert.equal(sectionPreview(contract, graph, 13), '2. számú melléklet\nA Munka részletes leírása.');
+});
+
+test('a quoted term ends at its closing quote', () => {
+  const g = buildDocumentGraph([
+    { text: 'A második részlet (a továbbiakban: „Vételár-részlet 2.” Utolsó vételárrészlet) esedékes.' },
+    { text: 'A Vételár-részlet 2. megfizetése a birtokbaadáskor történik.' },
+  ]);
+  assert.deepEqual(g.terms.map(t => [t.term, t.usages.length]), [['Vételár-részlet 2.', 1]]);
+});
+
+test('a one-off quotation is not reported as an undefined term, a reused one is', () => {
+  const g = buildDocumentGraph([
+    { text: 'Az „I. ütem: A jelű 12 lakásos lakóépület” építése.' },
+    { text: 'A „Teljesítési Igazolás” kiállítása.' },
+    { text: 'A Teljesítési Igazolás alapján fizet.' },
+  ]);
+  assert.deepEqual(g.issues.map(i => i.kind + ':' + i.message.slice(0, 25)), ['undefined-quoted:„Teljesítési Igazolás” id']);
+});
+
+test('references to annexes that are not in this file are a note, not a broken reference', () => {
+  const g = buildDocumentGraph([{ text: 'Az 1. sz. mellékletben foglaltak szerint.' }]);
+  assert.deepEqual(g.issues.map(i => i.kind), ['missing-annex']);
+});
+
+test('multi-level numbering is rebuilt when Word only gives the number of the level', () => {
+  const g = buildDocumentGraph([
+    { text: 'Felek', listString: '1.', listLevel: 0 },
+    { text: 'Az eladó adatai', listString: '1.', listLevel: 1 },
+    { text: 'A vevő adatai', listString: '2.', listLevel: 1 },
+    { text: 'Vételár', listString: '2.', listLevel: 0 },
+    { text: 'Részletek', listString: 'a)', listLevel: 1 },
+    { text: 'A vételár az 1.2. pont szerinti vevőt terheli.', listString: '1.', listLevel: 1 },
+  ]);
+  const labels = g.sections.map(s => s.label);
+  assert.deepEqual(labels, ['1', '1.1', '1.2', '2', '2.1']);
+  assert.equal(g.references[0].target, 2);
+});
+
+test('automatic numbering is shown in brackets, levels rebuilt', () => {
+  assert.deepEqual(
+    withAutoNumbers([
+      { text: 'Fogalmak', listString: '1.', listLevel: 0 },
+      { text: 'Vételár: …', listString: '1.', listLevel: 1 },
+      { text: 'felsorolás', listString: 'a)', listLevel: 2 },
+      { text: 'Sima bekezdés' },
+    ]),
+    ['[1.] Fogalmak', '[1.1.] Vételár: …', '[a)] felsorolás', 'Sima bekezdés']
+  );
 });

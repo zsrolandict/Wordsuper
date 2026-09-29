@@ -77,6 +77,12 @@ const WORD_SPACING = /^[ \t\r\n\v\f]+|[ \t\r\n\v\f]+$/g;
  * Mirrors Word's getTextRanges([' '], true): split on spaces only, trim spacing from both ends of each word.
  * Used for both the document and the AI's answer, so an unchanged tab or non-breaking space is never a "change".
  */
+/**
+ * Word puts invisible marks into range text (comment and field anchors show up as control characters).
+ * They are dropped from what the AI sees, and ignored when comparing words.
+ */
+export const stripControlChars = (text: string) => text.replace(/[\u0000-\u0008\u000e-\u001f]/g, '');
+
 export const tokenizeLikeWord = (text: string) => text.split(' ').map(t => t.replace(WORD_SPACING, '')).filter(Boolean);
 
 export interface ParagraphEdit {

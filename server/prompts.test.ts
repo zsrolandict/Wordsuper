@@ -60,10 +60,32 @@ test('compare mode needs the change list and answers with JSON', () => {
   assert.ok(built.prompt.startsWith('CHANGES BETWEEN THE EARLIER AND THE CURRENT VERSION:\nCHANGE 1'));
 });
 
+test('masked requests tell the model to keep the placeholders', () => {
+  const parsed = parseRequest({ ...valid, originalText: '[CÉG_1] fizet.', masked: true });
+  assert.ok('value' in parsed && parsed.value.masked);
+  assert.match(buildPrompt(parsed.value).systemInstruction, /Keep every placeholder exactly/);
+  assert.doesNotMatch(buildPrompt({ ...parsed.value, masked: false }).systemInstruction, /PLACEHOLDERS/);
+});
+
 test('Word paragraph marks reach the model as line breaks', () => {
   const parsed = parseRequest({ ...valid, originalText: 'Első\rMásodik', documentContext: 'A\r\nB', history: [{ instruction: 'x', result: 'C\rD' }] });
   assert.ok('value' in parsed);
   assert.equal(parsed.value.originalText, 'Első\nMásodik');
   assert.equal(parsed.value.documentContext, 'A\nB');
   assert.equal(parsed.value.history![0].result, 'C\nD');
+});
+
+test('without a selection the whole document is edited or commented', () => {
+  const edit = buildPrompt({ mode: 'edit', instruction: 'Aláírósor', originalText: 'Szerződés', documentContext: '', wholeDocument: true });
+  assert.match(edit.systemInstruction, /WHOLE DOCUMENT/);
+  const comment = buildPrompt({ mode: 'comment', instruction: 'Kockázatok', originalText: 'Szerződés', documentContext: '', wholeDocument: true });
+  assert.ok(comment.prompt.includes('WHOLE DOCUMENT TO ANALYZE:\nSzerződés'));
+  const parsed = parseRequest({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', wholeDocument: true });
+  assert.ok('value' in parsed && parsed.value.wholeDocument === true);
+});
+
+test('review findings carry a fix', () => {
+  const review = buildPrompt({ mode: 'review', instruction: 'Ellentmondások', originalText: '', documentContext: 'doc' });
+  assert.match(review.systemInstruction, /"suggestion" is the fix/);
+  assert.ok(JSON.stringify(review.responseJsonSchema).includes('"suggestion"'));
 });

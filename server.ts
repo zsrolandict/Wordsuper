@@ -67,8 +67,8 @@ async function startServer() {
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
   app.use("/api/", apiLimiter, requireAccessKey(accessKey, keyProblem));
   
-  // 2. Payload size limiter (Prevents massive 50MB texts from crashing server)
-  app.use(express.json({ limit: "2mb" }));
+  // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
+  app.use(express.json({ limit: "8mb" }));
 
   // Lets the settings panel verify the access key without spending AI credits
   app.get("/api/auth-check", (req, res) => {

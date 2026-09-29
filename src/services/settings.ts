@@ -14,6 +14,8 @@ export interface Settings {
   customPresets: CustomPreset[];
   /** Insert without the preview step */
   autoApply: boolean;
+  /** Replace sensitive values with placeholders before anything is sent to the AI */
+  masking: { enabled: boolean; extraTerms: string };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -21,6 +23,7 @@ export const DEFAULT_SETTINGS: Settings = {
   styleProfile: { addressing: '', tone: '', notes: '' },
   customPresets: [],
   autoApply: false,
+  masking: { enabled: true, extraTerms: '' },
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -40,6 +43,11 @@ function sanitize(raw: unknown): Settings {
       (p): p is CustomPreset => !!p && typeof p.id === 'string' && typeof p.label === 'string' && (MODES as readonly string[]).includes(p.mode)
     ),
     autoApply: value.autoApply === true,
+    // Older settings had no masking entry: masking is on unless it was switched off explicitly
+    masking: {
+      enabled: value.masking?.enabled !== false,
+      extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
+    },
   };
 }
 

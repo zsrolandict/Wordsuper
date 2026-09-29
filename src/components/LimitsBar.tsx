@@ -67,9 +67,12 @@ export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stat
   const docLimit = contextLimitFor(mode);
   const { documentChars, selectionChars } = stats;
   const selectionMatters = mode === 'edit' || mode === 'comment';
+  // Without a selection, edit and comment work on the whole document
+  const wholeDocument = selectionMatters && selectionChars === 0;
+  const workingChars = wholeDocument ? documentChars : selectionChars;
 
-  const docLevel: Level = documentChars !== null && documentChars > docLimit ? 'warn' : 'ok';
-  const selectionLevel: Level = !selectionMatters || selectionChars === null || selectionChars <= MAX_SELECTION_CHARS
+  const docLevel: Level = !wholeDocument && documentChars !== null && documentChars > docLimit ? 'warn' : 'ok';
+  const selectionLevel: Level = !selectionMatters || workingChars === null || workingChars <= MAX_SELECTION_CHARS
     ? 'ok'
     : mode === 'edit' ? 'error' : 'warn';
 
@@ -79,9 +82,14 @@ export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stat
 
   const messages: { level: Level; text: string }[] = [];
   if (selectionLevel === 'error') {
-    messages.push({ level: 'error', text: `A kijelölés túl hosszú a szerkesztéshez (legfeljebb ${formatNumber(MAX_SELECTION_CHARS)} karakter). Jelölj ki kisebb részt!` });
+    messages.push({
+      level: 'error',
+      text: wholeDocument
+        ? `Nincs kijelölés, és az egész dokumentum túl hosszú a szerkesztéshez (legfeljebb ${formatNumber(MAX_SELECTION_CHARS)} karakter). Jelölj ki egy részt!`
+        : `A kijelölés túl hosszú a szerkesztéshez (legfeljebb ${formatNumber(MAX_SELECTION_CHARS)} karakter). Jelölj ki kisebb részt!`,
+    });
   } else if (selectionLevel === 'warn') {
-    messages.push({ level: 'warn', text: `Hosszú kijelölés: az AI csak az első ${formatNumber(MAX_SELECTION_CHARS)} karaktert elemzi.` });
+    messages.push({ level: 'warn', text: `${wholeDocument ? 'Hosszú dokumentum' : 'Hosszú kijelölés'}: az AI csak az első ${formatNumber(MAX_SELECTION_CHARS)} karaktert elemzi.` });
   }
   if (docLevel === 'warn') {
     messages.push({
@@ -108,7 +116,9 @@ export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stat
           <Gauge className="w-3.5 h-3.5 mr-1 shrink-0" />
           <span className="truncate">
             Dokumentum: {documentChars === null ? '…' : formatNumber(documentChars)} kar.
-            {selectionMatters && <> · Kijelölés: {selectionChars === null ? '…' : formatNumber(selectionChars)} kar.</>}
+            {selectionMatters && (wholeDocument
+              ? <> · Nincs kijelölés: az egész dokumentum</>
+              : <> · Kijelölés: {selectionChars === null ? '…' : formatNumber(selectionChars)} kar.</>)}
           </span>
         </span>
         <span className="flex items-center text-neutral-500 shrink-0 ml-2">
@@ -139,8 +149,8 @@ export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stat
           />
           {selectionMatters && (
             <LimitRow
-              label="Kijelölés"
-              value={selectionChars}
+              label={wholeDocument ? 'Kijelölés (nincs: az egész dokumentum)' : 'Kijelölés'}
+              value={workingChars}
               limit={MAX_SELECTION_CHARS}
               level={selectionLevel}
               note={mode === 'edit' ? 'Szerkesztésnél ennél hosszabb kijelölést nem írok át.' : 'Véleményezésnél ennél hosszabb kijelölésnek csak az elejét elemzi az AI.'}

@@ -22,6 +22,44 @@ export interface RequestDetailsData {
   /** A szerver küldi a válasz elején: melyik modell válaszolt és hol dolgozták fel a szöveget */
   model?: string;
   location?: string;
+  /** Edit or comment without a selection: the whole document was the text to work on */
+  wholeDocument?: boolean;
+  /** What was hidden from the AI; null: masking was off */
+  masking?: MaskingInfo | null;
+}
+
+export interface MaskingInfo {
+  summary: string;
+  /** [placeholder, original value] */
+  entries: [string, string][];
+}
+
+const MAX_MASK_ROWS = 40;
+
+function MaskingDescription({ masking }: { masking: MaskingInfo | null }) {
+  if (!masking) {
+    return <p>A maszkolás ki volt kapcsolva: az AI a szöveget változtatás nélkül kapta meg. (Beállítások → Adatvédelem)</p>;
+  }
+  if (!masking.entries.length) {
+    return <p>A maszkolás be volt kapcsolva, de nem találtam elrejtendő adatot (nevet, céget, azonosítót, címet).</p>;
+  }
+  return (
+    <>
+      <p>Ezeket az AI nem látta, helyettük helyettesítőt kapott ({masking.summary}). A válaszban visszacseréltem őket.</p>
+      <table className="mt-1 w-full border-collapse">
+        <tbody>
+          {masking.entries.slice(0, MAX_MASK_ROWS).map(([token, value]) => (
+            <tr key={token} className="border-t border-neutral-100">
+              <td className="py-0.5 pr-2 font-mono text-[10px] text-neutral-500 whitespace-nowrap align-top">{token}</td>
+              <td className="py-0.5 break-words">{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {masking.entries.length > MAX_MASK_ROWS && <p className="mt-1">…és még {formatNumber(masking.entries.length - MAX_MASK_ROWS)}.</p>}
+      <p className="mt-1 text-neutral-400">A felismerés szabályalapú. Ha valami kimaradt, add hozzá a Beállításokban a mindig elrejtendő kifejezésekhez.</p>
+    </>
+  );
 }
 
 /** A gondolkodási összefoglaló **félkövér** címsorait jelenítjük meg félkövérként */
@@ -98,7 +136,7 @@ function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
 
 export default function RequestDetails({ details, isLoading }: { details: RequestDetailsData; isLoading: boolean }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location } = details;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -130,7 +168,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
               </Section>
             )
           ) : (mode === 'edit' || mode === 'comment') && (
-            <Section title={`Kijelölt szöveg (${formatNumber(selectionText.length)} karakter)`}>
+            <Section title={wholeDocument ? `Nem jelöltél ki semmit: a teljes dokumentum (${formatNumber(selectionText.length)} karakter)` : `Kijelölt szöveg (${formatNumber(selectionText.length)} karakter)`}>
               <div className="max-h-32 overflow-y-auto whitespace-pre-wrap bg-neutral-50 border border-neutral-200 rounded-md p-2">
                 {toLineFeeds(selectionText.substring(0, MAX_SELECTION_CHARS))}
               </div>
@@ -140,9 +178,17 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
             </Section>
           )}
 
-          <Section title={mode === 'review' ? 'Átvizsgált szöveg' : mode === 'compare' ? 'Összevetett változások' : 'Dokumentum-kontextus'}>
-            <ContextDescription info={contextInfo} mode={mode} />
-          </Section>
+          {!wholeDocument && (
+            <Section title={mode === 'review' ? 'Átvizsgált szöveg' : mode === 'compare' ? 'Összevetett változások' : 'Dokumentum-kontextus'}>
+              <ContextDescription info={contextInfo} mode={mode} />
+            </Section>
+          )}
+
+          {masking !== undefined && (
+            <Section title="Adatvédelem">
+              <MaskingDescription masking={masking} />
+            </Section>
+          )}
 
           <Section title="Hogyan gondolkodott">
             {thoughts ? (

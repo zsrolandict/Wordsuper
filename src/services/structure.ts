@@ -6,8 +6,10 @@
 
 export interface ParagraphInfo {
   text: string;
-  /** Automatic numbering as Word shows it (ListItem.listString), e.g. "5.2." */
+  /** Automatic numbering as Word shows it (ListItem.listString), e.g. "5.2." — some hosts give only "2." */
   listString?: string;
+  /** List level (0 = top), used to rebuild "5.2" when Word only gives the number of the level */
+  listLevel?: number;
 }
 
 export interface Occurrence {
@@ -43,7 +45,8 @@ export interface CrossReference extends Occurrence {
   target: number | null;
 }
 
-export type IssueKind = 'unused' | 'duplicate' | 'broken-reference' | 'undefined-quoted';
+/** missing-annex is only a note: annexes are often separate files */
+export type IssueKind = 'unused' | 'duplicate' | 'broken-reference' | 'missing-annex' | 'undefined-quoted';
 
 export interface StructureIssue {
   kind: IssueKind;
@@ -63,8 +66,14 @@ const QUOTE_OPEN = '„"“«';
 const QUOTE_CLOSE = '”"“»';
 const COMPANY_SUFFIX = /\b(Kft|Zrt|Nyrt|Bt|Kkt|Ltd|GmbH|Inc|LLC)\.?$/;
 
+const QUOTED_START = new RegExp(`^\\s*[${QUOTE_OPEN}]([^${QUOTE_CLOSE}]+)[${QUOTE_CLOSE}]`, 'u');
+
+/** A term without its quotes; a quoted term ends at its closing quote („Vételár-részlet 2.” Utolsó… → Vételár-részlet 2.) */
 const normalizeTerm = (term: string) =>
-  term.replace(new RegExp(`^[${QUOTE_OPEN}\\s]+|[${QUOTE_CLOSE}\\s]+$`, 'g'), '').replace(/\s+/g, ' ').trim();
+  (QUOTED_START.exec(term)?.[1] ?? term)
+    .replace(new RegExp(`^[${QUOTE_OPEN}\\s]+|[${QUOTE_CLOSE}\\s]+$`, 'g'), '')
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const looksLikeTerm = (term: string) =>
   term.length >= 2 && term.length <= 60 && new RegExp(`^[${UPPER}]`).test(term) && !COMPANY_SUFFIX.test(term);
@@ -108,10 +117,38 @@ function sentenceBefore(text: string, end: number): string {
   return sentence.length > 400 ? `…${sentence.slice(-400)}` : sentence;
 }
 
-function sectionLabel(p: ParagraphInfo): string | null {
-  const fromList = p.listString?.trim().replace(/\.+$/, '');
-  if (fromList && /^\d+(\.\d+)*$/.test(fromList)) return fromList;
-  return TEXT_NUMBERING.exec(p.text)?.[1] ?? null;
+/**
+ * Section labels of all paragraphs. Word's listString is "5.2." on desktop but can be just "2." for a level-2
+ * item; then the label is rebuilt from the numbers of the parent levels.
+ */
+function sectionLabels(paragraphs: ParagraphInfo[]): (string | null)[] {
+  const levels: string[] = [];
+  return paragraphs.map(p => {
+    const fromList = p.listString?.trim().replace(/\.+$/, '');
+    if (fromList !== undefined) {
+      const level = p.listLevel ?? 0;
+      if (!/^\d+(\.\d+)*$/.test(fromList)) return null; // bullets, a), i. …
+      const parts = fromList.split('.');
+      const label = parts.length > 1 || level === 0 ? fromList : [...levels.slice(0, level), fromList].join('.');
+      levels.length = level;
+      levels[level] = parts[parts.length - 1];
+      return label;
+    }
+    return TEXT_NUMBERING.exec(p.text)?.[1] ?? null;
+  });
+}
+
+/**
+ * Paragraph texts with Word's automatic numbering put in front in square brackets ("[5.2.] A Vevő…"). The
+ * numbering is not part of the text, so without this the AI could not check numbering and references.
+ */
+export function withAutoNumbers(paragraphs: ParagraphInfo[]): string[] {
+  const labels = sectionLabels(paragraphs);
+  return paragraphs.map((p, i) => {
+    const shown = p.listString?.trim();
+    if (!shown) return p.text;
+    return `[${labels[i] !== null && /^\d/.test(shown) ? `${labels[i]}.` : shown}] ${p.text}`;
+  });
 }
 
 export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
@@ -186,6 +223,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   const sections: Section[] = [];
   const sectionIndex = new Map<string, number>();
   const annexIndex = new Map<string, number>();
+  const labels = sectionLabels(paragraphs);
   paragraphs.forEach((p, paragraph) => {
     const title = p.text.trim().slice(0, 100);
     const annex = ANNEX_HEADING.exec(p.text);
@@ -197,7 +235,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
       }
       return;
     }
-    const label = sectionLabel(p);
+    const label = labels[paragraph];
     // The first occurrence wins: numbering often restarts inside annexes
     if (label && !sectionIndex.has(label)) {
       sectionIndex.set(label, paragraph);
@@ -221,14 +259,17 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   });
   references.sort((a, b) => a.paragraph - b.paragraph || a.start - b.start);
   for (const ref of references) {
-    if (ref.target === null) {
-      const what = ref.kind === 'annex' ? `${ref.label}. számú melléklet` : `${ref.label}. pont`;
-      issues.push({ kind: 'broken-reference', message: `A „${ref.raw}” hivatkozás célja (${what}) nem található ebben a dokumentumban.`, at: ref });
+    if (ref.target === null && ref.kind === 'annex') {
+      issues.push({ kind: 'missing-annex', message: `A(z) ${ref.label}. számú melléklet nincs ebben a dokumentumban („${ref.raw}”) – ha külön fájl, ez rendben van.`, at: ref });
+    } else if (ref.target === null) {
+      issues.push({ kind: 'broken-reference', message: `A „${ref.raw}” hivatkozás célja (${ref.label}. pont) nem található ebben a dokumentumban.`, at: ref });
     }
   }
 
-  // 5. Quoted terms that are never defined, e.g. „Teljesítési Igazolás”
+  // 5. Quoted terms that are never defined but used again, e.g. „Teljesítési Igazolás” … a Teljesítési Igazolás
+  // (a quotation that appears only once is just a quotation, not a term)
   const reported = new Set<string>();
+  const occurrencesOf = (term: string) => paragraphs.reduce((n, { text }) => n + (text.match(termPattern(term)) ?? []).length, 0);
   const quoted = new RegExp(`[${QUOTE_OPEN}]([${UPPER}][^${QUOTE_CLOSE}]{1,59})[${QUOTE_CLOSE}]`, 'gu');
   paragraphs.forEach(({ text }, paragraph) => {
     for (const match of text.matchAll(quoted)) {
@@ -237,6 +278,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
       if (!looksLikeTerm(term) || byTerm.has(term) || reported.has(term)) continue;
       if (definitionSpans.some(span => overlaps(span, occurrence))) continue;
       reported.add(term);
+      if (occurrencesOf(term) < 2) continue;
       issues.push({ kind: 'undefined-quoted', message: `„${term}” idézőjelben szerepel, mintha definiált fogalom lenne, de nincs definiálva.`, at: occurrence });
     }
   });

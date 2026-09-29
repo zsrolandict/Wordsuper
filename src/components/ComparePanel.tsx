@@ -8,6 +8,7 @@ import { UserFacingError, insertCommentsAtParagraphs, jumpToParagraph, readParag
 import { SEVERITY_LABELS } from '../services/review';
 import { describeStyle, type Settings } from '../services/settings';
 import { formatNumber } from '../services/format';
+import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
 import { DiffView, SEVERITY_STYLES } from './Proposal';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import { DEFAULT_PRESETS, PLACEHOLDERS } from './modes';
@@ -109,6 +110,13 @@ export default function ComparePanel({
       thoughts: '',
       startedAt,
     };
+    const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
+    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile };
+    const sentRequest = masker ? maskRequest(request, masker) : request;
+    const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
+    details.masking = masker ? { summary: masker.summary(), entries: masker.entries() } : null;
+    let rawThoughts = '';
+
     const controller = new AbortController();
     abortRef.current = controller;
     setInsertStatus(null);
@@ -119,10 +127,13 @@ export default function ComparePanel({
 
     try {
       const result = await streamAIResponse(
-        { mode: 'compare', instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile },
+        sentRequest,
         {
           onText: () => {},
-          onThought: chunk => updateDetails(d => ({ ...d, thoughts: d.thoughts + (d.thoughts && !d.thoughts.endsWith('\n') ? '\n\n' : '') + chunk })),
+          onThought: chunk => {
+            rawThoughts += (rawThoughts && !rawThoughts.endsWith('\n') ? '\n\n' : '') + chunk;
+            updateDetails(d => ({ ...d, thoughts: unmask(rawThoughts, true) }));
+          },
           onMeta: meta => updateDetails(d => ({ ...d, model: meta.model, location: meta.location })),
           onRateLimit,
         },
@@ -130,8 +141,10 @@ export default function ComparePanel({
       );
       const parsed = parseCompareResult(result, new Set(comparison.changes.map(c => c.id)));
       if (!parsed) throw new Error('Az elemzés eredményét nem tudtam értelmezni.');
-      setSelected(new Set(parsed.assessments.keys()));
-      setAnalysis(a => a && { ...a, running: false, overview: parsed.overview, assessments: parsed.assessments, details: { ...a.details, durationMs: Date.now() - startedAt } });
+      // Parsed with the placeholders in it, then each text is unmasked
+      const assessments = new Map([...parsed.assessments].map(([id, a]) => [id, { ...a, summary: unmask(a.summary), recommendation: unmask(a.recommendation) }]));
+      setSelected(new Set(assessments.keys()));
+      setAnalysis(a => a && { ...a, running: false, overview: unmask(parsed.overview), assessments, details: { ...a.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt } });
     } catch (e) {
       const message = controller.signal.aborted
         ? '⏹️ Leállítottad az elemzést.'

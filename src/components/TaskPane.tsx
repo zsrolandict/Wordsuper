@@ -1,18 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare } from 'lucide-react';
-import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
+import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap } from 'lucide-react';
+import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, splitExplanation, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
+  applyDocumentEdit,
   applyEdit,
+  applyReviewFindings,
   insertCommentAt,
   insertGenerated,
-  insertReviewComments,
   releaseRange,
   takeSnapshot,
   type DocumentSnapshot,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
+import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
 import { describeStyle, useSettings } from '../services/settings';
 import { useDocumentStats } from '../services/useDocumentStats';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
@@ -21,7 +23,7 @@ import LimitsBar from './LimitsBar';
 import SettingsPanel from './SettingsPanel';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
-import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, modeLabel } from './modes';
+import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 
 interface Message {
   id: string;
@@ -33,7 +35,15 @@ interface Message {
   /** Mit kapott az AI és hogyan gondolkodott – a lenyitható Részletek panelhez */
   details?: RequestDetailsData;
   /** Javaslat, amiről a felhasználó dönt (beszúrás / másik változat / elvetés) */
-  proposal?: { state: ProposalState; findings?: FindingView[] };
+  proposal?: {
+    state: ProposalState;
+    findings?: FindingView[];
+    /** Edit: why the change was needed, and whether it goes into the document as a comment */
+    explanation?: string;
+    addExplanation?: boolean;
+  };
+  /** A felhasználó üzenete egy gyorsgomb szövege volt */
+  preset?: PresetMatch;
   /** Pl. hibás hozzáférési kulcsnál: gomb a Beállításokhoz */
   showSettingsLink?: boolean;
 }
@@ -46,12 +56,16 @@ interface PendingProposal {
   /** Minden eddigi kör; az utolsó a mostani javaslat */
   rounds: HistoryTurn[];
   result: string;
+  /** Edit: why the change was needed */
+  explanation: string;
+  /** The same placeholders are kept for every refinement; null when masking is off */
+  masker: Masker | null;
 }
 
 const WELCOME_MESSAGE: Message = {
   id: 'welcome',
   role: 'assistant',
-  content: 'Szia! Jelölj ki egy szöveget a dokumentumban, és válassz módot alul! Választhatsz, hogy kicseréljem a szöveget korrektúrával, vagy egy széljegyzetben (Word Megjegyzés) elemezzem a kijelölt részt. Az Átvizsgálás a teljes dokumentumot nézi át. Mielőtt bármi bekerül a dokumentumba, megmutatom a javaslatot.'
+  content: 'Szia! Válassz módot alul, és írd le, mit szeretnél! Ha kijelölsz egy szöveget, azzal dolgozom; ha nem jelölsz ki semmit, az egész dokumentummal. A változtatások korrektúrával kerülnek be, a véleményem Word-megjegyzésként. Mielőtt bármi bekerül a dokumentumba, megmutatom a javaslatot.'
 };
 
 const ALTERNATIVE_INSTRUCTION = 'Kérek egy másik változatot.';
@@ -148,8 +162,11 @@ export default function TaskPane() {
   };
 
   const handleSend = async (instructionOverride?: string, modeOverride?: Mode) => {
-    const instruction = (instructionOverride ?? input).trim();
-    if (!instruction || !tryLock()) return;
+    const typed = (instructionOverride ?? input).trim();
+    if (!typed || !tryLock()) return;
+    // A built-in quick button can stand for a longer instruction; the chat shows the short label
+    const preset = matchPreset(typed, modeOverride ?? mode, settings.customPresets);
+    const instruction = (preset && !preset.custom && PRESET_INSTRUCTIONS[preset.label]) || typed;
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -159,7 +176,9 @@ export default function TaskPane() {
     try {
       if (instructionOverride === undefined) setInput('');
 
-      const requestMode = modeOverride ?? mode;
+      // A begépelt vagy kattintott gyorsgombot felismerjük; egy másik módhoz mentett saját gyorsgomb abban a módban fut
+      const requestMode = modeOverride ?? preset?.mode ?? mode;
+      if (requestMode !== mode) setMode(requestMode);
       const current = pendingRef.current;
       // Amíg van döntésre váró javaslat ugyanebben a módban, az új utasítás azt finomítja
       const refining = current !== null && current.mode === requestMode;
@@ -167,7 +186,7 @@ export default function TaskPane() {
         await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
       }
 
-      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${instruction}` });
+      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${typed}`, preset: preset ?? undefined });
 
       if (typeof Word === 'undefined') {
         addMessage({ role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' });
@@ -187,7 +206,14 @@ export default function TaskPane() {
         documentContext: snapshot.documentContext,
         history: sentRounds,
         styleProfile: settings.styleProfile,
+        wholeDocument: !!snapshot.wholeDocument,
       };
+      // Names and identifiers are replaced by placeholders before the request leaves the machine
+      const masker = refining
+        ? current!.masker
+        : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
+      const sentRequest = masker ? maskRequest(request, masker) : request;
+      const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
 
       const loadingId = newMessageId();
       const startedAt = Date.now();
@@ -206,8 +232,14 @@ export default function TaskPane() {
           styleSummary: describeStyle(settings.styleProfile),
           thoughts: '',
           startedAt,
+          wholeDocument: !!snapshot.wholeDocument,
+          masking: masker ? { summary: masker.summary(), entries: masker.entries() } : null,
         },
       }]);
+
+      // What arrived so far, still with placeholders; the screen shows it unmasked
+      let rawText = '';
+      let rawThoughts = '';
 
       // A válasz lezárása: a részleteket megtartjuk, hogy utólag is visszanézhető legyen
       const finishLoadingMessage = (changes: Partial<Message>) => {
@@ -215,24 +247,25 @@ export default function TaskPane() {
           ...m,
           ...changes,
           isLoading: false,
-          details: m.details && { ...m.details, durationMs: Date.now() - startedAt },
+          details: m.details && { ...m.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt },
         }));
       };
 
       let result: string;
       try {
-        result = await streamAIResponse(request, {
+        result = await streamAIResponse(sentRequest, {
           // Frissítsük az UI-t folyamatosan, ahogy jönnek a szavak (az átvizsgálás JSON-ját nem mutatjuk nyersen)
           onText: chunk => {
-            if (requestMode !== 'review') updateMessage(loadingId, m => ({ ...m, content: m.content + chunk, isLoading: false }));
+            rawText += chunk;
+            if (requestMode === 'review') return;
+            const shown = requestMode === 'edit' ? splitExplanation(rawText, true).text : rawText;
+            updateMessage(loadingId, m => ({ ...m, content: unmask(shown, true), isLoading: false }));
           },
           // A gondolkodás csak a Részletek panelbe kerül, a dokumentumba soha
-          onThought: chunk => updateMessage(loadingId, m => {
-            if (!m.details) return m;
-            const previous = m.details.thoughts;
-            const separator = previous && !previous.endsWith('\n') ? '\n\n' : '';
-            return { ...m, details: { ...m.details, thoughts: previous + separator + chunk } };
-          }),
+          onThought: chunk => {
+            rawThoughts += (rawThoughts && !rawThoughts.endsWith('\n') ? '\n\n' : '') + chunk;
+            updateMessage(loadingId, m => (m.details ? { ...m, details: { ...m.details, thoughts: unmask(rawThoughts, true) } } : m));
+          },
           onRateLimit: setRateLimit,
           onMeta: meta => updateMessage(loadingId, m => ({ ...m, details: m.details && { ...m.details, model: meta.model, location: meta.location } })),
         }, { accessKey: settings.accessKey, signal: controller.signal });
@@ -248,8 +281,14 @@ export default function TaskPane() {
       }
 
       let findings: ReviewFinding[] | undefined;
+      let explanation = '';
+      if (requestMode === 'edit') {
+        ({ text: result, explanation } = splitExplanation(result));
+        explanation = unmask(explanation);
+      }
       if (requestMode === 'review') {
-        const parsed = parseFindings(result);
+        // The JSON is parsed with the placeholders in it, then each field is unmasked
+        const parsed = parseFindings(result)?.map(f => ({ ...f, quote: unmask(f.quote), comment: unmask(f.comment), suggestion: unmask(f.suggestion) }));
         if (!parsed) {
           finishLoadingMessage({ role: 'system', content: 'Az átvizsgálás eredményét nem tudtam értelmezni. Kérlek próbáld újra.' });
           return;
@@ -262,6 +301,8 @@ export default function TaskPane() {
       } else if (!result.trim()) {
         finishLoadingMessage({ role: 'system', content: 'Az AI üres választ adott, ezért nem módosítottam a dokumentumot. Kérlek próbáld újra.' });
         return;
+      } else {
+        result = unmask(result);
       }
 
       // A finomított javaslat felváltja az előzőt, a kijelölés átszáll rá
@@ -273,12 +314,14 @@ export default function TaskPane() {
         }));
       }
       unclaimedRange = null;
-      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result });
-      const findingViews = findings?.map(f => ({ ...f, selected: true }));
-      finishLoadingMessage({ content: requestMode === 'review' ? '' : result, proposal: { state: 'pending', findings: findingViews } });
+      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result, explanation, masker });
+      const findingViews = findings?.map(f => ({ ...f, selected: true, fix: !!f.suggestion }));
+      // Asking for a comment in the instruction ticks the box by default
+      const addExplanation = !!explanation && /megjegyz|komment|indokl|magyaráz/i.test(instruction);
+      finishLoadingMessage({ content: requestMode === 'review' ? '' : result, proposal: { state: 'pending', findings: findingViews, explanation, addExplanation } });
 
       if (settings.autoApply) {
-        await applyProposal(loadingId, findingViews);
+        await applyProposal(loadingId, findingViews, addExplanation);
       }
     } catch (error) {
       if (error instanceof UserFacingError) {
@@ -295,11 +338,11 @@ export default function TaskPane() {
     }
   };
 
-  const handleApply = async (messageId: string, findingViews?: FindingView[]) => {
+  const handleApply = async (messageId: string, findingViews?: FindingView[], addExplanation = false) => {
     if (!tryLock()) return;
     setIsApplying(true);
     try {
-      await applyProposal(messageId, findingViews);
+      await applyProposal(messageId, findingViews, addExplanation);
     } finally {
       setIsApplying(false);
       unlock();
@@ -307,9 +350,10 @@ export default function TaskPane() {
   };
 
   /** Beszúrja a javaslatot (a hívó tartja a zárat: handleApply, vagy automatikus beszúrásnál handleSend) */
-  const applyProposal = async (messageId: string, findingViews?: FindingView[]) => {
+  const applyProposal = async (messageId: string, findingViews?: FindingView[], addExplanation = false) => {
     const current = pendingRef.current;
     if (!current || current.messageId !== messageId) return;
+    const explanation = addExplanation ? current.explanation : '';
     updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'applying' } }));
 
     try {
@@ -317,9 +361,21 @@ export default function TaskPane() {
       let updatedFindings = findingViews;
       const range = current.snapshot.range;
 
-      if (current.mode === 'edit') {
-        const outcome = await applyEdit(range!, current.result);
-        status = outcome.strategy === 'words'
+      if (current.mode === 'edit' && current.snapshot.wholeDocument) {
+        const outcome = await applyDocumentEdit(current.snapshot.wholeDocument, current.result, explanation);
+        const parts = [
+          outcome.changed && `${outcome.changed} bekezdést módosítottam`,
+          outcome.inserted && `${outcome.inserted} új bekezdést szúrtam be`,
+          outcome.deleted && `${outcome.deleted} bekezdést töröltem`,
+        ].filter(Boolean);
+        status = parts.length
+          ? `✅ Az egész dokumentumon: ${parts.join(', ')}, korrektúrával. A többi bekezdéshez nem nyúltam.`
+          : '✅ A javaslat megegyezik a dokumentummal, nem kellett semmit módosítani.';
+      } else if (current.mode === 'edit') {
+        const outcome = await applyEdit(range!, current.result, explanation);
+        status = outcome.pendingChanges
+          ? '✅ A kijelölést kicseréltem, korrektúrával. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).'
+          : outcome.strategy === 'words'
           ? `✅ ${outcome.changedPlaces} helyen módosítottam, korrektúrával. A változatlan szöveg formázása érintetlen maradt.`
           : outcome.strategy === 'unchanged'
           ? '✅ A javaslat megegyezik az eredetivel, nem kellett semmit módosítani.'
@@ -329,15 +385,23 @@ export default function TaskPane() {
         status = '✅ A szöveget beszúrtam a dokumentumba!';
       } else if (current.mode === 'comment') {
         await insertCommentAt(range!, current.result);
-        status = '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).';
+        status = current.snapshot.wholeDocument
+          ? '✅ A véleményezést beszúrtam Megjegyzésként abba a bekezdésbe, ahol a kurzor állt.'
+          : '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).';
       } else {
-        const selected = (findingViews ?? []).filter(f => f.selected);
-        const outcome = await insertReviewComments(selected);
-        updatedFindings = findingViews?.map(f => ({ ...f, notFound: outcome.notFound.includes(f) }));
-        status = `✅ ${outcome.inserted} megjegyzést beszúrtam.` +
-          (outcome.notFound.length ? ` ${outcome.notFound.length} idézetet nem találtam meg szó szerint a dokumentumban, ezeket fent megjelöltem.` : '');
+        const chosen = (findingViews ?? []).filter(f => f.selected || f.fix);
+        const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })));
+        updatedFindings = findingViews?.map(f => ({ ...f, notFound: outcome.notFound.includes(f), fixFailed: outcome.fixFailed.includes(f) }));
+        const done = [
+          outcome.comments && `${outcome.comments} megjegyzést beszúrtam`,
+          outcome.fixes && `${outcome.fixes} javítást beírtam korrektúrával`,
+        ].filter(Boolean);
+        const missed = outcome.notFound.length + outcome.fixFailed.length;
+        status = `✅ ${done.length ? done.join(', ') : 'Nem került be semmi'}.` +
+          (missed ? ' Amit nem találtam meg szó szerint a dokumentumban, azt fent megjelöltem.' : '');
       }
 
+      if (explanation) status += ' Az indoklást megjegyzésként mellé tettem.';
       setPending(null);
       updateMessage(messageId, m => ({
         ...m,
@@ -349,16 +413,21 @@ export default function TaskPane() {
       console.error("Write error in Word:", writeError);
       // A javaslat megmarad, újra lehet próbálni vagy el lehet vetni
       updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'pending' } }));
-      addMessage({ role: 'system', content: 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál? A javaslat megmaradt: újrapróbálhatod vagy elvetheted.' });
+      addMessage({
+        role: 'system',
+        content: writeError instanceof UserFacingError
+          ? writeError.message
+          : 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál? A javaslat megmaradt: újrapróbálhatod vagy elvetheted.',
+      });
     }
   };
 
-  const toggleFinding = (messageId: string, index: number) => {
+  const toggleFinding = (messageId: string, index: number, field: 'selected' | 'fix') => {
     updateMessage(messageId, m => ({
       ...m,
       proposal: m.proposal && {
         ...m.proposal,
-        findings: m.proposal.findings?.map((f, i) => (i === index ? { ...f, selected: !f.selected } : f)),
+        findings: m.proposal.findings?.map((f, i) => (i === index ? { ...f, [field]: !f[field] } : f)),
       },
     }));
   };
@@ -441,6 +510,12 @@ export default function TaskPane() {
                   msg.role === 'system' ? 'bg-red-50 text-red-700 border border-red-200 rounded-bl-none' :
                   'bg-white text-neutral-800 border border-neutral-200 rounded-bl-none'}`}
             >
+              {msg.preset && (
+                <span className="flex items-center w-fit mb-1 px-1.5 py-0.5 rounded bg-blue-500 text-[10px] font-medium" title="Ezt a szöveget gyorsgombként ismertem fel">
+                  <Zap className="w-3 h-3 mr-0.5 fill-current" />
+                  {msg.preset.custom ? 'Saját gyorsgomb' : 'Gyorsgomb'}
+                </span>
+              )}
               {msg.role === 'system' && <AlertCircle className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />}
               {msg.isLoading && <Loader2 className="w-4 h-4 inline-block mr-2 animate-spin text-blue-600" />}
               {msg.isLoading && !msg.content ? (
@@ -453,10 +528,13 @@ export default function TaskPane() {
                   state={msg.proposal.state}
                   findings={msg.proposal.findings}
                   busy={isBusy}
-                  onApply={() => handleApply(msg.id, msg.proposal?.findings)}
+                  explanation={msg.proposal.explanation}
+                  addExplanation={!!msg.proposal.addExplanation}
+                  onToggleExplanation={() => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, addExplanation: !m.proposal.addExplanation } }))}
+                  onApply={() => handleApply(msg.id, msg.proposal?.findings, !!msg.proposal?.addExplanation)}
                   onReject={handleReject}
                   onAlternative={() => handleSend(ALTERNATIVE_INSTRUCTION, msg.details!.mode)}
-                  onToggleFinding={index => toggleFinding(msg.id, index)}
+                  onToggleFinding={(index, field) => toggleFinding(msg.id, index, field)}
                 />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>

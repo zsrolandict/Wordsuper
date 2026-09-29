@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote } from 'lucide-react';
+import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info } from 'lucide-react';
 import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo } from '../services/structure';
 import { UserFacingError, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
 import { formatNumber } from '../services/format';
@@ -11,6 +11,7 @@ interface Loaded {
 
 const ISSUE_ICONS: Record<IssueKind, React.ReactNode> = {
   'broken-reference': <Unlink className="w-3.5 h-3.5 text-red-600" />,
+  'missing-annex': <Info className="w-3.5 h-3.5 text-neutral-500" />,
   duplicate: <Copy className="w-3.5 h-3.5 text-amber-600" />,
   unused: <CircleSlash className="w-3.5 h-3.5 text-amber-600" />,
   'undefined-quoted': <Quote className="w-3.5 h-3.5 text-amber-600" />,

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, RefreshCw, X, Loader2, SearchX } from 'lucide-react';
+import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb } from 'lucide-react';
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
@@ -7,9 +7,14 @@ import { SEVERITY_LABELS, cleanQuote } from '../services/review';
 export type ProposalState = 'pending' | 'applying' | 'applied' | 'rejected' | 'superseded';
 
 export interface FindingView extends ReviewFinding {
+  /** Insert as a margin comment */
   selected: boolean;
+  /** Write the suggested wording into the text (only when there is a suggestion) */
+  fix: boolean;
   /** Set after inserting: the quote could not be found in the document */
   notFound?: boolean;
+  /** Set after inserting: the fix could not be applied, the quote was not found word for word */
+  fixFailed?: boolean;
 }
 
 export const SEVERITY_STYLES = {
@@ -45,29 +50,53 @@ export function DiffView({ original, proposal }: { original: string; proposal: s
   );
 }
 
-function FindingsList({ findings, editable, onToggle }: { findings: FindingView[]; editable: boolean; onToggle: (index: number) => void }) {
+function FindingsList({ findings, editable, onToggle }: { findings: FindingView[]; editable: boolean; onToggle: (index: number, field: 'selected' | 'fix') => void }) {
   return (
     <ul className="space-y-2">
-      {findings.map((finding, i) => (
-        <li key={i} className={`border rounded-lg p-2 ${finding.notFound ? 'border-amber-300 bg-amber-50' : 'border-neutral-200 bg-neutral-50'}`}>
-          <label className={`flex items-start space-x-2 ${editable ? 'cursor-pointer' : ''}`}>
-            {editable && <input type="checkbox" checked={finding.selected} onChange={() => onToggle(i)} className="mt-0.5 shrink-0" />}
-            <span className="min-w-0">
-              <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded mr-1 ${SEVERITY_STYLES[finding.severity]}`}>
-                {SEVERITY_LABELS[finding.severity]}
-              </span>
-              <span className="text-xs italic text-neutral-500 break-words">„{cleanQuote(finding.quote)}”</span>
-              <span className="block text-sm mt-1">{finding.comment}</span>
-              {finding.notFound && (
-                <span className="flex items-center text-xs text-amber-700 mt-1">
-                  <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
-                  Nem találtam meg szó szerint a dokumentumban, ezért ez nem került be.
-                </span>
-              )}
+      {findings.map((finding, i) => {
+        const missed = finding.notFound || finding.fixFailed;
+        return (
+          <li key={i} className={`border rounded-lg p-2 ${missed ? 'border-amber-300 bg-amber-50' : 'border-neutral-200 bg-neutral-50'}`}>
+            <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded mr-1 ${SEVERITY_STYLES[finding.severity]}`}>
+              {SEVERITY_LABELS[finding.severity]}
             </span>
-          </label>
-        </li>
-      ))}
+            <span className="text-xs italic text-neutral-500 break-words">„{cleanQuote(finding.quote)}”</span>
+            <span className="block text-sm mt-1">{finding.comment}</span>
+            {finding.suggestion && (
+              <span className="block mt-1.5 text-xs bg-white border border-neutral-200 rounded-md p-1.5">
+                <span className="block font-semibold text-neutral-600 mb-0.5">Javasolt szöveg:</span>
+                <DiffView original={cleanQuote(finding.quote)} proposal={finding.suggestion} />
+              </span>
+            )}
+            {editable && (
+              <span className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-neutral-700">
+                <label className="flex items-center cursor-pointer">
+                  <input type="checkbox" checked={finding.selected} onChange={() => onToggle(i, 'selected')} className="mr-1" />
+                  Megjegyzés
+                </label>
+                {finding.suggestion && (
+                  <label className="flex items-center cursor-pointer">
+                    <input type="checkbox" checked={finding.fix} onChange={() => onToggle(i, 'fix')} className="mr-1" />
+                    Javítás korrektúrával
+                  </label>
+                )}
+              </span>
+            )}
+            {finding.notFound && (
+              <span className="flex items-center text-xs text-amber-700 mt-1">
+                <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
+                Nem találtam meg szó szerint a dokumentumban, ezért a megjegyzés nem került be.
+              </span>
+            )}
+            {finding.fixFailed && (
+              <span className="flex items-center text-xs text-amber-700 mt-1">
+                <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
+                A javítást nem írtam be: az idézett szöveget nem találtam meg pontosan így a dokumentumban.{finding.selected && !finding.notFound ? ' A javasolt szöveg a megjegyzésbe került.' : ''}
+              </span>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -76,7 +105,7 @@ const APPLY_LABELS: Record<Mode, string> = {
   edit: 'Elfogadom',
   generate: 'Beszúrás',
   comment: 'Megjegyzés beszúrása',
-  review: 'Megjegyzések beszúrása',
+  review: 'Beszúrás',
   compare: 'Megjegyzések beszúrása',
 };
 
@@ -91,6 +120,9 @@ export default function Proposal({
   onReject,
   onAlternative,
   onToggleFinding,
+  explanation,
+  addExplanation,
+  onToggleExplanation,
 }: {
   mode: Mode;
   originalText: string;
@@ -101,17 +133,27 @@ export default function Proposal({
   onApply: () => void;
   onReject: () => void;
   onAlternative: () => void;
-  onToggleFinding: (index: number) => void;
+  onToggleFinding: (index: number, field: 'selected' | 'fix') => void;
+  explanation?: string;
+  addExplanation?: boolean;
+  onToggleExplanation?: () => void;
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const isOpen = state === 'pending' || state === 'applying';
-  const selectedCount = findings?.filter(f => f.selected).length ?? 0;
+  const commentCount = findings?.filter(f => f.selected).length ?? 0;
+  const fixCount = findings?.filter(f => f.fix && f.suggestion).length ?? 0;
+  const hasSuggestions = findings?.some(f => f.suggestion) ?? false;
 
   return (
     <div>
       {mode === 'review' && findings ? (
         <>
-          <p className="mb-2">{findings.length} észrevételt találtam. {isOpen ? 'Válaszd ki, melyik kerüljön be megjegyzésként:' : ''}</p>
+          <p className="mb-2">
+            {findings.length} észrevételt találtam.{' '}
+            {isOpen && (hasSuggestions
+              ? 'Mindegyiknél eldöntheted, hogy megjegyzésként, javításként (korrektúrával) vagy mindkettőként kerüljön be:'
+              : 'Válaszd ki, melyik kerüljön be megjegyzésként:')}
+          </p>
           <FindingsList findings={findings} editable={state === 'pending'} onToggle={onToggleFinding} />
         </>
       ) : mode === 'edit' ? (
@@ -128,6 +170,18 @@ export default function Proposal({
             ))}
           </div>
           {showChanges ? <DiffView original={originalText} proposal={text} /> : <span className="whitespace-pre-wrap">{text}</span>}
+          {explanation && (
+            <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md p-2">
+              <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />Miért?</p>
+              <p className="whitespace-pre-wrap text-neutral-700">{explanation}</p>
+              {state === 'pending' && onToggleExplanation && (
+                <label className="flex items-center mt-1.5 cursor-pointer text-neutral-700">
+                  <input type="checkbox" checked={!!addExplanation} onChange={onToggleExplanation} className="mr-1" />
+                  Magyarázó megjegyzés is a módosításhoz
+                </label>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <span className="whitespace-pre-wrap">{text}</span>
@@ -138,11 +192,13 @@ export default function Proposal({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={onApply}
-              disabled={busy || state === 'applying' || (mode === 'review' && selectedCount === 0)}
+              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0)}
               className="flex items-center px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors"
             >
               {state === 'applying' ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
-              {APPLY_LABELS[mode]}{mode === 'review' ? ` (${selectedCount})` : ''}
+              {mode === 'review'
+                ? `${APPLY_LABELS.review} (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
+                : APPLY_LABELS[mode]}
             </button>
             <button
               onClick={onAlternative}

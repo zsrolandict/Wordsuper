@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2 } from 'lucide-react';
+import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
 import { checkAccessKey, describeRequestError, type RateLimitInfo } from '../services/aiService';
@@ -126,6 +127,36 @@ export default function SettingsPanel({
               Előnézet beszúrás előtt <span className="text-neutral-400">(ajánlott)</span>
               <span className="block text-xs text-neutral-500">Előbb megmutatom a javaslatot, és te döntöd el, hogy bekerül-e a dokumentumba. Kikapcsolva azonnal beszúrom.</span>
             </span>
+          </label>
+        </Card>
+
+        <Card title="Adatvédelem">
+          <label className="flex items-start space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.masking.enabled}
+              onChange={e => onChange(s => ({ ...s, masking: { ...s.masking, enabled: e.target.checked } }))}
+              className="mt-0.5"
+            />
+            <span>
+              Érzékeny adatok maszkolása <span className="text-neutral-400">(ajánlott)</span>
+              <span className="block text-xs text-neutral-500">
+                Mielőtt bármi az AI-hoz kerül, a neveket és azonosítókat helyettesítőre cserélem (pl. [CÉG_1], [SZEMÉLY_2]), a válaszban pedig visszacserélem.
+                Felismerem: {Object.values(ENTITY_LABELS).filter(label => label !== ENTITY_LABELS.EGYÉB).join(', ')}.
+                Hogy mit rejtettem el, azt minden válasz Részletek paneljén megnézheted.
+              </span>
+            </span>
+          </label>
+          <label className="block text-xs font-medium text-neutral-700">
+            Mindig elrejtendő kifejezések
+            <textarea
+              value={settings.masking.extraTerms}
+              onChange={e => onChange(s => ({ ...s, masking: { ...s.masking, extraTerms: e.target.value } }))}
+              rows={3}
+              placeholder={'Soronként egy, pl.\nNapfény projekt\nKiss és Társa'}
+              className={`${inputClass} mt-1 resize-none font-normal`}
+            />
+            <span className="block text-[10px] text-neutral-400 font-normal">Amit a szabályok nem ismernek fel (projektnevek, becenevek, termékek). Pontos egyezésre keresem.</span>
           </label>
         </Card>
 

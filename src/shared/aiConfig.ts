@@ -7,13 +7,15 @@ export type AssistantMode = typeof ASSISTANT_MODES[number];
 export const MODES = [...ASSISTANT_MODES, 'compare'] as const;
 export type Mode = typeof MODES[number];
 
-// The server truncates anything longer than these before sending it to the model
-export const MAX_SELECTION_CHARS = 10000;
-export const MAX_CONTEXT_CHARS = 40000;
+// Our own limits (not the model's: it takes about a million tokens). They keep answers fast and costs
+// predictable while a whole contract still fits. The server truncates anything longer.
+export const MAX_SELECTION_CHARS = 50000;
+/** About 60-70 pages of contract text */
+export const MAX_CONTEXT_CHARS = 200000;
 /** Whole-document review sends the document itself, so it gets a bigger budget */
-export const MAX_REVIEW_CHARS = 150000;
+export const MAX_REVIEW_CHARS = 400000;
 /** Version comparison sends the list of changes */
-export const MAX_COMPARE_CHARS = 60000;
+export const MAX_COMPARE_CHARS = 200000;
 export const MAX_INSTRUCTION_CHARS = 2000;
 /** How many earlier rounds of a refinement the AI gets to see (the first one always stays) */
 export const MAX_HISTORY_TURNS = 5;
@@ -52,6 +54,10 @@ export interface AIRequestBody {
   /** Earlier rounds when the user refines a proposal; the last one is the current draft */
   history?: HistoryTurn[];
   styleProfile?: StyleProfile;
+  /** Sensitive values were replaced with placeholders like [CÉG_1] before sending */
+  masked?: boolean;
+  /** Edit or comment without a selection: originalText is the whole document */
+  wholeDocument?: boolean;
 }
 
 export interface ReviewFinding {
@@ -59,6 +65,8 @@ export interface ReviewFinding {
   quote: string;
   comment: string;
   severity: Severity;
+  /** Corrected wording that replaces the quote as a tracked change; empty when the finding needs no text change */
+  suggestion: string;
 }
 
 export type ApiErrorCode =
@@ -84,3 +92,22 @@ export function trimHistory<T>(history: T[]): T[] {
 
 /** Word separates paragraphs with \r; everything sent to the model and shown in the pane uses \n */
 export const toLineFeeds = (text: string) => text.replace(/\r\n?/g, '\n');
+
+/** An edit ends with this line and a short explanation of why the change was needed (for an optional comment) */
+export const EXPLANATION_MARKER = '===WHY===';
+
+/** Splits an edit answer into the new text and its explanation; while streaming, a half-arrived marker is hidden */
+export function splitExplanation(answer: string, streaming = false): { text: string; explanation: string } {
+  const at = answer.indexOf(EXPLANATION_MARKER);
+  if (at !== -1) {
+    return { text: answer.slice(0, at).trimEnd(), explanation: answer.slice(at + EXPLANATION_MARKER.length).trim() };
+  }
+  if (streaming) {
+    // "…text\n===W" – the marker is still arriving
+    const partial = answer.match(/\n?=+[A-Z]*=*$/);
+    if (partial && EXPLANATION_MARKER.startsWith(partial[0].replace(/^\n/, ''))) {
+      return { text: answer.slice(0, partial.index).trimEnd(), explanation: '' };
+    }
+  }
+  return { text: answer, explanation: '' };
+}
