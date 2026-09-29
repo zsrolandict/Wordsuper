@@ -1,0 +1,59 @@
+import { GoogleGenAI } from "@google/genai";
+import type { ModelProvider, StreamFinish } from "./types";
+
+export interface GeminiConfig {
+  model: string;
+  /** Gemini Developer API key; used when no Vertex AI project is given */
+  apiKey?: string;
+  /** Vertex AI keeps the data in the chosen Google Cloud region (e.g. europe-west1); credentials come from the environment */
+  vertexProject?: string;
+  vertexLocation?: string;
+}
+
+const SAFETY_REASONS = new Set(["SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY"]);
+
+/** Maps Gemini's finish/block reasons to the provider-independent ones */
+export function mapGeminiFinish(finishReason: string | undefined, blockReason: string | undefined): StreamFinish {
+  if (blockReason) return { reason: "safety", detail: blockReason };
+  if (finishReason === undefined || finishReason === "STOP") return { reason: "stop" };
+  if (finishReason === "MAX_TOKENS") return { reason: "length", detail: finishReason };
+  if (SAFETY_REASONS.has(finishReason)) return { reason: "safety", detail: finishReason };
+  return { reason: "other", detail: finishReason };
+}
+
+export function createGeminiProvider(config: GeminiConfig): ModelProvider {
+  const ai = config.vertexProject
+    ? new GoogleGenAI({ vertexai: true, project: config.vertexProject, location: config.vertexLocation })
+    : new GoogleGenAI({ apiKey: config.apiKey });
+
+  return {
+    model: config.model,
+    location: config.vertexProject ? `Vertex AI (${config.vertexLocation})` : "Gemini API",
+
+    async generate({ systemInstruction, prompt, responseJsonSchema, signal }, onEvent) {
+      const stream = await ai.models.generateContentStream({
+        model: config.model,
+        contents: prompt,
+        config: {
+          systemInstruction,
+          // Stream the model's thought summaries too, so the task pane can show how it reached the answer
+          thinkingConfig: { includeThoughts: true },
+          abortSignal: signal,
+          ...(responseJsonSchema ? { responseMimeType: "application/json", responseJsonSchema } : {}),
+        },
+      });
+
+      let finishReason: string | undefined;
+      let blockReason: string | undefined;
+      for await (const chunk of stream) {
+        blockReason ??= chunk.promptFeedback?.blockReason;
+        const candidate = chunk.candidates?.[0];
+        for (const part of candidate?.content?.parts ?? []) {
+          if (part.text) onEvent({ type: part.thought ? "thought" : "text", text: part.text });
+        }
+        finishReason = candidate?.finishReason ?? finishReason;
+      }
+      return mapGeminiFinish(finishReason, blockReason);
+    },
+  };
+}

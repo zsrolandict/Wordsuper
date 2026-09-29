@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2 } from 'lucide-react';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
-import { checkAccessKey, describeRequestError } from '../services/aiService';
+import { checkAccessKey, describeRequestError, type RateLimitInfo } from '../services/aiService';
 import { MODE_LABELS, modeLabel } from './modes';
 
 const newId = () =>
@@ -26,11 +26,14 @@ export default function SettingsPanel({
   onChange,
   onClose,
   currentMode,
+  onRateLimit,
 }: {
   settings: Settings;
   onChange: (updater: (current: Settings) => Settings) => void;
   onClose: () => void;
   currentMode: Mode;
+  /** The key check counts towards the rate limit too, so the limits bar is told about it */
+  onRateLimit: (info: RateLimitInfo) => void;
 }) {
   const [showKey, setShowKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ state: 'idle' });
@@ -41,14 +44,24 @@ export default function SettingsPanel({
   const setStyle = (changes: Partial<typeof style>) =>
     onChange(s => ({ ...s, styleProfile: { ...s.styleProfile, ...changes } }));
 
+  // The key being edited right now; a check that finishes after an edit belongs to an old key and is dropped
+  const currentKeyRef = useRef(settings.accessKey);
+  useEffect(() => {
+    currentKeyRef.current = settings.accessKey;
+  }, [settings.accessKey]);
+
   const verifyKey = async () => {
+    const checkedKey = settings.accessKey;
     setKeyStatus({ state: 'checking' });
+    let status: KeyStatus;
     try {
-      const result = await checkAccessKey(settings.accessKey);
-      setKeyStatus('error' in result ? { state: 'error', message: describeRequestError(result.error) } : { state: 'ok' });
+      const result = await checkAccessKey(checkedKey);
+      if (result.rateLimit) onRateLimit(result.rateLimit);
+      status = result.ok ? { state: 'ok' } : { state: 'error', message: describeRequestError(result.error) };
     } catch {
-      setKeyStatus({ state: 'error', message: 'Nem érem el a szervert. Ellenőrizd a hálózatot.' });
+      status = { state: 'error', message: 'Nem érem el a szervert. Ellenőrizd a hálózatot.' };
     }
+    if (currentKeyRef.current === checkedKey) setKeyStatus(status);
   };
 
   const addPreset = () => {

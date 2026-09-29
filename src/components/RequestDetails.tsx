@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
-import { AI_MODEL, MAX_SELECTION_CHARS, type Mode } from '../shared/aiConfig';
+import { MAX_SELECTION_CHARS, toLineFeeds, type Mode } from '../shared/aiConfig';
 import type { ContextInfo } from '../services/contextBuilder';
-import { formatNumber, normalizeLineBreaks } from '../services/format';
+import { formatNumber } from '../services/format';
 
 /** Minden, amit egy AI kérésről tudunk – ebből mutatjuk meg, mit látott az AI és hogyan jutott a válaszra */
 export interface RequestDetailsData {
@@ -12,11 +12,16 @@ export interface RequestDetailsData {
   contextInfo: ContextInfo;
   /** Finomításnál ennyi korábbi kört (utasítás + válasz) látott az AI */
   historyRounds: number;
+  /** Ennyi kör volt összesen; ha több, mint amit az AI látott, a középsők kimaradtak */
+  totalRounds: number;
   /** A stílusprofil rövid leírása, üres, ha nincs beállítva */
   styleSummary: string;
   thoughts: string;
   startedAt: number;
   durationMs?: number;
+  /** A szerver küldi a válasz elején: melyik modell válaszolt és hol dolgozták fel a szöveget */
+  model?: string;
+  location?: string;
 }
 
 /** A gondolkodási összefoglaló **félkövér** címsorait jelenítjük meg félkövérként */
@@ -83,7 +88,7 @@ function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
 
 export default function RequestDetails({ details, isLoading }: { details: RequestDetailsData; isLoading: boolean }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, contextInfo, historyRounds, styleSummary, thoughts, durationMs } = details;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -100,7 +105,10 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
           <Section title="Utasítás">
             <p className="whitespace-pre-wrap">{instruction}</p>
             {historyRounds > 0 && (
-              <p className="mt-1">Ez finomítás volt: az AI látta az előző {formatNumber(historyRounds)} kör utasítását és a saját válaszát is.</p>
+              <p className="mt-1">
+                Ez finomítás volt: az AI látta az előző {formatNumber(historyRounds)} kör utasítását és a saját válaszát is.
+                {totalRounds > historyRounds && ` Összesen ${formatNumber(totalRounds)} kör volt: az elsőt és a legutóbbiakat kapta meg, a közbülsőket nem.`}
+              </p>
             )}
             {styleSummary && <p className="mt-1">Stílusprofil: {styleSummary}.</p>}
           </Section>
@@ -114,7 +122,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
           ) : mode !== 'review' && (
             <Section title={`Kijelölt szöveg (${formatNumber(selectionText.length)} karakter)`}>
               <div className="max-h-32 overflow-y-auto whitespace-pre-wrap bg-neutral-50 border border-neutral-200 rounded-md p-2">
-                {normalizeLineBreaks(selectionText.substring(0, MAX_SELECTION_CHARS))}
+                {toLineFeeds(selectionText.substring(0, MAX_SELECTION_CHARS))}
               </div>
               {selectionText.length > MAX_SELECTION_CHARS && (
                 <Warning>Csak az első {formatNumber(MAX_SELECTION_CHARS)} karaktert kapta meg az AI, a kijelölés végét nem látta.</Warning>
@@ -135,7 +143,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
           </Section>
 
           <p className="text-neutral-400">
-            {AI_MODEL}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
+            {model ? `${model} · ${location}` : 'A modell még nem jelentkezett'}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
           </p>
         </div>
       )}

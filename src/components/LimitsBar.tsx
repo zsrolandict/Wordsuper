@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle, OctagonAlert, Gauge } from 'lucide-react';
 import {
   MAX_HISTORY_TURNS,
@@ -8,7 +8,7 @@ import {
   contextLimitFor,
   type Mode,
 } from '../shared/aiConfig';
-import type { DocumentStats } from '../services/wordDocument';
+import type { DocumentStats } from '../services/useDocumentStats';
 import type { RateLimitInfo } from '../services/aiService';
 import { formatNumber } from '../services/format';
 
@@ -51,12 +51,21 @@ function currentRateLimit(rateLimit: RateLimitInfo | null): RateLimitInfo | null
  * Élő korlátjelző: mekkora a dokumentum és a kijelölés ahhoz képest, amennyit az AI megkap,
  * és hány kérés maradt ebben a percben. Figyelmeztet, ha valami nem fér bele.
  */
-export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stats: DocumentStats | null; rateLimit: RateLimitInfo | null }) {
+export default function LimitsBar({ mode, stats, rateLimit }: { mode: Mode; stats: DocumentStats; rateLimit: RateLimitInfo | null }) {
   const [open, setOpen] = useState(false);
+  const [, rerender] = useState(0);
+
+  // Re-render when the rate limit window resets, so an "out of requests" warning doesn't outlive it
+  useEffect(() => {
+    if (!rateLimit) return;
+    const msLeft = rateLimit.receivedAt + rateLimit.resetSeconds * 1000 - Date.now();
+    if (msLeft <= 0) return;
+    const timer = setTimeout(() => rerender(n => n + 1), msLeft + 50);
+    return () => clearTimeout(timer);
+  }, [rateLimit]);
 
   const docLimit = contextLimitFor(mode);
-  const documentChars = stats?.documentChars ?? null;
-  const selectionChars = stats?.selectionChars ?? null;
+  const { documentChars, selectionChars } = stats;
   const selectionMatters = mode === 'edit' || mode === 'comment';
 
   const docLevel: Level = documentChars !== null && documentChars > docLimit ? 'warn' : 'ok';

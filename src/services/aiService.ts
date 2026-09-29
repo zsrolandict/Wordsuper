@@ -3,12 +3,21 @@ import { ACCESS_KEY_HEADER, type AIRequestBody, type ApiErrorCode } from '../sha
 export class AIRequestError extends Error {
   code?: ApiErrorCode;
   status?: number;
+  /** For INCOMPLETE: why the model stopped (length, safety, other) */
+  reason?: string;
 
-  constructor(message: string, code?: ApiErrorCode, status?: number) {
+  constructor(message: string, code?: ApiErrorCode, status?: number, reason?: string) {
     super(message);
     this.code = code;
     this.status = status;
+    this.reason = reason;
   }
+}
+
+/** Which model answered and where the text was processed; sent by the server before the answer */
+export interface ResponseMeta {
+  model: string;
+  location: string;
 }
 
 export interface RateLimitInfo {
@@ -25,6 +34,7 @@ export interface StreamHandlers {
   /** The model's thought summary, shown in the task pane only */
   onThought?: (chunk: string) => void;
   onRateLimit?: (info: RateLimitInfo) => void;
+  onMeta?: (meta: ResponseMeta) => void;
 }
 
 export interface StreamOptions {
@@ -101,7 +111,7 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
             break;
           }
 
-          let data: { text?: string; thought?: string; error?: string };
+          let data: { text?: string; thought?: string; meta?: ResponseMeta; error?: string; code?: ApiErrorCode; reason?: string };
           try {
             data = JSON.parse(dataStr);
           } catch {
@@ -110,7 +120,10 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
           }
 
           if (data.error) {
-            throw new AIRequestError(data.error, 'SERVER_ERROR');
+            throw new AIRequestError(data.error, data.code ?? 'SERVER_ERROR', undefined, data.reason);
+          }
+          if (data.meta) {
+            handlers.onMeta?.(data.meta);
           }
           if (data.thought) {
             handlers.onThought?.(data.thought);
@@ -137,10 +150,11 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
   }
 }
 
-/** Checks the access key without spending AI credits */
-export async function checkAccessKey(accessKey: string): Promise<{ ok: true } | { ok: false; error: AIRequestError }> {
+/** Checks the access key without spending AI credits (it still counts towards the rate limit) */
+export async function checkAccessKey(accessKey: string): Promise<{ ok: boolean; error?: AIRequestError; rateLimit: RateLimitInfo | null }> {
   const response = await fetch('/api/auth-check', { headers: { [ACCESS_KEY_HEADER]: accessKey } });
-  return response.ok ? { ok: true } : { ok: false, error: await errorFromResponse(response) };
+  const rateLimit = readRateLimit(response.headers);
+  return response.ok ? { ok: true, rateLimit } : { ok: false, error: await errorFromResponse(response), rateLimit };
 }
 
 /** Hungarian explanation of a failed request, for the chat */
@@ -150,9 +164,16 @@ export function describeRequestError(error: unknown): string {
       case 'UNAUTHORIZED':
         return 'Hibás vagy hiányzó hozzáférési kulcs. Add meg a Beállításokban (fogaskerék ikon fent).';
       case 'ACCESS_KEY_NOT_CONFIGURED':
-        return 'A szerveren nincs beállítva hozzáférési kulcs (APP_ACCESS_KEY), ezért a szerver minden kérést elutasít. Az üzemeltetőnek kell beállítania.';
+        return 'A szerveren nincs rendesen beállítva a hozzáférési kulcs (APP_ACCESS_KEY hiányzik, túl rövid vagy még a mintaérték), ezért a szerver minden kérést elutasít. Az üzemeltetőnek kell beállítania.';
       case 'RATE_LIMITED':
         return 'Túl sok kérés érkezett egy percen belül. Várj egy kicsit, és próbáld újra.';
+      case 'INCOMPLETE':
+        // A félbehagyott válasz sosem kerül a dokumentumba
+        return error.reason === 'length'
+          ? 'A válasz túl hosszú lett, a modell félbehagyta, ezért nem használom. Próbáld kisebb kijelöléssel vagy rövidebb kéréssel.'
+          : error.reason === 'safety'
+          ? 'A modell szűrője (pl. biztonsági vagy szerzői jogi) megszakította a választ, ezért nem használom. Próbáld másként megfogalmazni a kérést.'
+          : 'A modell nem fejezte be a választ, ezért nem használom. Kérlek próbáld újra.';
     }
   }
   const detail = error instanceof Error ? error.message : '';

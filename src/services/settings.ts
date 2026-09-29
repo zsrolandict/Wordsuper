@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { MODES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
+import { ADDRESSING_VALUES, MODES, TONE_VALUES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
 
 export interface CustomPreset {
   id: string;
@@ -25,9 +25,6 @@ export const DEFAULT_SETTINGS: Settings = {
 
 const STORAGE_KEY = 'word-writer-settings-v1';
 
-const ADDRESSING: Addressing[] = ['', 'formal', 'informal'];
-const TONES: Tone[] = ['', 'legal', 'business', 'plain', 'friendly'];
-
 /** Anything read back from storage is validated, so a broken or old value never crashes the pane */
 function sanitize(raw: unknown): Settings {
   const value = (raw ?? {}) as Partial<Settings>;
@@ -35,12 +32,12 @@ function sanitize(raw: unknown): Settings {
   return {
     accessKey: typeof value.accessKey === 'string' ? value.accessKey : '',
     styleProfile: {
-      addressing: ADDRESSING.includes(style.addressing as Addressing) ? style.addressing! : '',
-      tone: TONES.includes(style.tone as Tone) ? style.tone! : '',
+      addressing: (ADDRESSING_VALUES as readonly string[]).includes(style.addressing as string) ? style.addressing as Addressing : '',
+      tone: (TONE_VALUES as readonly string[]).includes(style.tone as string) ? style.tone as Tone : '',
       notes: typeof style.notes === 'string' ? style.notes : '',
     },
     customPresets: (Array.isArray(value.customPresets) ? value.customPresets : []).filter(
-      (p): p is CustomPreset => !!p && typeof p.id === 'string' && typeof p.label === 'string' && MODES.includes(p.mode)
+      (p): p is CustomPreset => !!p && typeof p.id === 'string' && typeof p.label === 'string' && (MODES as readonly string[]).includes(p.mode)
     ),
     autoApply: value.autoApply === true,
   };

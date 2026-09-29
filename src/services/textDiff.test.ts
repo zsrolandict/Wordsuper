@@ -61,3 +61,8 @@ test('diffForDisplay marks removed and added words and keeps line breaks', () =>
     { type: 'equal', tokens: ['\n', 'c'] },
   ]);
 });
+
+test('an unchanged paragraph with a tab, a non-breaking space and a soft break gives no hunks', () => {
+  const paragraph = '1.\tA Megbízó köteles 5 000 Ft-ot\u000bfizetni.';
+  assert.deepEqual(planParagraphEdits([tokenizeLikeWord(paragraph)], paragraph), []);
+});

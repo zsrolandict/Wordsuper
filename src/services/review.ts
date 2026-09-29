@@ -1,6 +1,4 @@
-import { MAX_REVIEW_FINDINGS, type ReviewFinding, type Severity } from '../shared/aiConfig';
-
-const SEVERITIES: Severity[] = ['high', 'medium', 'low'];
+import { MAX_REVIEW_FINDINGS, SEVERITY_VALUES, type ReviewFinding, type Severity } from '../shared/aiConfig';
 
 /** Parses the review JSON; null when it isn't a list of findings */
 export function parseFindings(text: string): ReviewFinding[] | null {
@@ -17,7 +15,7 @@ export function parseFindings(text: string): ReviewFinding[] | null {
     .map(f => ({
       quote: typeof f.quote === 'string' ? f.quote.trim() : '',
       comment: typeof f.comment === 'string' ? f.comment.trim() : '',
-      severity: SEVERITIES.includes(f.severity as Severity) ? (f.severity as Severity) : 'medium',
+      severity: (SEVERITY_VALUES as readonly unknown[]).includes(f.severity) ? (f.severity as Severity) : 'medium',
     }))
     .filter(f => f.quote && f.comment)
     .slice(0, MAX_REVIEW_FINDINGS);

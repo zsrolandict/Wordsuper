@@ -1,3 +1,5 @@
+import { toLineFeeds } from '../shared/aiConfig';
+
 /** What part of the document the AI received as context; shown in the limits bar and the details panel */
 export interface ContextInfo {
   documentChars: number;
@@ -35,8 +37,8 @@ const OVERHEAD_CHARS = 400;
 const formatRange = (start: number, end: number, total: number) => `characters ${start + 1}–${end} of ${total}`;
 
 export function buildDocumentContext({ documentText, selectionStart, selectionLength, headings, limit, wholeDocument }: BuildOptions): { text: string; info: ContextInfo } {
-  // The AI reads \n as line breaks; Word uses \r for paragraphs (same length, so offsets stay valid)
-  const doc = documentText.replace(/\r/g, '\n');
+  // The AI reads \n as line breaks; Word uses a lone \r for paragraphs, so the offsets stay valid
+  const doc = toLineFeeds(documentText);
   const total = doc.length;
 
   if (total === 0) {

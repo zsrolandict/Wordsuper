@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound } from 'lucide-react';
-import { MAX_INSTRUCTION_CHARS, MODES, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
+import { MAX_INSTRUCTION_CHARS, MODES, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
@@ -60,6 +60,7 @@ export default function TaskPane() {
   const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [settings, updateSettings] = useSettings();
@@ -71,6 +72,18 @@ export default function TaskPane() {
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stats = useDocumentStats(documentVersion);
+  // Egyszerre csak egy művelet futhat (küldés, beszúrás, elvetés, Főmenü). A ref szinkron zár, így két gyors
+  // kattintásból sem indul két művelet; az isBusy pedig letiltja a gombokat.
+  const busyRef = useRef(false);
+  const isBusy = isSending || isApplying;
+  const tryLock = () => {
+    if (busyRef.current) return false;
+    busyRef.current = true;
+    return true;
+  };
+  const unlock = () => {
+    busyRef.current = false;
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -89,7 +102,7 @@ export default function TaskPane() {
     setMessages(prev => prev.map(m => (m.id === id ? update(m) : m)));
   };
 
-  /** Lezárja a függő javaslatot a dokumentum módosítása nélkül */
+  /** Lezárja a függő javaslatot a dokumentum módosítása nélkül (a hívó tartja a zárat) */
   const closePending = async (state: 'rejected' | 'superseded', statusText: string) => {
     const current = pendingRef.current;
     if (!current) return;
@@ -102,34 +115,31 @@ export default function TaskPane() {
     await releaseRange(current.snapshot.range);
   };
 
+  const handleReject = async () => {
+    if (!tryLock()) return;
+    try {
+      await closePending('rejected', '✖️ Elvetetted, a dokumentum változatlan maradt.');
+    } finally {
+      unlock();
+    }
+  };
+
   // Vissza a kezdőképernyőre, új beszélgetéssel
   const goToMainMenu = async () => {
-    await closePending('rejected', '✖️ Elvetve.');
-    setMessages([WELCOME_MESSAGE]);
-    setInput('');
-    setMode('edit');
+    if (!tryLock()) return;
+    try {
+      await closePending('rejected', '✖️ Elvetve.');
+      setMessages([WELCOME_MESSAGE]);
+      setInput('');
+      setMode('edit');
+    } finally {
+      unlock();
+    }
   };
 
   const handleSend = async (instructionOverride?: string, modeOverride?: Mode) => {
     const instruction = (instructionOverride ?? input).trim();
-    if (!instruction || isSending) return;
-    if (instructionOverride === undefined) setInput('');
-
-    const requestMode = modeOverride ?? mode;
-    const current = pendingRef.current;
-    // Amíg van döntésre váró javaslat ugyanebben a módban, az új utasítás azt finomítja
-    const refining = current !== null && current.mode === requestMode;
-    if (current && !refining) {
-      await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
-    }
-
-    addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${instruction}` });
-
-    if (typeof Word === 'undefined') {
-      addMessage({ role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' });
-      return;
-    }
-
+    if (!instruction || !tryLock()) return;
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -137,16 +147,35 @@ export default function TaskPane() {
     let unclaimedRange: Word.Range | null = null;
 
     try {
+      if (instructionOverride === undefined) setInput('');
+
+      const requestMode = modeOverride ?? mode;
+      const current = pendingRef.current;
+      // Amíg van döntésre váró javaslat ugyanebben a módban, az új utasítás azt finomítja
+      const refining = current !== null && current.mode === requestMode;
+      if (current && !refining) {
+        await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
+      }
+
+      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${instruction}` });
+
+      if (typeof Word === 'undefined') {
+        addMessage({ role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' });
+        return;
+      }
+
       const snapshot = refining ? current!.snapshot : await takeSnapshot(requestMode);
       if (!refining) unclaimedRange = snapshot.range;
-      const rounds = refining ? current!.rounds : [];
+      const rounds: HistoryTurn[] = refining ? current!.rounds : [];
+      // Hosszú finomításnál az első és a legutóbbi körök mennek el (a szerver is így vág)
+      const sentRounds = trimHistory(rounds);
 
       const request: AIRequestBody = {
         mode: requestMode,
         instruction,
         originalText: requestMode === 'edit' || requestMode === 'comment' ? snapshot.selectionText : '',
         documentContext: snapshot.documentContext,
-        history: rounds,
+        history: sentRounds,
         styleProfile: settings.styleProfile,
       };
 
@@ -162,7 +191,8 @@ export default function TaskPane() {
           instruction,
           selectionText: snapshot.selectionText,
           contextInfo: snapshot.contextInfo,
-          historyRounds: rounds.length,
+          historyRounds: sentRounds.length,
+          totalRounds: rounds.length,
           styleSummary: describeStyle(settings.styleProfile),
           thoughts: '',
           startedAt,
@@ -194,6 +224,7 @@ export default function TaskPane() {
             return { ...m, details: { ...m.details, thoughts: previous + separator + chunk } };
           }),
           onRateLimit: setRateLimit,
+          onMeta: meta => updateMessage(loadingId, m => ({ ...m, details: m.details && { ...m.details, model: meta.model, location: meta.location } })),
         }, { accessKey: settings.accessKey, signal: controller.signal });
       } catch (aiError) {
         // Hibás, félbeszakadt vagy leállított válasz esetén a dokumentumhoz nem nyúlunk
@@ -250,9 +281,22 @@ export default function TaskPane() {
       await releaseRange(unclaimedRange);
       abortRef.current = null;
       setIsSending(false);
+      unlock();
     }
   };
 
+  const handleApply = async (messageId: string, findingViews?: FindingView[]) => {
+    if (!tryLock()) return;
+    setIsApplying(true);
+    try {
+      await applyProposal(messageId, findingViews);
+    } finally {
+      setIsApplying(false);
+      unlock();
+    }
+  };
+
+  /** Beszúrja a javaslatot (a hívó tartja a zárat: handleApply, vagy automatikus beszúrásnál handleSend) */
   const applyProposal = async (messageId: string, findingViews?: FindingView[]) => {
     const current = pendingRef.current;
     if (!current || current.messageId !== messageId) return;
@@ -310,7 +354,7 @@ export default function TaskPane() {
   };
 
   if (view === 'settings') {
-    return <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} />;
+    return <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} onRateLimit={setRateLimit} />;
   }
 
   const refining = pending !== null && pending.mode === mode;
@@ -331,8 +375,8 @@ export default function TaskPane() {
           {messages.length > 1 && (
             <button
               onClick={goToMainMenu}
-              disabled={isSending}
-              title={isSending ? 'Várd meg, amíg elkészül a válasz' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
+              disabled={isBusy}
+              title={isBusy ? 'Várd meg, amíg befejeződik a művelet' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
               className="flex items-center px-2.5 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-400 disabled:opacity-50 disabled:hover:bg-blue-500 rounded-lg transition-colors"
             >
               <House className="w-4 h-4 mr-1" />
@@ -371,9 +415,9 @@ export default function TaskPane() {
                   text={msg.content}
                   state={msg.proposal.state}
                   findings={msg.proposal.findings}
-                  busy={isSending}
-                  onApply={() => applyProposal(msg.id, msg.proposal?.findings)}
-                  onReject={() => closePending('rejected', '✖️ Elvetetted, a dokumentum változatlan maradt.')}
+                  busy={isBusy}
+                  onApply={() => handleApply(msg.id, msg.proposal?.findings)}
+                  onReject={handleReject}
                   onAlternative={() => handleSend(ALTERNATIVE_INSTRUCTION, msg.details!.mode)}
                   onToggleFinding={index => toggleFinding(msg.id, index)}
                 />
@@ -431,7 +475,7 @@ export default function TaskPane() {
             <button
               key={preset}
               onClick={() => handleSend(preset)}
-              disabled={isSending}
+              disabled={isBusy}
               className="px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-neutral-200 rounded-full transition-colors whitespace-nowrap disabled:opacity-50"
             >
               {preset}
@@ -441,7 +485,7 @@ export default function TaskPane() {
             <button
               key={preset.id}
               onClick={() => handleSend(preset.label)}
-              disabled={isSending}
+              disabled={isBusy}
               title="Saját gyorsgomb"
               className="px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-full transition-colors max-w-full truncate disabled:opacity-50"
             >
@@ -450,11 +494,11 @@ export default function TaskPane() {
           ))}
         </div>
 
-        {refining && !isSending && (
+        {refining && !isBusy && (
           <div className="mb-2 flex items-center justify-between text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">
             <span>↻ Finomítás: amit most írsz, a fenti javaslatot módosítja.</span>
             <button
-              onClick={() => closePending('rejected', '✖️ Elvetetted, a dokumentum változatlan maradt.')}
+              onClick={handleReject}
               className="underline ml-2 shrink-0"
             >
               Elvetés
@@ -489,7 +533,7 @@ export default function TaskPane() {
           ) : (
             <button
               onClick={() => handleSend()}
-              disabled={!input.trim()}
+              disabled={!input.trim() || isBusy}
               aria-label="Küldés"
               className="w-11 h-11 shrink-0 flex items-center justify-center bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-xl transition-colors"
             >

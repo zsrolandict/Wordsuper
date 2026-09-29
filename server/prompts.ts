@@ -1,12 +1,16 @@
-import { Type, type Schema } from "@google/genai";
 import {
-  MAX_HISTORY_TURNS,
+  ADDRESSING_VALUES,
+  MAX_HISTORY_RESULT_CHARS,
   MAX_INSTRUCTION_CHARS,
   MAX_REVIEW_FINDINGS,
   MAX_SELECTION_CHARS,
   MAX_STYLE_NOTES_CHARS,
   MODES,
+  SEVERITY_VALUES,
+  TONE_VALUES,
   contextLimitFor,
+  toLineFeeds,
+  trimHistory,
   type AIRequestBody,
   type Addressing,
   type HistoryTurn,
@@ -14,12 +18,6 @@ import {
   type StyleProfile,
   type Tone,
 } from "../src/shared/aiConfig";
-
-// A review result is JSON with up to MAX_REVIEW_FINDINGS entries, so it needs more room than a text draft
-const MAX_HISTORY_RESULT_CHARS = 20000;
-
-const ADDRESSING_VALUES: Addressing[] = ["", "formal", "informal"];
-const TONE_VALUES: Tone[] = ["", "legal", "business", "plain", "friendly"];
 
 type ParseResult = { value: AIRequestBody } | { error: string };
 
@@ -30,7 +28,7 @@ export function parseRequest(body: unknown): ParseResult {
   const raw = (body ?? {}) as Record<string, unknown>;
 
   const mode = raw.mode as Mode;
-  if (!MODES.includes(mode)) {
+  if (!(MODES as readonly unknown[]).includes(mode)) {
     return { error: "Invalid mode" };
   }
 
@@ -42,44 +40,49 @@ export function parseRequest(body: unknown): ParseResult {
     return { error: `Instruction is longer than ${MAX_INSTRUCTION_CHARS} characters` };
   }
 
-  const originalText = asString(raw.originalText).substring(0, MAX_SELECTION_CHARS);
+  // Word separates paragraphs with \r; the model reads \n as a line break
+  const originalText = toLineFeeds(asString(raw.originalText)).substring(0, MAX_SELECTION_CHARS);
   if ((mode === "edit" || mode === "comment") && !originalText.trim()) {
     return { error: "Missing originalText" };
   }
 
-  const documentContext = asString(raw.documentContext).substring(0, contextLimitFor(mode));
+  const documentContext = toLineFeeds(asString(raw.documentContext)).substring(0, contextLimitFor(mode));
   if (mode === "review" && !documentContext.trim()) {
     return { error: "Missing documentContext" };
   }
 
-  const history: HistoryTurn[] = (Array.isArray(raw.history) ? raw.history : [])
-    .slice(-MAX_HISTORY_TURNS)
-    .map((turn) => ({
-      instruction: asString(turn?.instruction).substring(0, MAX_INSTRUCTION_CHARS),
-      result: asString(turn?.result).substring(0, MAX_HISTORY_RESULT_CHARS),
-    }))
-    .filter((turn) => turn.instruction && turn.result);
+  const history: HistoryTurn[] = trimHistory(
+    (Array.isArray(raw.history) ? raw.history : [])
+      .map((turn) => ({
+        instruction: asString(turn?.instruction).substring(0, MAX_INSTRUCTION_CHARS),
+        result: toLineFeeds(asString(turn?.result)).substring(0, MAX_HISTORY_RESULT_CHARS),
+      }))
+      .filter((turn) => turn.instruction && turn.result)
+  );
 
   const rawStyle = (raw.styleProfile ?? {}) as Record<string, unknown>;
   const styleProfile: StyleProfile = {
-    addressing: ADDRESSING_VALUES.includes(rawStyle.addressing as Addressing) ? (rawStyle.addressing as Addressing) : "",
-    tone: TONE_VALUES.includes(rawStyle.tone as Tone) ? (rawStyle.tone as Tone) : "",
+    addressing: (ADDRESSING_VALUES as readonly unknown[]).includes(rawStyle.addressing) ? (rawStyle.addressing as Addressing) : "",
+    tone: (TONE_VALUES as readonly unknown[]).includes(rawStyle.tone) ? (rawStyle.tone as Tone) : "",
     notes: asString(rawStyle.notes).trim().substring(0, MAX_STYLE_NOTES_CHARS),
   };
 
   return { value: { mode, instruction, originalText, documentContext, history, styleProfile } };
 }
 
-const REVIEW_SCHEMA: Schema = {
-  type: Type.ARRAY,
+// Standard JSON Schema, so any provider that supports structured output can use it
+const REVIEW_SCHEMA = {
+  type: "array",
+  maxItems: MAX_REVIEW_FINDINGS,
   items: {
-    type: Type.OBJECT,
+    type: "object",
     properties: {
-      quote: { type: Type.STRING, description: "Exact, verbatim excerpt copied character-for-character from the document (5-15 words, at most 150 characters) that pinpoints where the comment belongs." },
-      comment: { type: Type.STRING, description: "Concise comment for the margin, written in the language of the user's instruction." },
-      severity: { type: Type.STRING, enum: ["high", "medium", "low"] },
+      quote: { type: "string", description: "Exact, verbatim excerpt copied character-for-character from the document (5-15 words, at most 150 characters) that pinpoints where the comment belongs." },
+      comment: { type: "string", description: "Concise comment for the margin, written in the language of the user's instruction." },
+      severity: { type: "string", enum: [...SEVERITY_VALUES] },
     },
     required: ["quote", "comment", "severity"],
+    // Gemini extension: generate the quote first, so the comment is written with the exact spot in mind
     propertyOrdering: ["quote", "comment", "severity"],
   },
 };
@@ -109,7 +112,7 @@ export interface BuiltPrompt {
   systemInstruction: string;
   prompt: string;
   /** Set when the model must answer with JSON matching this schema */
-  responseSchema?: Schema;
+  responseJsonSchema?: object;
 }
 
 export function buildPrompt(request: AIRequestBody): BuiltPrompt {
@@ -159,7 +162,7 @@ RULES:
 - "comment" is a concise, actionable margin note written in the language of the user's instruction.
 - If nothing relevant is found, return an empty array.${style}`,
       prompt: `DOCUMENT TO REVIEW:\n${documentContext}\n\n${historyBlock(history)}${instructionBlock}`,
-      responseSchema: REVIEW_SCHEMA,
+      responseJsonSchema: REVIEW_SCHEMA,
     };
   }
 

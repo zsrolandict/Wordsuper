@@ -92,6 +92,19 @@ export async function releaseRange(range: Word.Range | null) {
   }
 }
 
+/**
+ * Releases a tracked range once its change is in the document. A failure here must not look like a failed
+ * change, otherwise a retry would apply it twice.
+ */
+async function untrack(context: Word.RequestContext, range: Word.Range) {
+  try {
+    context.trackedObjects.remove(range);
+    await context.sync();
+  } catch {
+    // The change already landed; the range is released when the session ends
+  }
+}
+
 /** Runs a change with Track Changes on, then restores the user's own setting */
 async function withTrackChanges(context: Word.RequestContext, queueChanges: () => void) {
   const doc = context.document;
@@ -185,8 +198,7 @@ export async function applyEdit(range: Word.Range, newText: string): Promise<Edi
 
     if (plan) {
       if (plan.length === 0) {
-        context.trackedObjects.remove(range);
-        await context.sync();
+        await untrack(context, range);
         return { strategy: 'unchanged', changedPlaces: 0 };
       }
       await withTrackChanges(context, () => {
@@ -196,16 +208,14 @@ export async function applyEdit(range: Word.Range, newText: string): Promise<Edi
           for (const hunk of [...edit.hunks].reverse()) applyHunk(words, hunk);
         }
       });
-      context.trackedObjects.remove(range);
-      await context.sync();
+      await untrack(context, range);
       return { strategy: 'words', changedPlaces: plan.reduce((sum, edit) => sum + edit.hunks.length, 0) };
     }
 
     await withTrackChanges(context, () => {
       range.insertText(newText, 'Replace');
     });
-    context.trackedObjects.remove(range);
-    await context.sync();
+    await untrack(context, range);
     return { strategy: 'replace', changedPlaces: 1 };
   });
 }
@@ -214,16 +224,16 @@ export async function applyEdit(range: Word.Range, newText: string): Promise<Edi
 export async function insertGenerated(range: Word.Range, text: string) {
   await Word.run(range, async (context) => {
     range.insertText(text, 'Replace');
-    context.trackedObjects.remove(range);
     await context.sync();
+    await untrack(context, range);
   });
 }
 
 export async function insertCommentAt(range: Word.Range, text: string) {
   await Word.run(range, async (context) => {
     range.insertComment(text);
-    context.trackedObjects.remove(range);
     await context.sync();
+    await untrack(context, range);
   });
 }
 
@@ -249,7 +259,9 @@ export async function insertReviewComments(findings: ReviewFinding[]): Promise<R
     const notFound: ReviewFinding[] = [];
     let inserted = 0;
     findings.forEach((finding, i) => {
-      const hit = searches[i].find(results => results.items.length > 0);
+      // The full quote is exact, so its first match is right. A shorter prefix is only trusted when it occurs
+      // exactly once: otherwise the comment could land on an unrelated, earlier sentence.
+      const hit = searches[i].find((results, k) => (k === 0 ? results.items.length > 0 : results.items.length === 1));
       if (hit) {
         hit.items[0].insertComment(finding.comment);
         inserted++;
@@ -262,19 +274,22 @@ export async function insertReviewComments(findings: ReviewFinding[]): Promise<R
   });
 }
 
-export interface DocumentStats {
-  documentChars: number;
-  selectionChars: number;
-}
-
-export async function readDocumentStats(): Promise<DocumentStats> {
+export async function readSelectionLength(): Promise<number> {
   return Word.run(async (context) => {
     const selection = context.document.getSelection();
-    const body = context.document.body;
     selection.load('text');
+    await context.sync();
+    return (selection.text || '').length;
+  });
+}
+
+/** Reads the whole body over the Office bridge, so callers should do it sparingly */
+export async function readDocumentLength(): Promise<number> {
+  return Word.run(async (context) => {
+    const body = context.document.body;
     body.load('text');
     await context.sync();
-    return { documentChars: (body.text || '').length, selectionChars: (selection.text || '').length };
+    return (body.text || '').length;
   });
 }
 

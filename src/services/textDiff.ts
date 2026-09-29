@@ -1,3 +1,5 @@
+import { toLineFeeds } from '../shared/aiConfig';
+
 /** A run of changed tokens: old[oldStart, oldEnd) is replaced by newTokens (either side may be empty) */
 export interface DiffHunk {
   oldStart: number;
@@ -68,11 +70,14 @@ export function diffTokens(oldTokens: string[], newTokens: string[]): DiffHunk[]
 /** Word separates paragraphs with \r, the AI with \n */
 export const splitParagraphs = (text: string) => text.split(/\r\n|\r|\n/);
 
-/** Mirrors Word's getTextRanges([' '], true): split on spaces, trim spacing from both ends of each word */
-export const tokenizeLikeWord = (text: string) => text.split(' ').map(t => t.trim()).filter(Boolean);
+// What getTextRanges(..., trimSpacing: true) trims: spaces, tabs, paragraph and line marks – not non-breaking spaces
+const WORD_SPACING = /^[ \t\r\n\v\f]+|[ \t\r\n\v\f]+$/g;
 
-/** Words of the AI's answer; any whitespace separates them */
-export const tokenizeWords = (text: string) => text.split(/\s+/).filter(Boolean);
+/**
+ * Mirrors Word's getTextRanges([' '], true): split on spaces only, trim spacing from both ends of each word.
+ * Used for both the document and the AI's answer, so an unchanged tab or non-breaking space is never a "change".
+ */
+export const tokenizeLikeWord = (text: string) => text.split(' ').map(t => t.replace(WORD_SPACING, '')).filter(Boolean);
 
 export interface ParagraphEdit {
   /** Index among the given paragraphs */
@@ -86,7 +91,7 @@ export interface ParagraphEdit {
  */
 export function planParagraphEdits(oldParagraphTokens: string[][], newText: string): ParagraphEdit[] | null {
   const oldIndexes = oldParagraphTokens.map((tokens, index) => ({ tokens, index })).filter(p => p.tokens.length > 0);
-  const newParagraphs = splitParagraphs(newText).map(tokenizeWords).filter(tokens => tokens.length > 0);
+  const newParagraphs = splitParagraphs(newText).map(tokenizeLikeWord).filter(tokens => tokens.length > 0);
   if (oldIndexes.length !== newParagraphs.length) return null;
 
   const edits: ParagraphEdit[] = [];
@@ -101,7 +106,7 @@ export type DisplaySegment = { type: 'equal' | 'removed' | 'added'; tokens: stri
 
 /** Word-level diff for showing a proposal: tokens are words and line breaks */
 export function diffForDisplay(oldText: string, newText: string): DisplaySegment[] | null {
-  const tokenize = (text: string) => text.replace(/\r\n?/g, '\n').match(/\n+|[^\s]+/g) ?? [];
+  const tokenize = (text: string) => toLineFeeds(text).match(/\n+|[^\s]+/g) ?? [];
   const oldTokens = tokenize(oldText);
   const newTokens = tokenize(newText);
   if ((oldTokens.length + 1) * (newTokens.length + 1) > MAX_LCS_CELLS) return null;
