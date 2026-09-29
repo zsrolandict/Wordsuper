@@ -40,7 +40,8 @@ export function createGeminiProvider(config: GeminiConfig): ModelProvider {
   return {
     model: config.model,
     location: config.vertexProject ? `Vertex AI (${config.vertexLocation})` : "Gemini API",
-    euResident: !!config.vertexProject && /^europe-/.test(config.vertexLocation ?? ""),
+    // europe-* regions and the "eu" jurisdictional multi-region keep ML processing in the EU
+    euResident: !!config.vertexProject && /^(europe-|eu$)/.test(config.vertexLocation ?? ""),
 
     async generate({ systemInstruction, prompt, responseJsonSchema, signal }, onEvent) {
       const stream = await ai.models.generateContentStream({

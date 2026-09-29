@@ -64,11 +64,18 @@ Szerver (Node.js + Express)
 - Ha a felhasználó begépeli egy gyorsgomb szövegét, a rendszer felismeri, és a beszélgetésben „⚡ Saját gyorsgomb” címke jelzi. A más módhoz mentett saját gyorsgomb a saját módjában fut.
 
 **Diktálás (mikrofon):**
-- Az utasítás mező mellett mikrofon gomb van: a felhasználó elmondja, mit szeretne, a felvételt az AI (ugyanaz a Gemini / Vertex szolgáltató) szöveggé írja, és az utasítás mezőbe teszi.
+- Az utasítás mező mellett mikrofon gomb van: a felhasználó elmondja, mit szeretne, a felvétel szöveggé alakul, és az utasítás mezőbe kerül.
+- **Alapértelmezés: helyi felismerés.** Whisper modell fut a munkaablak háttérszálán (Transformers.js, WebGPU vagy WebAssembly); a hangfelvétel nem hagyja el a gépet.
+  - Első használatkor egyszer letölti a modellt (base kb. 80 MB, small kb. 250 MB).
+  - Az ONNX-futtatót a saját szerverünk adja, nem CDN.
+- **Felhős átírás:** csak a Beállításokban választható. A szerver csak akkor fogadja, ha Vertex AI-t használ EU-régióban (`europe-*` vagy `eu`); a Gemini API kulcsos módban elutasítja.
+- Döntés: felvétel utáni (kötegelt) átírás, élő felirat nincs. Hangos módváltás sincs.
 - A szöveget elküldés előtt még át lehet javítani.
 - Egy felvétel legfeljebb kb. 2 perc. Felvétel közben futó óra és leállítás gomb látszik.
 - Word Online-ban az első használatkor az Office engedélyt kér a mikrofonhoz, utána a bővítmény egyszer újratöltődik.
-- **Korlát:** a hangfelvételt nem lehet maszkolni; a diktált szöveg viszont a küldéskor már maszkolva megy tovább.
+- A diktált szöveg a küldéskor ugyanúgy maszkolódik, mint a begépelt.
+
+**Szándékfelismerés:** ha Szerkesztés vagy Vélemény módban az egész dokumentum átnézését kérik (pl. „nézd át, van-e benne ellentmondás”), egy kis gomb felajánlja az Átvizsgálást. Magától sosem vált módot.
 
 **Hangjelzés:** halk, kéthangú csengés, ha elkészült a válasz, és egy mélyebb hang hiba esetén, így közben nyugodtan lehet a dokumentumban dolgozni. A Beállításokban ki- és bekapcsolható, és ki is próbálható.
 
@@ -79,6 +86,11 @@ Szerver (Node.js + Express)
 - **Definíciók felismerése:** „(a továbbiakban: Megbízó)” és „„Szerződés”: jelenti…” formában.
 - **Kereszthivatkozások:** például „5.2. pont”, „3. számú melléklet”. A pontcímkéket a Word automatikus számozásából építi fel, szintenként.
 - **Kurzor alatti súgó:** egy fogalomra vagy hivatkozásra kattintva megjelenik a definíció, illetve a hivatkozott pont szövege, görgetés nélkül. Van „Ugrás” és „Vissza oda, ahol voltál” gomb.
+- **Javaslat gomb** minden javítható problémánál: a rendszer kijelöli a bekezdést, és a Szerkesztés módtól korrektúrás javítást kér.
+  - Hibás hivatkozásnál a dokumentum létező pontjainak listájával.
+  - Nem használt vagy kétszer definiált fogalomnál a definíció rendezésével.
+  - Idézőjeles, de nem definiált kifejezésnél **Definiálás** gomb.
+- **Fogalommeghatározások fejezet készítése:** a meglévő definíciókból betűrendes fejezetet generál, és beszúrja a bevezető végére, az első számozott pont elé.
 - **Problémalista:**
   - hibás hivatkozás (nem létező pont);
   - duplikált definíció;
@@ -132,6 +144,15 @@ Szerver (Node.js + Express)
 
 Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A korlátjelző sáv élőben mutatja, mekkora a dokumentum és a kijelölés, és figyelmeztet, ha valami nem fér bele.
 
+## 5/B. Auditnapló
+
+- Minden AI-műveletről egy JSON-sor készül, **tartalom nélkül**:
+  - időpont, felhasználói azonosító (Beállítások), IP;
+  - művelet, méretek, maszkolás be/ki és a kitakart elemek száma;
+  - modell, hely, státusz, időtartam, tokenszám.
+- A napló a szerver naplójába (Cloud Logging) kerül, és ha be van állítva, fájlba is (`AUDIT_LOG_FILE`).
+- Az adatvédelmi részletek külön dokumentumban vannak: [ADATVEDELMI-TAJEKOZTATO.md](ADATVEDELMI-TAJEKOZTATO.md).
+
 ## 6. Ismert korlátok, kockázatok
 
 - **Jogszabály-ellenőrzés:** a modell tudása nem élő jogszabálytár. A hatályosságot és a friss módosításokat nem tudja biztosan. Ezért a prompt kifejezetten kéri, hogy a bizonytalant jelezze, és a njt.hu-t ajánlja.
@@ -140,11 +161,11 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 - **Táblázatok, élőfejek, lábjegyzetek:** a bekezdés-illesztés a törzsszöveg bekezdéseivel dolgozik. Táblázatcellán belüli új bekezdésnél a formázás eltérhet.
 - **Asztali Word telepítése** (sideload) nehézkes volt. Word Online-ban a „Saját bővítmény feltöltése” működik. Egykattintásos helyi indító (HTTPS localhost) készül.
 
-## 7. Folyamatban / tervezett
+## 7. Kész az indításhoz
 
-- **Szerkezet fül javaslatai:** hibánként „Javaslat” gomb (az AI a hibás hivatkozásra vagy definícióra ad korrektúrás javítást), „Definíció létrehozása”, „Fogalommeghatározások fejezet készítése”.
-- **Arculat:** az ICT Europa Legal logó a fejlécben (most még a mintája alapján rajzolt változat; az eredeti fájlból kerül be végleg, a Word szalag ikonjával együtt).
-- **Egykattintásos helyi indító** Windowsra (`INDITAS.bat`: tanúsítvány, szerver, Word megnyitása a bővítménnyel).
+- **Egykattintásos helyi indító Windowsra:** `INDITAS.bat`. Első indításkor telepíti a függőségeket, létrehozza a `.env`-et, és telepíti a HTTPS-tanúsítványt. Minden indításkor elindítja a szervert a `https://localhost:3443` címen, és megnyitja a Wordöt a bővítménnyel.
+- **Arculat:** ICT Europa Legal logó a fejlécben (a végleges logófájl még hiányzik).
+- **Következő fázis (II.):** Microsoft-fiókos belépés (ellenőrzött felhasználó az auditnaplóban), költségkövetés ügyfélcímkénként.
 
 ## 8. Kérdések, amiket érdemes megbeszélni
 
@@ -152,5 +173,4 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 2. Maszkolás: elég-e a szabályalapú felismerés, vagy kell helyi névfelismerő modell? Melyik adatkategóriák hiányoznak még (pl. rendszám, személyi igazolvány szám formátumai, cégek rövid nevei)?
 3. Átvizsgálás: hány észrevétel a hasznos? Kell-e súlyosság szerinti szűrés, vagy kategóriák (jogi / pénzügyi / nyelvi)?
 4. Ügyféltörténet, sablontár, saját záradékkönyvtár: melyik hozna a legtöbbet egy tanácsadónak?
-5. Diktálás: elég-e a felvétel utáni átírás, vagy kell élő (valós idejű) felirat? Kell-e hangutasítás a módváltáshoz (pl. „átvizsgálás: kockázatok”)?
-6. Üzemeltetés: Vertex AI EU (adatrezidencia) vagy Gemini API (egyszerűbb)? Kell-e naplózás vagy auditnyom?
+5. Üzemeltetés: Vertex AI EU (adatrezidencia) vagy Gemini API (egyszerűbb)? Kell-e naplózás vagy auditnyom?
