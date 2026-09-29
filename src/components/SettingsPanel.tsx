@@ -196,6 +196,7 @@ export default function SettingsPanel({
               >
                 {Object.entries(LOCAL_MODELS).map(([key, model]) => <option key={key} value={key}>{model.label}</option>)}
               </select>
+              <span className="block text-[10px] text-neutral-400 font-normal mt-1">Váltás után az első diktáláskor egyszer letöltöm az új modellt. Tipp: a Windows saját diktálása (Windows+H a szövegmezőben) magyarul nagyon jó, de a hang ekkor a Microsofthoz megy.</span>
             </label>
           )}
         </Card>

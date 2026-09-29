@@ -1,9 +1,13 @@
 import type { WorkerRequest, WorkerResponse } from '../workers/whisper.worker';
 
-/** Whisper sizes offered in the settings: base is quick, small understands Hungarian better */
+/**
+ * Whisper sizes offered in the settings. Hungarian needs a bigger model: base is quick but often wrong,
+ * large-v3-turbo is far better but a big download and wants a graphics card (WebGPU).
+ */
 export const LOCAL_MODELS = {
-  base: { id: 'onnx-community/whisper-base', label: 'Gyors (base, kb. 80 MB)' },
+  base: { id: 'onnx-community/whisper-base', label: 'Gyors (base, kb. 80 MB) – magyarul gyenge' },
   small: { id: 'onnx-community/whisper-small', label: 'Pontosabb (small, kb. 250 MB)' },
+  large: { id: 'onnx-community/whisper-large-v3-turbo', label: 'Legpontosabb (large-v3-turbo, kb. 1 GB, erős gépre)' },
 } as const;
 export type LocalModel = keyof typeof LOCAL_MODELS;
 

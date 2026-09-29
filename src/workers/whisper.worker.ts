@@ -38,9 +38,11 @@ async function load(model: string, id: number) {
   // WebGPU when the machine has it (much faster), WebAssembly otherwise
   const hasWebGpu = 'gpu' in navigator && !!(await (navigator as Navigator & { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
   const device = hasWebGpu ? 'webgpu' : 'wasm';
+  // The large model's encoder is too big in full precision: half precision on the GPU, 8-bit on the CPU
+  const large = model.includes('large');
   const run = (await pipeline('automatic-speech-recognition', model, {
     device,
-    dtype: hasWebGpu ? { encoder_model: 'fp32', decoder_model_merged: 'q4' } : 'q8',
+    dtype: hasWebGpu ? { encoder_model: large ? 'fp16' : 'fp32', decoder_model_merged: 'q4' } : 'q8',
     progress_callback: onProgress,
   })) as AutomaticSpeechRecognitionPipeline;
   loaded = { model, device, run };

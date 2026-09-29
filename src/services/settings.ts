@@ -36,7 +36,8 @@ export const DEFAULT_SETTINGS: Settings = {
   autoApply: false,
   masking: { enabled: true, extraTerms: '' },
   sound: true,
-  dictation: { engine: 'local', localModel: 'base' },
+  // base misunderstands Hungarian too often to be the default
+  dictation: { engine: 'local', localModel: 'small' },
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -65,7 +66,7 @@ function sanitize(raw: unknown): Settings {
     sound: value.sound !== false,
     dictation: {
       engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
-      localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'base',
+      localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'small',
     },
   };
 }
