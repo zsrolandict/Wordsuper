@@ -9,11 +9,8 @@ export default function App() {
     // Determine if we are running inside a Microsoft Office host (Word)
     // The office.js script provides the global `Office` object.
     
-    // @ts-ignore
     if (typeof Office !== 'undefined' && Office.onReady) {
-      // @ts-ignore
       Office.onReady((info) => {
-        // @ts-ignore
         if (info.host === Office.HostType.Word) {
           setIsOfficeHost(true);
         } else {

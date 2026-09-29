@@ -41,20 +41,20 @@ export default function TaskPane() {
     setMessages(prev => [...prev, { id: newMessageId, role: 'user', content: `[${modeLabel}] ${userInstruction}` }]);
 
     try {
-      // @ts-ignore
       if (typeof Word === 'undefined') {
         setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' }]);
         setIsSending(false);
         return;
       }
 
-      // @ts-ignore
       await Word.run(async (context) => {
-        const selection = context.document.getSelection();
-        const body = context.document.body;
-        
+        const doc = context.document;
+        const selection = doc.getSelection();
+        const body = doc.body;
+
         selection.load("text");
         body.load("text");
+        doc.load("changeTrackingMode");
         await context.sync();
 
         if (mode !== 'generate' && (!selection.text || selection.text.trim() === '')) {
@@ -70,49 +70,69 @@ export default function TaskPane() {
         const loadingId = Date.now().toString() + 'load';
         setMessages(prev => [...prev, { id: loadingId, role: 'assistant', content: '', isLoading: true }]);
 
+        const replaceLoadingMessage = (role: Message['role'], content: string) => {
+          setMessages(prev => prev.map(m =>
+            m.id === loadingId
+              ? { id: loadingId, role, content }
+              : m
+          ));
+        };
+
         // Hívjuk meg a saját backendünket a szolgáltatáson keresztül streaminggel
-        const newText = await editDocumentTextStream(
-          originalText, 
-          userInstruction, 
-          documentContext, 
-          mode, 
-          (chunk) => {
-            // Frissítsük az UI-t folyamatosan, ahogy jönnek a szavak
-            setMessages(prev => prev.map(m => 
-              m.id === loadingId 
-                ? { ...m, content: m.content + chunk, isLoading: false } 
-                : m
-            ));
-          }
-        );
+        let newText: string;
+        try {
+          newText = await editDocumentTextStream(
+            originalText,
+            userInstruction,
+            documentContext,
+            mode,
+            (chunk) => {
+              // Frissítsük az UI-t folyamatosan, ahogy jönnek a szavak
+              setMessages(prev => prev.map(m =>
+                m.id === loadingId
+                  ? { ...m, content: m.content + chunk, isLoading: false }
+                  : m
+              ));
+            }
+          );
+        } catch (aiError) {
+          // Hibás vagy félbeszakadt válasz esetén a dokumentumhoz nem nyúlunk
+          const detail = aiError instanceof Error ? aiError.message : '';
+          replaceLoadingMessage('system', `Nem sikerült választ kapni az AI-tól, a dokumentumot nem módosítottam. Kérlek próbáld újra.${detail ? `\n(${detail})` : ''}`);
+          return;
+        }
+
+        if (!newText.trim()) {
+          replaceLoadingMessage('system', 'Az AI üres választ adott, ezért nem módosítottam a dokumentumot. Kérlek próbáld újra.');
+          return;
+        }
 
         try {
           if (mode === 'comment') {
             // Széljegyzet (Word Comment) beszúrása
             selection.insertComment(newText);
+            await context.sync();
           } else if (mode === 'generate') {
             // Beszúrás a kurzorhoz (ha van kijelölés, akkor cseréli azt, ha nincs, beszúrja)
             selection.insertText(newText, "Replace");
+            await context.sync();
           } else {
-            // Szerkesztés korrektúrával (Track Changes)
-            context.document.changeTrackingMode = "TrackAll"; 
-            selection.insertText(newText, "Replace"); 
+            // Szerkesztés korrektúrával (Track Changes), utána visszaállítjuk a felhasználó eredeti beállítását
+            const previousTrackingMode = doc.changeTrackingMode;
+            doc.changeTrackingMode = "TrackAll";
+            try {
+              selection.insertText(newText, "Replace");
+              await context.sync();
+            } finally {
+              doc.changeTrackingMode = previousTrackingMode;
+              await context.sync();
+            }
           }
-          
-          await context.sync();
 
-          setMessages(prev => prev.map(m => 
-            m.id === loadingId 
-              ? { id: loadingId, role: 'assistant', content: mode === 'comment' ? '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).' : mode === 'generate' ? '✅ A szöveget beszúrtam a dokumentumba!' : '✅ A szöveget kicseréltem! Ellenőrizd a korrektúrát a dokumentumban.' } 
-              : m
-          ));
+          replaceLoadingMessage('assistant', mode === 'comment' ? '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).' : mode === 'generate' ? '✅ A szöveget beszúrtam a dokumentumba!' : '✅ A szöveget kicseréltem! Ellenőrizd a korrektúrát a dokumentumban.');
         } catch (writeError) {
           console.error("Write error in Word:", writeError);
-          setMessages(prev => prev.map(m => 
-            m.id === loadingId 
-              ? { id: loadingId, role: 'system', content: 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál?' } 
-              : m
-          ));
+          replaceLoadingMessage('system', 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál?');
         }
       });
 

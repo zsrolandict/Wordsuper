@@ -3,12 +3,9 @@ import {createRoot} from 'react-dom/client';
 import App from './App.tsx';
 import './index.css';
 
-// Várjuk meg az Office API inicializálását mielőtt a React fát renderelnénk
-// @ts-ignore
-Office.onReady(() => {
-  createRoot(document.getElementById('root')!).render(
-    <StrictMode>
-      <App />
-    </StrictMode>,
-  );
-});
+// Az Office API inicializálását (Office.onReady) az App kezeli, így akkor is renderelünk, ha az office.js nem töltött be
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);

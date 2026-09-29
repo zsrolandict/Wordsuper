@@ -1,5 +1,5 @@
 {
-  "name": "react-example",
+  "name": "word-writer-add-in",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -20,7 +20,6 @@
     "express-rate-limit": "^8.7.0",
     "lucide-react": "^0.546.0",
     "motion": "^12.23.24",
-    "openai": "^7.13.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
     "vite": "^6.2.3"
@@ -33,7 +32,6 @@
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
+    "typescript": "~5.8.2"
   }
 }
