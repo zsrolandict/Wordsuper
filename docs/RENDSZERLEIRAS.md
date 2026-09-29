@@ -1,0 +1,148 @@
+# Word Writer – rendszerleírás
+
+*Állapot: 2026. szeptember, `phase-1` ág. A dokumentum egy másik AI-val (pl. Gemini) vagy fejlesztővel való egyeztetéshez készült: mit tud a rendszer, hogyan működik, hol vannak a korlátai, és mik a nyitott kérdések.*
+
+## 1. Mi ez és kinek szól
+
+A Word Writer egy **Microsoft Word bővítmény** (Office Add-in). Jogi és üzleti tanácsadóknak, ügyvédeknek készült, akik szerződéseken és hosszú dokumentumokon dolgoznak. A Word jobb oldalán egy munkaablakban fut. Minden változtatást **korrektúrával** (Track Changes) tesz a dokumentumba, a véleményét **Word-megjegyzésként**. Mielőtt bármi bekerül, a felhasználó látja a javaslatot, és ő dönt.
+
+Alapelvek:
+- **Az ember dönt.** Előnézet, szó szintű különbség, elfogadás, másik változat vagy elvetés, finomítás párbeszédben.
+- **Átláthatóság.** Minden válasznál lenyitható a „Részletek”: mit kapott az AI, mit nem látott, mit rejtettünk el előle, és hogyan gondolkodott.
+- **A formázás védelme.** Csak a ténylegesen megváltozott szavakhoz nyúl; a többi szöveg formázása érintetlen marad.
+- **Adatvédelem.** A neveket és azonosítókat még a gépen helyettesítőkre cseréljük, mielőtt bármi az AI-hoz kerülne.
+
+## 2. Felépítés
+
+```
+Word (asztali / Word Online)
+ └─ Munkaablak (React + TypeScript, Office.js / WordApi 1.4)
+      ├─ Word-réteg: olvasás, korrektúrás írás, megjegyzések, keresés
+      ├─ Tiszta logika: szódiff, bekezdés-illesztés, szerkezeti elemző, maszkolás, összevetés
+      └─ HTTPS → saját szerver
+Szerver (Node.js + Express)
+ ├─ Hozzáférési kulcs (X-Access-Key), percenkénti kéréskorlát (20/perc/IP)
+ ├─ Prompt-építés módonként, JSON-séma a strukturált válaszokhoz
+ ├─ Folyamatos válasz (SSE): szöveg, gondolkodás-összefoglaló, modell és feldolgozási hely
+ └─ AI-szolgáltató réteg: Gemini API vagy Vertex AI (EU régió választható)
+```
+
+- **Modell:** alapértelmezés szerint `gemini-3.8-flash` (az `AI_MODEL` változóval állítható).
+- **Szolgáltató:** `AI_PROVIDER=gemini` (API-kulccsal) vagy `vertex` (Google Cloud projekt, pl. `europe-west1`). Utóbbinál a dokumentum az EU-ban kerül feldolgozásra.
+- **Hibakezelés:** a félbeszakadt vagy csonka válasz (a modell nem jelez rendes befejezést) hibának számít. Ilyenkor a dokumentumhoz nem nyúlunk.
+- **Megszakítás:** a felhasználó bármikor leállíthatja a kérést; a szerver ekkor az AI-hívást is megszakítja.
+
+## 3. Nézetek és módok
+
+### 3.1 Asszisztens fül – négy mód
+
+| Mód | Mit csinál | Kijelöléssel | Kijelölés nélkül |
+|---|---|---|---|
+| 📝 **Szerkesztés** | Átírja a szöveget az utasítás szerint | A kijelölt részt | Az **egész dokumentumot** (legfeljebb 50 000 karakter) |
+| 💬 **Vélemény** | Rövid elemzés Word-megjegyzésként | A kijelölésről, oda | Az egész dokumentumról, a kurzor bekezdéséhez |
+| ✨ **Generálás** | Új szöveg (záradék, aláírósor…) | A kijelölés helyére | A kurzor helyére |
+| 🔍 **Átvizsgálás** | A teljes dokumentum átnézése, észrevétel-lista | – | Mindig a teljes dokumentum (400 000 karakterig) |
+
+**Szerkesztés részletei:**
+- Az AI a javított szöveg után röviden megindokolja a változtatást („Miért?”). Egy jelölőnégyzettel ez **magyarázó megjegyzésként** a módosítás mellé tehető. Alapból ki van kapcsolva; ha az utasításban szerepel pl. „megjegyzés” vagy „indokold”, magától bejelölődik.
+- Az előnézet szó szintű különbséget mutat (piros áthúzás / zöld beszúrás).
+- Beíráskor csak a megváltozott szavak cserélődnek, korrektúrával.
+- Egész dokumentumnál bekezdés-illesztés fut. A változatlan bekezdésekhez nem nyúl; az újakat (pl. aláírósor a végén) beszúrja, az elhagyottakat törli, a módosultakban csak a szavakat cseréli.
+- Mielőtt beírja, ellenőrzi, hogy a dokumentum nem változott-e a kérés óta.
+- Ha a kijelölésben még el nem fogadott korábbi korrektúra van, az AI a korrektúrák elfogadása utáni tiszta szöveget kapja. Ilyenkor beíráskor az egész kijelölés cserélődik (korrektúrával).
+
+**Átvizsgálás részletei:**
+- Az AI JSON-listát ad vissza, legfeljebb 15 észrevétellel. Mindegyikben van szó szerinti idézet, megjegyzés, súlyosság (magas / közepes / alacsony), és ha szövegcserével javítható, **javasolt szöveg** is.
+- A felhasználó észrevételenként dönt: **Megjegyzés**, **Javítás korrektúrával**, vagy mindkettő.
+- A javítás csak akkor kerül a szövegbe, ha az idézet szó szerint megtalálható. Ha nem, a javasolt szöveg a megjegyzésbe kerül, hogy ne vesszen el.
+- Az átvizsgálás a Word **automatikus számozását** is látja, szögletes zárójelben (`[5.2.] …`), így a pontszámozást és a kereszthivatkozásokat is ellenőrizni tudja.
+
+**Gyorsgombok:**
+- Beépített gyorsgombok minden módhoz. Átvizsgálásnál például: Kockázatok és hiányosságok, Ellentmondások keresése, **Jogszabályi hivatkozások**, **Kereszthivatkozások és számozás**, Helyesírás és stílus.
+- A két új gomb egy-egy részletes utasítást küld. A jogszabályinál: létezik-e a hely, jó helyre mutat-e, oda illik-e, hatályos-e; bizonytalanság esetén jelezze, hogy a njt.hu-n ellenőrizni kell.
+- Saját gyorsgombok módhoz rendelve.
+- Ha a felhasználó begépeli egy gyorsgomb szövegét, a rendszer felismeri, és a beszélgetésben „⚡ Saját gyorsgomb” címke jelzi. A más módhoz mentett saját gyorsgomb a saját módjában fut.
+
+**Finomítás:** amíg egy javaslat döntésre vár, az új utasítás azt módosítja („legyen rövidebb”). Az AI az első és a legutóbbi köröket látja, legfeljebb 5-öt.
+
+### 3.2 Szerkezet fül (AI nélkül, azonnal)
+
+- **Definíciók felismerése:** „(a továbbiakban: Megbízó)” és „„Szerződés”: jelenti…” formában.
+- **Kereszthivatkozások:** például „5.2. pont”, „3. számú melléklet”. A pontcímkéket a Word automatikus számozásából építi fel, szintenként.
+- **Kurzor alatti súgó:** egy fogalomra vagy hivatkozásra kattintva megjelenik a definíció, illetve a hivatkozott pont szövege, görgetés nélkül. Van „Ugrás” és „Vissza oda, ahol voltál” gomb.
+- **Problémalista:**
+  - hibás hivatkozás (nem létező pont);
+  - duplikált definíció;
+  - definiált, de nem használt fogalom;
+  - idézőjeles, de nem definiált kifejezés (csak ha többször is előfordul);
+  - hiányzó melléklet (csak jelzés, mert lehet külön fájl).
+
+### 3.3 Összevetés fül
+
+- A felhasználó feltölti a korábbi változatot (.docx). A rendszer bekezdés szinten összeveti a megnyitott dokumentummal, és jelöli, mi módosult, mi új és mi törölt.
+- Az AI változásonként kockázati értékelést és javaslatot ad.
+- Ezek megjegyzésként beszúrhatók a megváltozott bekezdésekhez.
+
+## 4. Adatvédelem – maszkolás
+
+- **Alapból bekapcsolva** (Beállítások → Adatvédelem).
+- Minden kérés előtt, még a gépen, szabályalapú felismeréssel helyettesítőre cseréli ezeket:
+
+  | Kategória | Helyettesítő |
+  |---|---|
+  | cégnevek (Kft., Zrt., Bt., GmbH…) | `[CÉG_n]` |
+  | személynevek („képviseli:”, „ügyvezető”, „Eladó:” után) | `[SZEMÉLY_n]` |
+  | e-mail-címek | `[EMAIL_n]` |
+  | telefonszámok | `[TELEFON_n]` |
+  | bankszámlaszámok (IBAN is) | `[SZÁMLA_n]` |
+  | adószámok, adóazonosító jelek | `[ADÓSZÁM_n]` |
+  | cégjegyzékszámok | `[CÉGJEGYZÉK_n]` |
+  | címek | `[CÍM_n]` |
+  | helyrajzi számok | `[HRSZ_n]` |
+  | TAJ, személyi igazolvány | `[AZONOSÍTÓ_n]` |
+  | születési adatok | `[SZÜLETÉS_n]` |
+  | a felhasználó saját listája | `[EGYÉB_n]` |
+
+- Ugyanaz az érték mindenhol ugyanazt a helyettesítőt kapja: a kijelölésben, a háttérszövegben és a finomítás minden körében is.
+- Az AI utasítást kap, hogy a helyettesítőket változatlanul hagyja. A választ a gépen cseréljük vissza, már menet közben is (a félig megérkezett helyettesítőt addig elrejtjük).
+- A „Részletek” panel táblázatban mutatja, mit rejtett el. Ha valami kimaradt, a felhasználó felveheti a „mindig elrejtendő kifejezések” közé.
+- **Korlátok:**
+  - A felismerés szabályalapú, nem tökéletes (pl. kulcsszó nélküli személynév a szöveg közepén).
+  - A kontextusból kikövetkeztethető információt (pl. egyedi ügyleti részletek) nem rejti el.
+
+## 5. Korlátok (és miért)
+
+| Mi | Érték | Megjegyzés |
+|---|---|---|
+| Szerkeszthető szöveg | 50 000 karakter | Az AI-nak a teljes szöveget vissza kell adnia; a hosszabbat nem írjuk át, hogy ne vesszen el semmi |
+| Háttérszöveg (kontextus) | 200 000 karakter | Hosszabb dokumentumnál: eleje + címsorok + a kijelölés környéke |
+| Átvizsgálás | 400 000 karakter | Ezen túl csak a dokumentum elejét nézi |
+| Összevetés | 200 000 karakter | Változáslista |
+| Észrevételek száma | 15 / átvizsgálás | |
+| Kérések | 20 / perc | A szerver védelme |
+
+Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A korlátjelző sáv élőben mutatja, mekkora a dokumentum és a kijelölés, és figyelmeztet, ha valami nem fér bele.
+
+## 6. Ismert korlátok, kockázatok
+
+- **Jogszabály-ellenőrzés:** a modell tudása nem élő jogszabálytár. A hatályosságot és a friss módosításokat nem tudja biztosan. Ezért a prompt kifejezetten kéri, hogy a bizonytalant jelezze, és a njt.hu-t ajánlja.
+  - *Nyitott kérdés:* bekössünk-e élő forrást (Nemzeti Jogszabálytár keresés, Gemini keresés-alapozás / grounding)?
+- **Idézet-alapú elhelyezés:** az átvizsgálás megjegyzéseit a Word keresőjével helyezzük el. Ha a modell nem pontosan idéz, a megjegyzés nem kerül be (ezt jelöljük). A Word keresése legfeljebb 255 karakteres.
+- **Táblázatok, élőfejek, lábjegyzetek:** a bekezdés-illesztés a törzsszöveg bekezdéseivel dolgozik. Táblázatcellán belüli új bekezdésnél a formázás eltérhet.
+- **Asztali Word telepítése** (sideload) nehézkes volt. Word Online-ban a „Saját bővítmény feltöltése” működik. Egykattintásos helyi indító (HTTPS localhost) készül.
+
+## 7. Folyamatban / tervezett
+
+- **Szerkezet fül javaslatai:** hibánként „Javaslat” gomb (az AI a hibás hivatkozásra vagy definícióra ad korrektúrás javítást), „Definíció létrehozása”, „Fogalommeghatározások fejezet készítése”.
+- **Halk hangjelzés,** ha elkészült egy művelet (beállítható).
+- **Diktálás:** mikrofon gomb az utasításhoz (hangfelvétel → átírás a választott AI-szolgáltatónál).
+  - *Nyitott kérdés:* a hangfelvételt nem lehet maszkolni.
+- **Egykattintásos helyi indító** Windowsra (`INDITAS.bat`: tanúsítvány, szerver, Word megnyitása a bővítménnyel).
+
+## 8. Kérdések, amiket érdemes megbeszélni
+
+1. Élő jogszabályi forrás: NJT-integráció vagy AI-keresés (grounding)? Adatvédelmi és költségvonzat?
+2. Maszkolás: elég-e a szabályalapú felismerés, vagy kell helyi névfelismerő modell? Melyik adatkategóriák hiányoznak még (pl. rendszám, személyi igazolvány szám formátumai, cégek rövid nevei)?
+3. Átvizsgálás: hány észrevétel a hasznos? Kell-e súlyosság szerinti szűrés, vagy kategóriák (jogi / pénzügyi / nyelvi)?
+4. Ügyféltörténet, sablontár, saját záradékkönyvtár: melyik hozna a legtöbbet egy tanácsadónak?
+5. Üzemeltetés: Vertex AI EU (adatrezidencia) vagy Gemini API (egyszerűbb)? Kell-e naplózás vagy auditnyom?
