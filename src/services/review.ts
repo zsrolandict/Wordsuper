@@ -30,7 +30,10 @@ const WRAPPING_QUOTES = /^["'„“”«»]+|["'„“”«»]+$/g;
 
 /** The quote without the quotation marks the model sometimes wraps it in, whitespace collapsed */
 export const cleanQuote = (quote: string) =>
-  quote.replace(/\s+/g, ' ').trim().replace(WRAPPING_QUOTES, '').trim();
+  stripAutoNumber(quote.replace(/\s+/g, ' ').trim().replace(WRAPPING_QUOTES, '').trim()).replace(WRAPPING_QUOTES, '').trim();
+
+/** "[5.2.] A Vevő…": the review sees Word's automatic numbering in brackets, but it is not in the text */
+const stripAutoNumber = (text: string) => text.replace(/^\[[^\]\s]{1,12}\]\s*/, '');
 
 /**
  * Search strings to locate a quote in the document, most specific first.
@@ -66,10 +69,10 @@ export interface ReviewFix {
  */
 export function reviewFix(finding: ReviewFinding): ReviewFix | null {
   if (!finding.suggestion.trim()) return null;
-  const collapsed = finding.quote.replace(/\s+/g, ' ').trim();
+  const collapsed = stripAutoNumber(finding.quote.replace(/\s+/g, ' ').trim());
   const leading = collapsed.match(/^["'„“”«»]+/)?.[0] ?? '';
   const trailing = collapsed.match(/["'„“”«»]+$/)?.[0] ?? '';
-  let replacement = finding.suggestion.trim();
+  let replacement = stripAutoNumber(finding.suggestion.trim());
   if (leading && replacement.startsWith(leading)) replacement = replacement.slice(leading.length);
   if (trailing && replacement.endsWith(trailing)) replacement = replacement.slice(0, -trailing.length);
   replacement = replacement.trim();

@@ -169,5 +169,10 @@ export function maskRequest(request: AIRequestBody, masker: Masker): AIRequestBo
   };
 }
 
+const KNOWN_TOKEN = new RegExp(`\\[(?:${Object.keys(ENTITY_LABELS).join('|')})_\\d+\\]`, 'g');
+
+/** Placeholders still in an unmasked answer: the AI made them up or mangled them, so they have no real value */
+export const leftoverPlaceholders = (text: string) => [...new Set(text.match(KNOWN_TOKEN) ?? [])];
+
 /** Splits the user's own list (one per line or comma separated) */
 export const parseExtraTerms = (text: string) => text.split(/[\n,;]/).map(t => t.trim()).filter(Boolean);

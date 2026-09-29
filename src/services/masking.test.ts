@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Masker, parseExtraTerms } from './masking';
+import { Masker, leftoverPlaceholders, parseExtraTerms } from './masking';
 
 const party = 'Eladó: Kovács János (szül.: Budapest, 1980. 05. 12., anyja neve: Nagy Mária), lakcím: 1111 Budapest, Fő utca 12/A., adóazonosító jel: 8123456789, e-mail: kovacs.janos@example.hu, telefon: +36 30 123 4567.';
 const company = 'Vevő: az ABC Ingatlanfejlesztő Kft. (székhely: 2600 Vác, Széchenyi u. 3., cégjegyzékszám: Cg. 13-09-123456, adószám: 12345678-2-13, bankszámlaszám: 11700024-20012345-00000000), képviseli: dr. Szabó Anna ügyvezető.';
@@ -64,4 +64,10 @@ test('headers and all-caps words that merely start like a legal form are left al
   const masker = new Masker();
   const text = '=== AROUND THE SELECTION (characters 1–10 of 20) ===\nA SELECTION AGREEMENT szerint az ABC Kft. fizet.';
   assert.equal(masker.mask(text), '=== AROUND THE SELECTION (characters 1–10 of 20) ===\nA SELECTION AGREEMENT szerint az [CÉG_1] fizet.');
+});
+
+test('placeholders the AI invented are reported', () => {
+  const masker = new Masker();
+  masker.mask('Vevő: ABC Kft.');
+  assert.deepEqual(leftoverPlaceholders(masker.unmask('A [CÉG_1] és a [CÉG_2], valamint [CÉG_2] és [A_1].')), ['[CÉG_2]']);
 });

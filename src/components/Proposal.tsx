@@ -3,6 +3,7 @@ import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb } from 'lucide-react';
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
+import { planDocumentEdits } from '../services/documentEdit';
 
 export type ProposalState = 'pending' | 'applying' | 'applied' | 'rejected' | 'superseded';
 
@@ -47,6 +48,33 @@ export function DiffView({ original, proposal }: { original: string; proposal: s
         return <React.Fragment key={i}>{text}</React.Fragment>;
       })}
     </span>
+  );
+}
+
+/** A rewrite of the whole document: only the paragraphs that change, new or go, not the whole text */
+function DocumentChangesView({ original, proposal }: { original: string; proposal: string }) {
+  const oldParagraphs = useMemo(() => original.split('\n'), [original]);
+  const ops = useMemo(() => planDocumentEdits(oldParagraphs, proposal), [oldParagraphs, proposal]);
+  if (!ops.length) return <span className="text-xs text-neutral-500">Nincs változás a dokumentumhoz képest.</span>;
+  const label = (text: string) => <span className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-0.5">{text}</span>;
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-neutral-500">Csak a változó részeket mutatom, a dokumentum többi része érintetlen marad.</p>
+      {ops.map((op, i) => (
+        <div key={i} className="border-l-2 border-neutral-200 pl-2">
+          {op.type === 'edit' ? (
+            <>{label(`${op.paragraph + 1}. bekezdés – módosul`)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
+          ) : op.type === 'delete' ? (
+            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
+          ) : (
+            <>
+              {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`)}
+              {op.texts.map((text, k) => <ins key={k} className="block no-underline bg-green-50 text-green-800 whitespace-pre-wrap">{text}</ins>)}
+            </>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -123,6 +151,7 @@ export default function Proposal({
   explanation,
   addExplanation,
   onToggleExplanation,
+  wholeDocument = false,
 }: {
   mode: Mode;
   originalText: string;
@@ -137,6 +166,8 @@ export default function Proposal({
   explanation?: string;
   addExplanation?: boolean;
   onToggleExplanation?: () => void;
+  /** Edit without a selection: originalText is the whole document, one paragraph per line */
+  wholeDocument?: boolean;
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const isOpen = state === 'pending' || state === 'applying';
@@ -169,7 +200,9 @@ export default function Proposal({
               </button>
             ))}
           </div>
-          {showChanges ? <DiffView original={originalText} proposal={text} /> : <span className="whitespace-pre-wrap">{text}</span>}
+          {!showChanges
+            ? <span className="whitespace-pre-wrap">{text}</span>
+            : wholeDocument ? <DocumentChangesView original={originalText} proposal={text} /> : <DiffView original={originalText} proposal={text} />}
           {explanation && (
             <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md p-2">
               <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />Miért?</p>

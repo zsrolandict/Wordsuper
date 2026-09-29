@@ -31,7 +31,10 @@ export interface DocumentSnapshot {
  * The text as it reads with pending tracked changes accepted. range.text would also contain the deleted
  * words ("eladóiEladói"), which confuses the AI and the diff.
  */
-const readable = (reviewed: string) => stripControlChars(reviewed);
+const readable = (reviewed: string) => stripControlChars(reviewed.replace(CELL_END_ALL, '\t'));
+/** Word marks the end of a table cell or row with this character */
+const CELL_END = /\u0007/;
+const CELL_END_ALL = /\u0007/g;
 const sameWords = (a: string, b: string) => stripControlChars(a).replace(/\s+/g, ' ').trim() === stripControlChars(b).replace(/\s+/g, ' ').trim();
 
 const isHeading = (p: Word.Paragraph) =>
@@ -42,9 +45,15 @@ export async function takeSnapshot(mode: Mode): Promise<DocumentSnapshot> {
   return Word.run(async (context) => {
     const selection = context.document.getSelection();
     const body = context.document.body;
+    selection.load('text');
     const selectionReviewed = selection.getReviewedText('Current');
     const bodyReviewed = body.getReviewedText('Current');
     await context.sync();
+
+    // Replacing text across table cells would break the table apart
+    if (mode === 'edit' && CELL_END.test(selection.text || '')) {
+      throw new UserFacingError('A kijelölés több táblázatcellán ível át, ezt nem tudom biztonságosan átírni. Jelölj ki szöveget egy cellán belül, vagy a táblázaton kívül.');
+    }
 
     const selectionText = readable(selectionReviewed.value || '');
     let documentText = readable(bodyReviewed.value || '');
@@ -71,10 +80,10 @@ export async function takeSnapshot(mode: Mode): Promise<DocumentSnapshot> {
       headings = paragraphs.items.filter(isHeading).map(p => p.text);
 
       try {
-        const before = body.getRange('Start').expandTo(selection.getRange('Start'));
-        before.load('text');
+        // Measured on the reviewed text, like the document text it indexes into
+        const before = body.getRange('Start').expandTo(selection.getRange('Start')).getReviewedText('Current');
         await context.sync();
-        selectionStart = before.text.length;
+        selectionStart = readable(before.value || '').length;
       } catch {
         // E.g. the selection is in a header or a footnote: locate it by its text instead
         selectionStart = Math.max(0, documentText.indexOf(selectionText));
@@ -315,7 +324,7 @@ export async function applyDocumentEdit(
   const { paragraphs: expectedParagraphs, reviewed } = snapshot;
   return Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
-    paragraphs.load('items/text');
+    paragraphs.load('items/text,items/tableNestingLevel');
     await context.sync();
     const items = paragraphs.items;
     if (items.length !== expectedParagraphs.length || items.some((p, i) => p.text !== expectedParagraphs[i])) {
@@ -340,12 +349,23 @@ export async function applyDocumentEdit(
       // Last to first, so the positions of earlier paragraphs and words stay put
       for (const op of [...ops].reverse()) {
         const paragraph = items[op.type === 'insert' ? Math.max(op.after, 0) : op.paragraph];
+        // Processed last to first, so after the loop this holds the first place that changed
         firstChanged = paragraph;
         if (op.type === 'insert') {
           if (op.after === -1) {
-            op.texts.forEach(text => { firstChanged = paragraph.insertParagraph(text, 'Before'); });
+            op.texts.forEach((text, i) => {
+              const inserted = paragraph.insertParagraph(text, 'Before');
+              if (i === 0) firstChanged = inserted;
+            });
           } else {
-            [...op.texts].reverse().forEach(text => { firstChanged = paragraph.insertParagraph(text, 'After'); });
+            // After a table cell (e.g. a signature table at the end) the new text goes after the whole table
+            let previous: Word.Paragraph | null = null;
+            op.texts.forEach((text, i) => {
+              previous = previous
+                ? previous.insertParagraph(text, 'After')
+                : paragraph.tableNestingLevel > 0 ? paragraph.parentTable.insertParagraph(text, 'After') : paragraph.insertParagraph(text, 'After');
+              if (i === 0) firstChanged = previous;
+            });
           }
         } else if (op.type === 'delete') {
           paragraph.delete();
@@ -565,14 +585,15 @@ export async function jumpToParagraph(index: number, rememberPosition: boolean):
 }
 
 /** Puts the cursor where a request from the structure view should work: the whole paragraph, or before it */
-export async function placeAtParagraph(index: number, where: 'select' | 'before') {
+export async function placeAtParagraph(index: number, where: 'select' | 'before' | 'after') {
   await Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load('items/text');
     await context.sync();
     const target = paragraphs.items[index];
     if (!target) throw new UserFacingError('Ez a bekezdés már nincs meg a dokumentumban. Frissítsd a nézetet.');
-    (where === 'select' ? target.getRange('Whole') : target.getRange('Start')).select();
+    const place = where === 'select' ? target.getRange('Whole') : where === 'before' ? target.getRange('Start') : target.getRange('Content').getRange('End');
+    place.select();
     await context.sync();
   });
 }

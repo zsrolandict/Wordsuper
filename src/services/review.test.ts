@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseFindings, reviewCommentText, reviewFix, searchCandidates } from './review';
+import { cleanQuote, parseFindings, reviewCommentText, reviewFix, searchCandidates } from './review';
 import { splitExplanation } from '../shared/aiConfig';
 
 test('parseFindings keeps valid findings and defaults the severity', () => {
@@ -56,4 +56,9 @@ test('an edit answer is split into the new text and the explanation', () => {
   assert.deepEqual(splitExplanation('Új szöveg.'), { text: 'Új szöveg.', explanation: '' });
   assert.deepEqual(splitExplanation('Új szöveg.\n===WH', true), { text: 'Új szöveg.', explanation: '' });
   assert.deepEqual(splitExplanation('A = B', true), { text: 'A = B', explanation: '' });
+});
+
+test('automatic numbers the review saw are not part of a quote or a fix', () => {
+  assert.equal(cleanQuote('[5.2.] A Vevő köteles fizetni.'), 'A Vevő köteles fizetni.');
+  assert.deepEqual(reviewFix(finding('[5.2.] A Vevő 10 napon belül fizet.', '[5.2.] A Vevő 8 napon belül fizet.')), { search: 'A Vevő 10 napon belül fizet.', replacement: 'A Vevő 8 napon belül fizet.' });
 });

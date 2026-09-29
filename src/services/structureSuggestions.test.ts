@@ -24,7 +24,8 @@ test('a broken reference asks for a fix and lists the sections that exist', () =
 test('the definitions section goes before the first numbered section and lists the terms', () => {
   const request = requestForDefinitionsSection(buildDocumentGraph(paragraphs), paragraphs.length);
   assert.equal(request.mode, 'generate');
-  assert.equal(request.cursor, 'before');
-  assert.equal(request.paragraph, 2);
+  // At the end of the preamble, not in front of the numbered section
+  assert.equal(request.cursor, 'after');
+  assert.equal(request.paragraph, 1);
   assert.ok(request.instruction.indexOf('„Megbízó”') < request.instruction.indexOf('„Megbízott”'));
 });

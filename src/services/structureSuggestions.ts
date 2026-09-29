@@ -4,8 +4,8 @@ import type { DocumentGraph, StructureIssue } from './structure';
 /** A request the structure view hands to the assistant: where to put the cursor, and what to ask */
 export interface StructureRequest {
   paragraph: number;
-  /** select: work on the paragraph; before: insert in front of it */
-  cursor: 'select' | 'before';
+  /** select: work on the paragraph; before / after: insert in front of it or behind it */
+  cursor: 'select' | 'before' | 'after';
   mode: Mode;
   instruction: string;
   /** Short label shown in the chat instead of the long instruction */
@@ -71,8 +71,13 @@ export function requestForDefinitionsSection(graph: DocumentGraph, paragraphCoun
     .map(t => `- „${t.term}”: ${t.definition.replace(/\s+/g, ' ').slice(0, 300)}`)
     .join('\n');
   return {
-    paragraph: firstSection ? firstSection.paragraph : Math.min(1, Math.max(0, paragraphCount - 1)),
-    cursor: 'before',
+    // At the end of the paragraph before the first section (the preamble): inserted in front of a numbered
+    // paragraph, the new text would take over its numbering and shift every section number
+    ...(firstSection && firstSection.paragraph > 0
+      ? { paragraph: firstSection.paragraph - 1, cursor: 'after' as const }
+      : firstSection
+      ? { paragraph: 0, cursor: 'before' as const }
+      : { paragraph: Math.min(1, Math.max(0, paragraphCount - 1)), cursor: paragraphCount > 1 ? 'before' as const : 'after' as const }),
     mode: 'generate',
     label: 'Fogalommeghatározások fejezet készítése',
     instruction: `Készíts „Fogalommeghatározások” című fejezetet a szerződés elejére. Az első sor a fejezet címe legyen, utána minden fogalom külön bekezdésben, betűrendben, ebben a formában: „Fogalom”: jelenti …

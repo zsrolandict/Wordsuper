@@ -16,7 +16,7 @@ import {
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
 import type { StructureRequest } from '../services/structureSuggestions';
-import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
+import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
 import { useDocumentStats } from '../services/useDocumentStats';
@@ -344,9 +344,19 @@ export default function TaskPane() {
       const findingViews = findings?.map(f => ({ ...f, selected: true, fix: !!f.suggestion }));
       // Asking for a comment in the instruction ticks the box by default
       const addExplanation = !!explanation && /megjegyz|komment|indokl|magyaráz/i.test(instruction);
-      finishLoadingMessage({ content: requestMode === 'review' ? '' : result, proposal: { state: 'pending', findings: findingViews, explanation, addExplanation } });
+      // A placeholder the AI made up has no real value behind it and must not slip into the document unnoticed
+      const leftovers = masker
+        ? leftoverPlaceholders([result, explanation, ...(findings ?? []).flatMap(f => [f.comment, f.suggestion])].join('\n'))
+        : [];
+      finishLoadingMessage({
+        content: requestMode === 'review' ? '' : result,
+        proposal: { state: 'pending', findings: findingViews, explanation, addExplanation },
+        status: leftovers.length
+          ? { text: `⚠️ A válaszban ismeretlen helyettesítő maradt (${leftovers.join(', ')}), ehhez nincs valódi adat. Beszúrás előtt ellenőrizd, vagy kérj másik változatot.`, tone: 'neutral' }
+          : undefined,
+      });
 
-      if (settings.autoApply) {
+      if (settings.autoApply && !leftovers.length) {
         await applyProposal(loadingId, findingViews, addExplanation);
       }
     } catch (error) {
@@ -555,6 +565,7 @@ export default function TaskPane() {
                   state={msg.proposal.state}
                   findings={msg.proposal.findings}
                   busy={isBusy}
+                  wholeDocument={!!msg.details.wholeDocument}
                   explanation={msg.proposal.explanation}
                   addExplanation={!!msg.proposal.addExplanation}
                   onToggleExplanation={() => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, addExplanation: !m.proposal.addExplanation } }))}
