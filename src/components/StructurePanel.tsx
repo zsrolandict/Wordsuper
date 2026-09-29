@@ -101,6 +101,9 @@ export default function StructurePanel({ active, busy, onRequest }: {
     };
   }, [active, data]);
 
+  // Remembers the paragraph's text, so a stale map can't point the assistant at the wrong paragraph
+  const requestFix = (r: StructureRequest) => onRequest({ ...r, expectedText: data?.paragraphs[r.paragraph]?.text });
+
   const jump = async (paragraph: number) => {
     setError(null);
     try {
@@ -210,7 +213,7 @@ export default function StructurePanel({ active, busy, onRequest }: {
                 const request = requestForIssue(issue, graph);
                 return request && (
                   <button
-                    onClick={() => onRequest(request)}
+                    onClick={() => request && requestFix(request)}
                     disabled={busy}
                     title="Az AI korrektúrás javítást javasol erre a bekezdésre (előbb megmutatja)"
                     className="flex items-center shrink-0 text-[11px] font-medium text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
@@ -226,7 +229,7 @@ export default function StructurePanel({ active, busy, onRequest }: {
 
         {graph && data && list === 'terms' && (
           <button
-            onClick={() => onRequest(requestForDefinitionsSection(graph, data.paragraphs.length))}
+            onClick={() => requestFix(requestForDefinitionsSection(graph, data.paragraphs.length))}
             disabled={busy}
             title="Az AI megírja a fejezetet a szerződés meglévő definíciói alapján; beszúrás előtt megmutatja"
             className="w-full flex items-center justify-center py-1.5 text-xs font-medium border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 rounded-lg"

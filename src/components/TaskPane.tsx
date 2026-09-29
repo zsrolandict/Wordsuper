@@ -171,7 +171,7 @@ export default function TaskPane() {
   const runStructureRequest = async (request: StructureRequest) => {
     if (busyRef.current) return;
     try {
-      await placeAtParagraph(request.paragraph, request.cursor);
+      await placeAtParagraph(request.paragraph, request.cursor, request.expectedText);
     } catch (error) {
       setTab('assistant');
       addMessage({ role: 'system', content: error instanceof UserFacingError ? error.message : 'Nem sikerült odaállni a bekezdéshez.' });

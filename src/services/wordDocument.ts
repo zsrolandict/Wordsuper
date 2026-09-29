@@ -585,13 +585,16 @@ export async function jumpToParagraph(index: number, rememberPosition: boolean):
 }
 
 /** Puts the cursor where a request from the structure view should work: the whole paragraph, or before it */
-export async function placeAtParagraph(index: number, where: 'select' | 'before' | 'after') {
+export async function placeAtParagraph(index: number, where: 'select' | 'before' | 'after', expectedText?: string) {
   await Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load('items/text');
     await context.sync();
     const target = paragraphs.items[index];
-    if (!target) throw new UserFacingError('Ez a bekezdés már nincs meg a dokumentumban. Frissítsd a nézetet.');
+    // The structure map is a snapshot: after an edit its paragraph numbers may point elsewhere
+    if (!target || (expectedText !== undefined && !sameText(target.text, expectedText))) {
+      throw new UserFacingError('A dokumentum változott, amióta a Szerkezet nézet beolvasta. Nyomd meg a Frissítés gombot, és próbáld újra.');
+    }
     const place = where === 'select' ? target.getRange('Whole') : where === 'before' ? target.getRange('Start') : target.getRange('Content').getRange('End');
     place.select();
     await context.sync();

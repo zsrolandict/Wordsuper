@@ -10,6 +10,8 @@ export interface StructureRequest {
   instruction: string;
   /** Short label shown in the chat instead of the long instruction */
   label: string;
+  /** The paragraph's text when the structure map was built; set by the structure view */
+  expectedText?: string;
 }
 
 const MAX_LISTED_SECTIONS = 80;
