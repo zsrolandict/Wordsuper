@@ -25,11 +25,26 @@ function requireAccessKey(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+/**
+ * Behind a reverse proxy (Cloud Run, a load balancer) req.ip is the proxy's address, so every user would share one
+ * rate limit bucket. TRUST_PROXY tells Express which X-Forwarded-For hops to trust: a hop count, "true", or
+ * addresses/subnets. On Cloud Run (K_SERVICE is set) it defaults to one hop. Without a proxy leave it unset,
+ * otherwise clients could dodge the rate limit by sending a fake X-Forwarded-For.
+ */
+function trustProxySetting(): boolean | number | string {
+  const value = (process.env.TRUST_PROXY ?? (process.env.K_SERVICE ? "1" : "")).trim();
+  if (value === "" || value === "false") return false;
+  if (value === "true") return true;
+  if (/^\d+$/.test(value)) return Number(value);
+  return value;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.disable("x-powered-by");
+  app.set("trust proxy", trustProxySetting());
 
   // 1. Rate Limiter (Prevents DDoS, credit draining and access key guessing)
   const apiLimiter = rateLimit({

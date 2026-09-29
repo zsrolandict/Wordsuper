@@ -1,3 +1,6 @@
+/** Oldest Word API the add-in works with: comments and the Track Changes mode need WordApi 1.4 */
+export const REQUIRED_WORD_API_VERSION = "1.4";
+
 export function generateManifest(appUrl: string): string {
   // Ensure the URL doesn't have a trailing slash for consistency
   const baseUrl = appUrl.replace(/\/$/, '');
@@ -15,7 +18,7 @@ export function generateManifest(appUrl: string): string {
 
   <!-- Basic Add-in Settings -->
   <Id>${guid}</Id>
-  <Version>1.0.0.0</Version>
+  <Version>1.1.0.0</Version>
   <ProviderName>AI Studio User</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Word Writer Add-in" />
@@ -34,6 +37,13 @@ export function generateManifest(appUrl: string): string {
   <Hosts>
     <Host Name="Document" />
   </Hosts>
+
+  <!-- Word API features the add-in relies on (comments, Track Changes mode: WordApi 1.4) -->
+  <Requirements>
+    <Sets DefaultMinVersion="1.1">
+      <Set Name="WordApi" MinVersion="${REQUIRED_WORD_API_VERSION}" />
+    </Sets>
+  </Requirements>
   <DefaultSettings>
     <SourceLocation DefaultValue="${baseUrl}" />
   </DefaultSettings>
