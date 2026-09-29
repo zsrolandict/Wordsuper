@@ -196,6 +196,7 @@ Your task is to review the whole document according to the user's instruction an
 RULES:
 - Return a JSON array of findings, most important first, at most ${MAX_REVIEW_FINDINGS} findings.
 - "quote" MUST be copied verbatim from the document (same characters, same punctuation), 5-15 words, so the add-in can find it with an exact search. Never paraphrase it.
+- A quote must come from a single paragraph: never let it run across a line break.
 - "comment" is a concise, actionable margin note written in the language of the user's instruction.
 - If nothing relevant is found, return an empty array.${style}`,
       prompt: `DOCUMENT TO REVIEW:\n${documentContext}\n\n${historyBlock(history)}${instructionBlock}`,

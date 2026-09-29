@@ -27,3 +27,10 @@ test('searchCandidates strips quotes, shortens and escapes carets', () => {
   assert.deepEqual(searchCandidates('2^10 bájt'), ['2^^10 bájt']);
   assert.deepEqual(searchCandidates('ab'), []);
 });
+
+test('searchCandidates also tries the sentences of a quote that spans two paragraphs', () => {
+  const candidates = searchCandidates('fizeti meg. A Megbízott felelőssége korlátlan.');
+  assert.ok(candidates.includes('A Megbízott felelőssége korlátlan.'));
+  // The longer sentence comes before the shorter one
+  assert.ok(candidates.indexOf('A Megbízott felelőssége korlátlan.') < candidates.indexOf('fizeti meg.'));
+});

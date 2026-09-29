@@ -30,12 +30,17 @@ export const cleanQuote = (quote: string) =>
 
 /**
  * Search strings to locate a quote in the document, most specific first.
- * The model sometimes changes quotes or whitespace, so shorter prefixes are tried too.
+ * The model sometimes changes quotes or whitespace, so shorter prefixes are tried too; and it sometimes quotes
+ * across a paragraph break, which Word's search can't match, so each sentence is tried as well (longest first).
  */
 export function searchCandidates(quote: string): string[] {
   const clean = cleanQuote(quote);
   const words = clean.split(' ');
-  const candidates = [clean, words.slice(0, 8).join(' '), words.slice(0, 4).join(' ')]
+  const sentences = clean
+    .split(/(?<=[.!?;:])\s+/)
+    .filter(sentence => sentence !== clean)
+    .sort((a, b) => b.length - a.length);
+  const candidates = [clean, words.slice(0, 8).join(' '), ...sentences, words.slice(0, 4).join(' ')]
     .map(c => c.substring(0, 200).trim())
     .filter(c => c.length >= 3)
     // ^ starts a special character code in Word search (^p, ^t…), ^^ is a literal caret

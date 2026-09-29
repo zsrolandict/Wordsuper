@@ -3,7 +3,8 @@ import type { ModelProvider } from "./types";
 
 export type { ModelProvider, StreamEvent, StreamFinish } from "./types";
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
+// gemini-2.5-flash is no longer available to new Gemini API users
+const DEFAULT_MODEL = "gemini-3.8-flash";
 const DEFAULT_VERTEX_LOCATION = "europe-west1";
 
 /**

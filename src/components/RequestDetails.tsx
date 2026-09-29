@@ -146,7 +146,10 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
 
           <Section title="Hogyan gondolkodott">
             {thoughts ? (
-              <FormattedThoughts text={thoughts} />
+              <>
+                <FormattedThoughts text={thoughts} />
+                <p className="mt-1 text-neutral-400">A modell a gondolkodását angolul foglalja össze, a válasza ettől még magyar.</p>
+              </>
             ) : (
               <p className="italic">{isLoading ? 'Várom az első gondolatokat…' : 'Ehhez a válaszhoz a modell nem adott gondolkodási összefoglalót.'}</p>
             )}
