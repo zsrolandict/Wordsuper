@@ -53,9 +53,9 @@ if errorlevel 1 (
   echo Szerver inditasa: https://localhost:3444
   start "Word Writer szerver" cmd /k "npm run word:server"
   echo Varok, amig a szerver elindul...
-  powershell -NoProfile -Command "$i=0; while ($i -lt 60) { try { Invoke-WebRequest -UseBasicParsing https://localhost:3444/ -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
+  powershell -NoProfile -Command "$i=0; while ($i -lt 90) { try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 3444)).Close(); exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
   if errorlevel 1 (
-    echo A szerver nem indult el 60 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
+    echo A szerver nem indult el 90 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
     goto hiba
   )
 ) else (
