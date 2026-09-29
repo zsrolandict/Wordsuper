@@ -103,7 +103,21 @@ export default function SetupInstructions() {
                   <li>Tallózd ki a letöltött <code>manifest.xml</code> fájlt. A beépülő egyből betöltődik az oldalsávba!</li>
                 </ul>
               </div>
-              
+
+            </div>
+          </section>
+
+          <section>
+            <h2 className="text-xl font-bold text-neutral-800 mb-4 flex items-center">
+              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 text-sm mr-3">3</span>
+              Hozzáférési kulcs
+            </h2>
+            <div className="space-y-2 text-neutral-600">
+              <p>A szerver csak hozzáférési kulccsal fogad AI-kéréseket, így idegenek nem használhatják a Gemini-keretedet.</p>
+              <ul className="list-decimal pl-5 space-y-2 text-sm">
+                <li>Állíts be a szerveren egy hosszú, véletlen <code>APP_ACCESS_KEY</code> környezeti változót (pl. <code>openssl rand -hex 32</code>).</li>
+                <li>A Wordben nyisd meg a beépülő <strong>Beállítások</strong> (fogaskerék) paneljét, írd be ugyanezt a kulcsot, és nyomd meg az <strong>Ellenőrzés</strong> gombot.</li>
+              </ul>
             </div>
           </section>
 

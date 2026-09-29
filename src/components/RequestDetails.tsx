@@ -1,24 +1,23 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
-import { AI_MODEL, MAX_CONTEXT_CHARS, MAX_SELECTION_CHARS } from '../shared/aiConfig';
-
-export type Mode = 'edit' | 'comment' | 'generate';
+import { AI_MODEL, MAX_SELECTION_CHARS, type Mode } from '../shared/aiConfig';
+import type { ContextInfo } from '../services/contextBuilder';
+import { formatNumber, normalizeLineBreaks } from '../services/format';
 
 /** Minden, amit egy AI kérésről tudunk – ebből mutatjuk meg, mit látott az AI és hogyan jutott a válaszra */
 export interface RequestDetailsData {
   mode: Mode;
   instruction: string;
   selectionText: string;
-  documentChars: number;
+  contextInfo: ContextInfo;
+  /** Finomításnál ennyi korábbi kört (utasítás + válasz) látott az AI */
+  historyRounds: number;
+  /** A stílusprofil rövid leírása, üres, ha nincs beállítva */
+  styleSummary: string;
   thoughts: string;
   startedAt: number;
   durationMs?: number;
 }
-
-const formatNumber = (n: number) => n.toLocaleString('hu-HU');
-
-// A Word a bekezdéseket \r-rel választja el, ezt a böngésző nem töri sorba
-const normalizeLineBreaks = (text: string) => text.replace(/\r\n?/g, '\n');
 
 /** A gondolkodási összefoglaló **félkövér** címsorait jelenítjük meg félkövérként */
 function FormattedThoughts({ text }: { text: string }) {
@@ -43,7 +42,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Warning({ children }: { children: React.ReactNode }) {
+export function Warning({ children }: { children: React.ReactNode }) {
   return (
     <p className="mt-1 flex items-start text-amber-700">
       <AlertTriangle className="w-3.5 h-3.5 mr-1 mt-px shrink-0" />
@@ -52,12 +51,39 @@ function Warning({ children }: { children: React.ReactNode }) {
   );
 }
 
+function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
+  switch (info.strategy) {
+    case 'empty':
+      return <p>A dokumentum üres volt, így az AI nem kapott háttérinformációt.</p>;
+    case 'full':
+      return mode === 'review'
+        ? <p>Az AI a teljes dokumentumot ({formatNumber(info.documentChars)} karakter) átvizsgálta.</p>
+        : <p>A teljes dokumentum ({formatNumber(info.documentChars)} karakter) elment háttérinformációként, hogy a hangnem és a szóhasználat illeszkedjen.</p>;
+    case 'truncated':
+      return (
+        <>
+          <p>A dokumentum {formatNumber(info.documentChars)} karakteréből az első {formatNumber(info.sentChars)} ment el átvizsgálásra.</p>
+          <Warning>A dokumentum ezen túli részét az AI nem vizsgálta át.</Warning>
+        </>
+      );
+    case 'excerpts':
+      return (
+        <>
+          <p>A dokumentum túl hosszú ({formatNumber(info.documentChars)} karakter, a korlát {formatNumber(info.limit)}), ezért részleteket kapott:</p>
+          <ul className="list-disc pl-4 mt-1 space-y-0.5">
+            {!!info.beginningChars && <li>a dokumentum elejét ({formatNumber(info.beginningChars)} karakter),</li>}
+            {!!info.totalHeadings && <li>{formatNumber(info.headingCount ?? 0)} címsort a vázlatból (összesen {formatNumber(info.totalHeadings)} van),</li>}
+            <li>a kijelölés környékét ({formatNumber((info.windowStart ?? 0) + 1)}–{formatNumber(info.windowEnd ?? 0)}. karakter).</li>
+          </ul>
+          <Warning>A dokumentum többi részét az AI nem látta.</Warning>
+        </>
+      );
+  }
+}
+
 export default function RequestDetails({ details, isLoading }: { details: RequestDetailsData; isLoading: boolean }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, documentChars, thoughts, durationMs } = details;
-
-  const selectionTruncated = selectionText.length > MAX_SELECTION_CHARS;
-  const contextTruncated = documentChars > MAX_CONTEXT_CHARS;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, styleSummary, thoughts, durationMs } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -73,36 +99,31 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
         <div className="mt-2 space-y-3 text-xs">
           <Section title="Utasítás">
             <p className="whitespace-pre-wrap">{instruction}</p>
+            {historyRounds > 0 && (
+              <p className="mt-1">Ez finomítás volt: az AI látta az előző {formatNumber(historyRounds)} kör utasítását és a saját válaszát is.</p>
+            )}
+            {styleSummary && <p className="mt-1">Stílusprofil: {styleSummary}.</p>}
           </Section>
 
           {mode === 'generate' ? (
             selectionText.trim() !== '' && (
               <Section title="Kijelölt szöveg">
-                <p>A kijelölt szöveget az AI nem kapta meg, a generált szöveg ennek a helyére került.</p>
+                <p>A kijelölt szöveget az AI nem kapta meg, a generált szöveg ennek a helyére kerül.</p>
               </Section>
             )
-          ) : (
+          ) : mode !== 'review' && (
             <Section title={`Kijelölt szöveg (${formatNumber(selectionText.length)} karakter)`}>
               <div className="max-h-32 overflow-y-auto whitespace-pre-wrap bg-neutral-50 border border-neutral-200 rounded-md p-2">
                 {normalizeLineBreaks(selectionText.substring(0, MAX_SELECTION_CHARS))}
               </div>
-              {selectionTruncated && (
+              {selectionText.length > MAX_SELECTION_CHARS && (
                 <Warning>Csak az első {formatNumber(MAX_SELECTION_CHARS)} karaktert kapta meg az AI, a kijelölés végét nem látta.</Warning>
               )}
             </Section>
           )}
 
-          <Section title="Dokumentum-kontextus">
-            {documentChars === 0 ? (
-              <p>A dokumentum üres volt, így az AI nem kapott háttérinformációt.</p>
-            ) : contextTruncated ? (
-              <>
-                <p>A dokumentum {formatNumber(documentChars)} karakteréből az első {formatNumber(MAX_CONTEXT_CHARS)} ment el háttérinformációként.</p>
-                <Warning>A dokumentum ezen túli részét az AI nem látta.</Warning>
-              </>
-            ) : (
-              <p>A teljes dokumentum ({formatNumber(documentChars)} karakter) elment háttérinformációként, hogy a hangnem és a szóhasználat illeszkedjen.</p>
-            )}
+          <Section title={mode === 'review' ? 'Átvizsgált szöveg' : 'Dokumentum-kontextus'}>
+            <ContextDescription info={contextInfo} mode={mode} />
           </Section>
 
           <Section title="Hogyan gondolkodott">

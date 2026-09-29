@@ -1,0 +1,90 @@
+import { useCallback, useState } from 'react';
+import { MODES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
+
+export interface CustomPreset {
+  id: string;
+  mode: Mode;
+  label: string;
+}
+
+export interface Settings {
+  /** Must match APP_ACCESS_KEY on the server */
+  accessKey: string;
+  styleProfile: StyleProfile;
+  customPresets: CustomPreset[];
+  /** Insert without the preview step */
+  autoApply: boolean;
+}
+
+export const DEFAULT_SETTINGS: Settings = {
+  accessKey: '',
+  styleProfile: { addressing: '', tone: '', notes: '' },
+  customPresets: [],
+  autoApply: false,
+};
+
+const STORAGE_KEY = 'word-writer-settings-v1';
+
+const ADDRESSING: Addressing[] = ['', 'formal', 'informal'];
+const TONES: Tone[] = ['', 'legal', 'business', 'plain', 'friendly'];
+
+/** Anything read back from storage is validated, so a broken or old value never crashes the pane */
+function sanitize(raw: unknown): Settings {
+  const value = (raw ?? {}) as Partial<Settings>;
+  const style = (value.styleProfile ?? {}) as Partial<StyleProfile>;
+  return {
+    accessKey: typeof value.accessKey === 'string' ? value.accessKey : '',
+    styleProfile: {
+      addressing: ADDRESSING.includes(style.addressing as Addressing) ? style.addressing! : '',
+      tone: TONES.includes(style.tone as Tone) ? style.tone! : '',
+      notes: typeof style.notes === 'string' ? style.notes : '',
+    },
+    customPresets: (Array.isArray(value.customPresets) ? value.customPresets : []).filter(
+      (p): p is CustomPreset => !!p && typeof p.id === 'string' && typeof p.label === 'string' && MODES.includes(p.mode)
+    ),
+    autoApply: value.autoApply === true,
+  };
+}
+
+export function loadSettings(): Settings {
+  try {
+    const stored = localStorage.getItem(STORAGE_KEY);
+    return stored ? sanitize(JSON.parse(stored)) : DEFAULT_SETTINGS;
+  } catch {
+    // Storage can be blocked or empty in some Office hosts; the defaults still work
+    return DEFAULT_SETTINGS;
+  }
+}
+
+function saveSettings(settings: Settings) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  } catch {
+    // Not persisted, but the current session keeps working
+  }
+}
+
+export function useSettings(): [Settings, (update: (current: Settings) => Settings) => void] {
+  const [settings, setSettings] = useState<Settings>(loadSettings);
+  const update = useCallback((updater: (current: Settings) => Settings) => {
+    setSettings(current => {
+      const next = updater(current);
+      saveSettings(next);
+      return next;
+    });
+  }, []);
+  return [settings, update];
+}
+
+/** Short Hungarian summary of the style profile, for the details panel */
+export function describeStyle(style: StyleProfile): string {
+  const parts: string[] = [];
+  if (style.addressing === 'formal') parts.push('magázó');
+  if (style.addressing === 'informal') parts.push('tegező');
+  if (style.tone === 'legal') parts.push('jogi hangnem');
+  if (style.tone === 'business') parts.push('üzleti hangnem');
+  if (style.tone === 'plain') parts.push('közérthető');
+  if (style.tone === 'friendly') parts.push('barátságos');
+  if (style.notes.trim()) parts.push('egyéni irányelvek');
+  return parts.join(', ');
+}
