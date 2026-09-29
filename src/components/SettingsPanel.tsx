@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2 } from 'lucide-react';
 import { playSound } from '../services/sound';
+import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
@@ -149,6 +150,43 @@ export default function SettingsPanel({
               <Volume2 className="w-3.5 h-3.5 mr-1" />Kipróbálás
             </button>
           </div>
+        </Card>
+
+        <Card title="Diktálás">
+          {(['local', 'cloud'] as const).map(engine => (
+            <label key={engine} className="flex items-start space-x-2 cursor-pointer">
+              <input
+                type="radio"
+                name="dictation-engine"
+                checked={settings.dictation.engine === engine}
+                onChange={() => onChange(s => ({ ...s, dictation: { ...s.dictation, engine } }))}
+                className="mt-0.5"
+              />
+              {engine === 'local' ? (
+                <span>
+                  Helyben, ezen a gépen <span className="text-neutral-400">(ajánlott)</span>
+                  <span className="block text-xs text-neutral-500">A hangfelvétel nem hagyja el a gépet. Első használatkor egyszer letöltöm a beszédfelismerő modellt, utána a gépről töltődik be.</span>
+                </span>
+              ) : (
+                <span>
+                  Felhőben (Vertex AI, EU)
+                  <span className="block text-xs text-neutral-500">Pontosabb lehet, de a hang a szerver AI-szolgáltatójához kerül, és hangot nem lehet maszkolni. A szerver csak akkor fogadja, ha EU-régióban dolgoz fel.</span>
+                </span>
+              )}
+            </label>
+          ))}
+          {settings.dictation.engine === 'local' && (
+            <label className="block text-xs font-medium text-neutral-700">
+              Helyi modell
+              <select
+                value={settings.dictation.localModel}
+                onChange={e => onChange(s => ({ ...s, dictation: { ...s.dictation, localModel: e.target.value as LocalModel } }))}
+                className={`${inputClass} mt-1`}
+              >
+                {Object.entries(LOCAL_MODELS).map(([key, model]) => <option key={key} value={key}>{model.label}</option>)}
+              </select>
+            </label>
+          )}
         </Card>
 
         <Card title="Adatvédelem">

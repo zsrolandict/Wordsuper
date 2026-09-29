@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { LOCAL_MODELS, type LocalModel } from './localSpeech';
 import { ADDRESSING_VALUES, MODES, TONE_VALUES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
 
 export interface CustomPreset {
@@ -18,6 +19,11 @@ export interface Settings {
   masking: { enabled: boolean; extraTerms: string };
   /** A soft chime when an answer is ready */
   sound: boolean;
+  /**
+   * local: Whisper runs on this machine, the recording never leaves it (default).
+   * cloud: the server's AI transcribes it; only allowed when the server processes data in the EU.
+   */
+  dictation: { engine: 'local' | 'cloud'; localModel: LocalModel };
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -27,6 +33,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoApply: false,
   masking: { enabled: true, extraTerms: '' },
   sound: true,
+  dictation: { engine: 'local', localModel: 'base' },
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -52,6 +59,10 @@ function sanitize(raw: unknown): Settings {
       extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
     },
     sound: value.sound !== false,
+    dictation: {
+      engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
+      localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'base',
+    },
   };
 }
 

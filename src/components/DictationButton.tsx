@@ -1,13 +1,18 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Mic, Square, Loader2 } from 'lucide-react';
 import { describeRequestError, transcribeAudio } from '../services/aiService';
+import { transcribeLocally, type LocalModel } from '../services/localSpeech';
 
 /** Longest recording; the server accepts about two minutes of compressed speech */
 const MAX_RECORDING_SECONDS = 110;
 // Formats the AI accepts, in order of preference; browsers support different ones
 const RECORDING_TYPES = ['audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm;codecs=opus', 'audio/webm'];
 
-type State = { kind: 'idle' } | { kind: 'recording'; seconds: number } | { kind: 'transcribing' };
+type State =
+  | { kind: 'idle' }
+  | { kind: 'recording'; seconds: number }
+  /** download: share of the local model downloaded so far (first use only) */
+  | { kind: 'transcribing'; download: number | null };
 
 /**
  * Word on the web shows microphone access only after the add-in asked Office for it. The first time the user
@@ -31,11 +36,13 @@ function microphoneError(error: unknown): string {
 }
 
 /**
- * Mikrofon gomb: felvesz egy rövid diktálást, az AI átírja szöveggé, és az utasítás mezőbe teszi.
- * A hangfelvételt nem lehet maszkolni, ezt a gomb súgója is jelzi.
+ * Mikrofon gomb: felvesz egy rövid diktálást, szöveggé írja, és az utasítás mezőbe teszi. Alapból helyben
+ * (Whisper a gépen, a hang nem megy sehova); felhőben csak akkor, ha a szerver EU-ban dolgoz fel.
  */
-export default function DictationButton({ accessKey, disabled, onText, onError }: {
+export default function DictationButton({ accessKey, engine, localModel, disabled, onText, onError }: {
   accessKey: string;
+  engine: 'local' | 'cloud';
+  localModel: LocalModel;
   disabled: boolean;
   onText: (text: string) => void;
   onError: (message: string) => void;
@@ -82,15 +89,20 @@ export default function DictationButton({ accessKey, disabled, onText, onError }
         setState({ kind: 'idle' });
         return;
       }
-      setState({ kind: 'transcribing' });
+      setState({ kind: 'transcribing', download: null });
       const controller = new AbortController();
       abortRef.current = controller;
       try {
-        const text = await transcribeAudio(recording, accessKey, controller.signal);
+        const text = engine === 'local'
+          ? await transcribeLocally(recording, localModel, ({ download }) => setState({ kind: 'transcribing', download }), controller.signal)
+          : await transcribeAudio(recording, accessKey, controller.signal);
         if (text) onText(text);
         else onError('Nem értettem beszédet a felvételen. Próbáld újra, közelebb a mikrofonhoz.');
       } catch (error) {
-        if (!controller.signal.aborted) onError(describeRequestError(error));
+        if (controller.signal.aborted) return;
+        onError(engine === 'local'
+          ? `A helyi beszédfelismerés nem sikerült: ${error instanceof Error ? error.message : String(error)}. Első használatkor a modellt le kell tölteni (huggingface.co), ehhez internet kell; régebbi gépen vagy Word-változatban előfordulhat, hogy nem fut. Ilyenkor a Beállításokban választhatod a felhős (EU) diktálást.`
+          : describeRequestError(error));
       } finally {
         abortRef.current = null;
         setState({ kind: 'idle' });
@@ -126,11 +138,21 @@ export default function DictationButton({ accessKey, disabled, onText, onError }
       </button>
     );
   }
+  if (state.kind === 'transcribing' && state.download !== null) {
+    return (
+      <span className="h-11 px-2 shrink-0 flex items-center text-[11px] text-neutral-600 border border-neutral-300 rounded-xl" title="Első használat: a beszédfelismerő modell letöltése, utána a gépről töltődik">
+        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+        Modell {Math.round(state.download * 100)}%
+      </span>
+    );
+  }
   return (
     <button
       onClick={start}
       disabled={disabled || state.kind === 'transcribing'}
-      title="Diktálás: mondd el, mit szeretnél. A felvételt az AI írja át szöveggé (a hangot nem lehet maszkolni)."
+      title={engine === 'local'
+        ? 'Diktálás: mondd el, mit szeretnél. Ezen a gépen írom át szöveggé, a hang nem hagyja el a gépet.'
+        : 'Diktálás: mondd el, mit szeretnél. A szerver AI-ja (EU) írja át szöveggé; a hangot nem lehet maszkolni.'}
       aria-label="Diktálás"
       className="w-11 h-11 shrink-0 flex items-center justify-center border border-neutral-300 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 rounded-xl transition-colors"
     >

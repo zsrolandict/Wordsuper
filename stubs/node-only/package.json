@@ -1,0 +1,6 @@
+{
+  "name": "node-only-stub",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Stands in for transformers.js's Node-only dependencies (onnxruntime-node, sharp): the add-in only uses its browser build."
+}

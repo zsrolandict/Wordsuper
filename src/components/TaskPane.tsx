@@ -677,6 +677,8 @@ export default function TaskPane() {
           {!isSending && (
             <DictationButton
               accessKey={settings.accessKey}
+              engine={settings.dictation.engine}
+              localModel={settings.dictation.localModel}
               disabled={isBusy}
               onText={text => setInput(current => (current.trim() ? `${current.trimEnd()} ${text}` : text))}
               onError={message => addMessage({ role: 'system', content: message })}

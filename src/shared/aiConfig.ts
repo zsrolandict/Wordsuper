@@ -76,7 +76,9 @@ export type ApiErrorCode =
   | 'BAD_REQUEST'
   | 'SERVER_ERROR'
   /** The model stopped early (length limit, safety filter…), so the answer is incomplete */
-  | 'INCOMPLETE';
+  | 'INCOMPLETE'
+  /** Cloud dictation is refused unless the server processes data in the EU */
+  | 'DICTATION_NOT_ALLOWED';
 
 export const contextLimitFor = (mode: Mode) =>
   mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;

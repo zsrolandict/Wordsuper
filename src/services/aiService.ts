@@ -182,6 +182,8 @@ export function describeRequestError(error: unknown): string {
         return 'Hibás vagy hiányzó hozzáférési kulcs. Add meg a Beállításokban (fogaskerék ikon fent).';
       case 'ACCESS_KEY_NOT_CONFIGURED':
         return 'A szerveren nincs rendesen beállítva a hozzáférési kulcs (APP_ACCESS_KEY hiányzik, túl rövid vagy még a mintaérték), ezért a szerver minden kérést elutasít. Az üzemeltetőnek kell beállítania.';
+      case 'DICTATION_NOT_ALLOWED':
+        return 'A felhős diktálás ezen a szerveren nem engedélyezett, mert a hang nem EU-ban (Vertex AI, europe-… régió) kerülne feldolgozásra. Használd a helyi diktálást (Beállítások → Diktálás), ott a hang el sem hagyja a gépet.';
       case 'RATE_LIMITED':
         return 'Túl sok kérés érkezett egy percen belül. Várj egy kicsit, és próbáld újra.';
       case 'INCOMPLETE':

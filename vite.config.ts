@@ -67,6 +67,10 @@ function aistudioMediaPlugin(): Plugin {
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), aistudioMediaPlugin()],
+    // The local dictation worker (Whisper) uses ES module imports
+    worker: { format: 'es' as const },
+    // Pre-bundled at startup: otherwise the dev server reloads the page (and the conversation) on first dictation
+    optimizeDeps: { include: ['@huggingface/transformers'] },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

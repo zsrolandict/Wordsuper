@@ -30,6 +30,8 @@ export interface ModelProvider {
   readonly model: string;
   /** Where the request is processed, e.g. "Gemini API" or "Vertex AI (europe-west1)" */
   readonly location: string;
+  /** The data is processed only inside the EU (Vertex AI in a europe-* region) */
+  readonly euResident: boolean;
   generate(options: GenerateOptions, onEvent: (event: StreamEvent) => void): Promise<StreamFinish>;
   /** Speech to text, for dictating instructions */
   transcribe(options: TranscribeOptions): Promise<string>;

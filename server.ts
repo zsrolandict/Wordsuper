@@ -129,6 +129,13 @@ async function startServer() {
     if ("problem" in ai) {
       return res.status(500).json({ error: ai.problem, code: "SERVER_ERROR" });
     }
+    // A recording can't be masked: it may only go to the cloud when it stays in the EU (Vertex AI, europe-* region)
+    if (!ai.provider.euResident) {
+      return res.status(403).json({
+        error: "Cloud dictation is only allowed with Vertex AI in an EU region (AI_PROVIDER=vertex, GOOGLE_CLOUD_LOCATION=europe-…).",
+        code: "DICTATION_NOT_ALLOWED",
+      });
+    }
     const parsed = parseTranscribeRequest(req.body);
     if ("error" in parsed) {
       return res.status(400).json({ error: parsed.error, code: "BAD_REQUEST" });
