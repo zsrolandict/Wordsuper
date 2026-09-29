@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info } from 'lucide-react';
+import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus } from 'lucide-react';
+import { requestForDefinitionsSection, requestForIssue, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo } from '../services/structure';
 import { UserFacingError, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
 import { formatNumber } from '../services/format';
@@ -30,7 +31,13 @@ function JumpButton({ onClick, label = 'Ugrás' }: { onClick: () => void; label?
  * Szerkezet nézet: definiált fogalmak, kereszthivatkozások és a hibáik – AI nélkül, azonnal.
  * A kurzor alatti fogalom definíciója vagy a hivatkozott pont szövege görgetés nélkül látszik.
  */
-export default function StructurePanel({ active }: { active: boolean }) {
+export default function StructurePanel({ active, busy, onRequest }: {
+  active: boolean;
+  /** An AI request is running; the suggestion buttons wait for it */
+  busy: boolean;
+  /** Hands a fix or a new section over to the assistant */
+  onRequest: (request: StructureRequest) => void;
+}) {
   const [data, setData] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -197,10 +204,37 @@ export default function StructurePanel({ active }: { active: boolean }) {
               <span className="mr-1.5 mt-px shrink-0">{ISSUE_ICONS[issue.kind]}</span>
               <span className="break-words">{issue.message}</span>
             </span>
-            <span className="ml-2"><JumpButton onClick={() => jump(issue.at.paragraph)} /></span>
+            <span className="ml-2 flex flex-col items-end space-y-1">
+              <JumpButton onClick={() => jump(issue.at.paragraph)} />
+              {(() => {
+                const request = requestForIssue(issue, graph);
+                return request && (
+                  <button
+                    onClick={() => onRequest(request)}
+                    disabled={busy}
+                    title="Az AI korrektúrás javítást javasol erre a bekezdésre (előbb megmutatja)"
+                    className="flex items-center shrink-0 text-[11px] font-medium text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
+                  >
+                    <Wand2 className="w-3 h-3 mr-0.5" />
+                    {issue.kind === 'undefined-quoted' ? 'Definiálás' : 'Javaslat'}
+                  </button>
+                );
+              })()}
+            </span>
           </div>
         )))}
 
+        {graph && data && list === 'terms' && (
+          <button
+            onClick={() => onRequest(requestForDefinitionsSection(graph, data.paragraphs.length))}
+            disabled={busy}
+            title="Az AI megírja a fejezetet a szerződés meglévő definíciói alapján; beszúrás előtt megmutatja"
+            className="w-full flex items-center justify-center py-1.5 text-xs font-medium border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50 rounded-lg"
+          >
+            <ListPlus className="w-3.5 h-3.5 mr-1" />
+            Fogalommeghatározások fejezet készítése
+          </button>
+        )}
         {graph && list === 'terms' && (graph.terms.length === 0 ? (
           <p className="text-xs text-neutral-500">Nem találtam definiált fogalmat (pl. „(a továbbiakban: Megbízó)” vagy „„Szerződés”: jelenti…”).</p>
         ) : [...graph.terms].sort((a, b) => a.term.localeCompare(b.term, 'hu')).map(term => (

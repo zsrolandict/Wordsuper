@@ -52,6 +52,8 @@ export interface StructureIssue {
   kind: IssueKind;
   message: string;
   at: Occurrence;
+  /** The term or the reference text the issue is about */
+  subject: string;
 }
 
 export interface DocumentGraph {
@@ -163,7 +165,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
     const existing = byTerm.get(term);
     if (existing) {
       if (existing.definedAt.paragraph !== at.paragraph) {
-        issues.push({ kind: 'duplicate', message: `„${term}” kétszer van definiálva (az első a ${existing.definedAt.paragraph + 1}. bekezdésben).`, at });
+        issues.push({ kind: 'duplicate', message: `„${term}” kétszer van definiálva (az első a ${existing.definedAt.paragraph + 1}. bekezdésben).`, at, subject: term });
       }
       return;
     }
@@ -215,7 +217,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   for (const entry of terms) {
     entry.usages.sort((a, b) => a.paragraph - b.paragraph || a.start - b.start);
     if (entry.usages.length === 0) {
-      issues.push({ kind: 'unused', message: `„${entry.term}” definiálva van, de a szerződés sehol nem használja.`, at: entry.definedAt });
+      issues.push({ kind: 'unused', message: `„${entry.term}” definiálva van, de a szerződés sehol nem használja.`, at: entry.definedAt, subject: entry.term });
     }
   }
 
@@ -260,9 +262,9 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   references.sort((a, b) => a.paragraph - b.paragraph || a.start - b.start);
   for (const ref of references) {
     if (ref.target === null && ref.kind === 'annex') {
-      issues.push({ kind: 'missing-annex', message: `A(z) ${ref.label}. számú melléklet nincs ebben a dokumentumban („${ref.raw}”) – ha külön fájl, ez rendben van.`, at: ref });
+      issues.push({ kind: 'missing-annex', message: `A(z) ${ref.label}. számú melléklet nincs ebben a dokumentumban („${ref.raw}”) – ha külön fájl, ez rendben van.`, at: ref, subject: ref.raw });
     } else if (ref.target === null) {
-      issues.push({ kind: 'broken-reference', message: `A „${ref.raw}” hivatkozás célja (${ref.label}. pont) nem található ebben a dokumentumban.`, at: ref });
+      issues.push({ kind: 'broken-reference', message: `A „${ref.raw}” hivatkozás célja (${ref.label}. pont) nem található ebben a dokumentumban.`, at: ref, subject: ref.raw });
     }
   }
 
@@ -279,7 +281,7 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
       if (definitionSpans.some(span => overlaps(span, occurrence))) continue;
       reported.add(term);
       if (occurrencesOf(term) < 2) continue;
-      issues.push({ kind: 'undefined-quoted', message: `„${term}” idézőjelben szerepel, mintha definiált fogalom lenne, de nincs definiálva.`, at: occurrence });
+      issues.push({ kind: 'undefined-quoted', message: `„${term}” idézőjelben szerepel, mintha definiált fogalom lenne, de nincs definiálva.`, at: occurrence, subject: term });
     }
   });
 

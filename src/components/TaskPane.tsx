@@ -9,11 +9,13 @@ import {
   applyReviewFindings,
   insertCommentAt,
   insertGenerated,
+  placeAtParagraph,
   releaseRange,
   takeSnapshot,
   type DocumentSnapshot,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
+import type { StructureRequest } from '../services/structureSuggestions';
 import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
@@ -164,13 +166,28 @@ export default function TaskPane() {
     }
   };
 
-  const handleSend = async (instructionOverride?: string, modeOverride?: Mode) => {
+  /** From the structure view: put the cursor in place, then ask the assistant */
+  const runStructureRequest = async (request: StructureRequest) => {
+    if (busyRef.current) return;
+    try {
+      await placeAtParagraph(request.paragraph, request.cursor);
+    } catch (error) {
+      setTab('assistant');
+      addMessage({ role: 'system', content: error instanceof UserFacingError ? error.message : 'Nem sikerült odaállni a bekezdéshez.' });
+      return;
+    }
+    setTab('assistant');
+    setMode(request.mode);
+    await handleSend(request.instruction, request.mode, request.label);
+  };
+
+  const handleSend = async (instructionOverride?: string, modeOverride?: Mode, displayText?: string) => {
     const typed = (instructionOverride ?? input).trim();
     if (!typed || !tryLock()) return;
     if (settings.sound) primeSound();
     const chime = (kind: 'done' | 'error') => { if (settings.sound) playSound(kind); };
     // A built-in quick button can stand for a longer instruction; the chat shows the short label
-    const preset = matchPreset(typed, modeOverride ?? mode, settings.customPresets);
+    const preset = displayText ? null : matchPreset(typed, modeOverride ?? mode, settings.customPresets);
     const instruction = (preset && !preset.custom && PRESET_INSTRUCTIONS[preset.label]) || typed;
     setIsSending(true);
     const controller = new AbortController();
@@ -186,12 +203,13 @@ export default function TaskPane() {
       if (requestMode !== mode) setMode(requestMode);
       const current = pendingRef.current;
       // Amíg van döntésre váró javaslat ugyanebben a módban, az új utasítás azt finomítja
-      const refining = current !== null && current.mode === requestMode;
+      // A request from the structure view is always a new one
+      const refining = displayText === undefined && current !== null && current.mode === requestMode;
       if (current && !refining) {
         await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
       }
 
-      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${typed}`, preset: preset ?? undefined });
+      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${displayText ?? typed}`, preset: preset ?? undefined });
 
       if (typeof Word === 'undefined') {
         addMessage({ role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' });
@@ -502,7 +520,7 @@ export default function TaskPane() {
       </div>
 
       <div className={tab === 'structure' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-        <StructurePanel active={tab === 'structure'} />
+        <StructurePanel active={tab === 'structure'} busy={isBusy} onRequest={runStructureRequest} />
       </div>
       <div className={tab === 'compare' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <ComparePanel settings={settings} onRateLimit={setRateLimit} onOpenSettings={() => setView('settings')} />

@@ -371,10 +371,26 @@ export async function applyDocumentEdit(
   });
 }
 
-/** Inserts generated text at the tracked selection (replacing it, if there was one) */
+/**
+ * Inserts generated text at the tracked selection (replacing it, if there was one). At the start or the end of
+ * a non-empty paragraph it becomes paragraphs of its own instead of gluing onto that paragraph's text.
+ */
 export async function insertGenerated(range: Word.Range, text: string) {
   await Word.run(range, async (context) => {
-    range.insertText(text, 'Replace');
+    range.load('text');
+    const paragraph = range.paragraphs.getFirst();
+    paragraph.load('text');
+    const before = paragraph.getRange('Start').expandTo(range.getRange('Start'));
+    before.load('text');
+    await context.sync();
+
+    let insert = text;
+    if (!range.text && paragraph.text.trim()) {
+      const offset = before.text.length;
+      if (offset === 0) insert = `${text}\n`;
+      else if (offset >= paragraph.text.length) insert = `\n${text}`;
+    }
+    range.insertText(insert, 'Replace');
     await context.sync();
     await untrack(context, range);
   });
@@ -545,6 +561,19 @@ export async function jumpToParagraph(index: number, rememberPosition: boolean):
     target.select();
     await context.sync();
     return previous;
+  });
+}
+
+/** Puts the cursor where a request from the structure view should work: the whole paragraph, or before it */
+export async function placeAtParagraph(index: number, where: 'select' | 'before') {
+  await Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    const target = paragraphs.items[index];
+    if (!target) throw new UserFacingError('Ez a bekezdés már nincs meg a dokumentumban. Frissítsd a nézetet.');
+    (where === 'select' ? target.getRange('Whole') : target.getRange('Start')).select();
+    await context.sync();
   });
 }
 
