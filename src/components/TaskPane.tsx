@@ -1,30 +1,47 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2 } from 'lucide-react';
+import { Send, PenTool, AlertCircle, Loader2, House } from 'lucide-react';
 import { editDocumentTextStream } from '../services/aiService';
+import { MAX_CONTEXT_CHARS, MAX_SELECTION_CHARS } from '../shared/aiConfig';
+import RequestDetails, { type Mode, type RequestDetailsData } from './RequestDetails';
 
 interface Message {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   isLoading?: boolean;
+  /** Rövid visszajelzés arról, mi történt a dokumentumban */
+  status?: string;
+  /** Mit kapott az AI és hogyan gondolkodott – a lenyitható Részletek panelhez */
+  details?: RequestDetailsData;
 }
 
+const WELCOME_MESSAGE: Message = { 
+  id: 'welcome', 
+  role: 'assistant', 
+  content: 'Szia! Jelölj ki egy szöveget a dokumentumban, és válassz módot alul! Választhatsz, hogy kicseréljem a szöveget korrektúrával, vagy egy széljegyzetben (Word Megjegyzés) elemezzem a kijelölt részt.' 
+};
+
 export default function TaskPane() {
-  const [messages, setMessages] = useState<Message[]>([
-    { 
-      id: 'welcome', 
-      role: 'assistant', 
-      content: 'Szia! Jelölj ki egy szöveget a dokumentumban, és válassz módot alul! Választhatsz, hogy kicseréljem a szöveget korrektúrával, vagy egy széljegyzetben (Word Megjegyzés) elemezzem a kijelölt részt.' 
-    }
-  ]);
+  const [messages, setMessages] = useState<Message[]>([WELCOME_MESSAGE]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
-  const [mode, setMode] = useState<'edit' | 'comment' | 'generate'>('edit');
+  const [mode, setMode] = useState<Mode>('edit');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  const updateMessage = (id: string, update: (m: Message) => Message) => {
+    setMessages(prev => prev.map(m => (m.id === id ? update(m) : m)));
+  };
+
+  // Vissza a kezdőképernyőre, új beszélgetéssel
+  const goToMainMenu = () => {
+    setMessages([WELCOME_MESSAGE]);
+    setInput('');
+    setMode('edit');
+  };
 
   const handleSend = async (instructionOverride?: string) => {
     const userInstruction = instructionOverride || input;
@@ -63,19 +80,42 @@ export default function TaskPane() {
           return;
         }
 
+        // Szerkesztésnél a teljes kijelölés lecserélődik, de az AI csak az elejét kapja meg – a vége elveszne
+        if (mode === 'edit' && selection.text.length > MAX_SELECTION_CHARS) {
+          setMessages(prev => [...prev, { id: Date.now().toString(), role: 'system', content: `A kijelölés túl hosszú (${selection.text.length.toLocaleString('hu-HU')} karakter). Szerkesztésnél egyszerre legfeljebb ${MAX_SELECTION_CHARS.toLocaleString('hu-HU')} karaktert tudok átírni, különben a kijelölés vége elveszne. Jelölj ki kisebb részt!` }]);
+          setIsSending(false);
+          return;
+        }
+
         const originalText = selection.text || "";
-        // Biztonsági okokból és a hálózat kímélése miatt vágjuk meg a kontextust a kliens oldalon is (kb 30-40 ezer karakter elég)
-        const documentContext = body.text ? body.text.substring(0, 40000) : "";
+        // Biztonsági okokból és a hálózat kímélése miatt vágjuk meg a kontextust a kliens oldalon is (ugyanott, ahol a szerver)
+        const documentContext = body.text ? body.text.substring(0, MAX_CONTEXT_CHARS) : "";
         
         const loadingId = Date.now().toString() + 'load';
-        setMessages(prev => [...prev, { id: loadingId, role: 'assistant', content: '', isLoading: true }]);
+        const startedAt = Date.now();
+        setMessages(prev => [...prev, {
+          id: loadingId,
+          role: 'assistant',
+          content: '',
+          isLoading: true,
+          details: {
+            mode,
+            instruction: userInstruction,
+            selectionText: originalText,
+            documentChars: (body.text || "").length,
+            thoughts: '',
+            startedAt,
+          },
+        }]);
 
-        const replaceLoadingMessage = (role: Message['role'], content: string) => {
-          setMessages(prev => prev.map(m =>
-            m.id === loadingId
-              ? { id: loadingId, role, content }
-              : m
-          ));
+        // A válasz lezárása: a részleteket megtartjuk, hogy utólag is visszanézhető legyen
+        const finishLoadingMessage = (changes: Partial<Message>) => {
+          updateMessage(loadingId, m => ({
+            ...m,
+            ...changes,
+            isLoading: false,
+            details: m.details && { ...m.details, durationMs: Date.now() - startedAt },
+          }));
         };
 
         // Hívjuk meg a saját backendünket a szolgáltatáson keresztül streaminggel
@@ -86,24 +126,27 @@ export default function TaskPane() {
             userInstruction,
             documentContext,
             mode,
-            (chunk) => {
+            {
               // Frissítsük az UI-t folyamatosan, ahogy jönnek a szavak
-              setMessages(prev => prev.map(m =>
-                m.id === loadingId
-                  ? { ...m, content: m.content + chunk, isLoading: false }
-                  : m
-              ));
+              onText: (chunk) => updateMessage(loadingId, m => ({ ...m, content: m.content + chunk, isLoading: false })),
+              // A gondolkodás csak a Részletek panelbe kerül, a dokumentumba soha
+              onThought: (chunk) => updateMessage(loadingId, m => {
+                if (!m.details) return m;
+                const previous = m.details.thoughts;
+                const separator = previous && !previous.endsWith('\n') ? '\n\n' : '';
+                return { ...m, details: { ...m.details, thoughts: previous + separator + chunk } };
+              }),
             }
           );
         } catch (aiError) {
           // Hibás vagy félbeszakadt válasz esetén a dokumentumhoz nem nyúlunk
           const detail = aiError instanceof Error ? aiError.message : '';
-          replaceLoadingMessage('system', `Nem sikerült választ kapni az AI-tól, a dokumentumot nem módosítottam. Kérlek próbáld újra.${detail ? `\n(${detail})` : ''}`);
+          finishLoadingMessage({ role: 'system', content: `Nem sikerült választ kapni az AI-tól, a dokumentumot nem módosítottam. Kérlek próbáld újra.${detail ? `\n(${detail})` : ''}` });
           return;
         }
 
         if (!newText.trim()) {
-          replaceLoadingMessage('system', 'Az AI üres választ adott, ezért nem módosítottam a dokumentumot. Kérlek próbáld újra.');
+          finishLoadingMessage({ role: 'system', content: 'Az AI üres választ adott, ezért nem módosítottam a dokumentumot. Kérlek próbáld újra.' });
           return;
         }
 
@@ -129,10 +172,11 @@ export default function TaskPane() {
             }
           }
 
-          replaceLoadingMessage('assistant', mode === 'comment' ? '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).' : mode === 'generate' ? '✅ A szöveget beszúrtam a dokumentumba!' : '✅ A szöveget kicseréltem! Ellenőrizd a korrektúrát a dokumentumban.');
+          // Az AI válasza a buborékban marad, alá kerül a visszajelzés
+          finishLoadingMessage({ status: mode === 'comment' ? '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).' : mode === 'generate' ? '✅ A szöveget beszúrtam a dokumentumba!' : '✅ A szöveget kicseréltem! Ellenőrizd a korrektúrát a dokumentumban.' });
         } catch (writeError) {
           console.error("Write error in Word:", writeError);
-          replaceLoadingMessage('system', 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál?');
+          finishLoadingMessage({ role: 'system', content: 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál?' });
         }
       });
 
@@ -153,12 +197,25 @@ export default function TaskPane() {
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
       {/* Header */}
-      <div className="bg-blue-600 px-4 py-4 text-white shrink-0 shadow-md z-10">
-        <h1 className="text-lg font-bold flex items-center">
-          <PenTool className="w-5 h-5 mr-2" />
-          Word Writer
-        </h1>
-        <p className="text-blue-100 text-xs mt-1">Szerkessz, véleményezz, vagy generálj!</p>
+      <div className="bg-blue-600 px-4 py-4 text-white shrink-0 shadow-md z-10 flex items-start justify-between">
+        <div>
+          <h1 className="text-lg font-bold flex items-center">
+            <PenTool className="w-5 h-5 mr-2" />
+            Word Writer
+          </h1>
+          <p className="text-blue-100 text-xs mt-1">Szerkessz, véleményezz, vagy generálj!</p>
+        </div>
+        {messages.length > 1 && (
+          <button
+            onClick={goToMainMenu}
+            disabled={isSending}
+            title={isSending ? 'Várd meg, amíg elkészül a válasz' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
+            className="flex items-center shrink-0 px-2.5 py-1.5 text-xs font-medium bg-blue-500 hover:bg-blue-400 disabled:opacity-50 disabled:hover:bg-blue-500 rounded-lg transition-colors"
+          >
+            <House className="w-4 h-4 mr-1" />
+            Főmenü
+          </button>
+        )}
       </div>
 
       {/* Chat Area */}
@@ -173,7 +230,11 @@ export default function TaskPane() {
             >
               {msg.role === 'system' && <AlertCircle className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />}
               {msg.isLoading && <Loader2 className="w-4 h-4 inline-block mr-2 animate-spin text-blue-600" />}
-              <span className="whitespace-pre-wrap">{msg.content}</span>
+              {msg.isLoading && !msg.content
+                ? <span className="text-neutral-500">Gondolkodom…</span>
+                : <span className="whitespace-pre-wrap">{msg.content}</span>}
+              {msg.status && <p className="mt-2 text-xs font-medium text-green-700">{msg.status}</p>}
+              {msg.details && <RequestDetails details={msg.details} isLoading={!!msg.isLoading} />}
             </div>
           </div>
         ))}

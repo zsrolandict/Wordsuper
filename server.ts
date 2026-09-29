@@ -3,6 +3,7 @@ import path from "path";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import rateLimit from "express-rate-limit";
+import { AI_MODEL, MAX_CONTEXT_CHARS, MAX_SELECTION_CHARS } from "./src/shared/aiConfig";
 
 async function startServer() {
   const app = express();
@@ -39,8 +40,8 @@ async function startServer() {
       }
 
       // Truncate context just in case it slips past the 2mb somehow or uses too many tokens
-      const safeContext = documentContext ? documentContext.substring(0, 40000) : "";
-      const safeOriginal = originalText ? originalText.substring(0, 10000) : "";
+      const safeContext = documentContext ? documentContext.substring(0, MAX_CONTEXT_CHARS) : "";
+      const safeOriginal = originalText ? originalText.substring(0, MAX_SELECTION_CHARS) : "";
 
       let systemInstruction = "";
       let prompt = "";
@@ -83,16 +84,21 @@ RULES:
       res.setHeader('Connection', 'keep-alive');
 
       const responseStream = await ai.models.generateContentStream({
-        model: "gemini-2.5-flash",
+        model: AI_MODEL,
         contents: prompt,
         config: {
-          systemInstruction: systemInstruction
+          systemInstruction: systemInstruction,
+          // Stream the model's thought summaries too, so the task pane can show how it reached the answer
+          thinkingConfig: { includeThoughts: true }
         }
       });
 
       for await (const chunk of responseStream) {
-        if (chunk.text) {
-          res.write(`data: ${JSON.stringify({ text: chunk.text })}\n\n`);
+        for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
+          if (!part.text) continue;
+          // Thoughts are only shown in the task pane, never written into the document
+          const event = part.thought ? { thought: part.text } : { text: part.text };
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
         }
       }
 

@@ -1,3 +1,10 @@
+export interface StreamHandlers {
+  /** Answer text, the only part that may end up in the document */
+  onText: (chunk: string) => void;
+  /** The model's thought summary, shown in the task pane only */
+  onThought?: (chunk: string) => void;
+}
+
 /**
  * Service to call the AI backend and stream the response
  */
@@ -6,7 +13,7 @@ export async function editDocumentTextStream(
   instruction: string,
   documentContext: string = "",
   mode: 'edit' | 'comment' | 'generate' = 'edit',
-  onChunk: (chunk: string) => void
+  handlers: StreamHandlers
 ): Promise<string> {
   try {
     const response = await fetch('/api/edit-stream', {
@@ -52,7 +59,7 @@ export async function editDocumentTextStream(
             break;
           }
 
-          let data: { text?: string; error?: string };
+          let data: { text?: string; thought?: string; error?: string };
           try {
             data = JSON.parse(dataStr);
           } catch {
@@ -63,9 +70,12 @@ export async function editDocumentTextStream(
           if (data.error) {
             throw new Error(data.error);
           }
+          if (data.thought) {
+            handlers.onThought?.(data.thought);
+          }
           if (data.text) {
             fullText += data.text;
-            onChunk(data.text);
+            handlers.onText(data.text);
           }
         }
       }
