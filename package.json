@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.cjs",
     "lint": "tsc --noEmit",
-    "test": "tsx --test \"src/**/*.test.ts\" \"server/**/*.test.ts\""
+    "test": "tsx --test \"src/**/*.test.ts\" \"server/**/*.test.ts\"",
+    "word:server": "tsx scripts/word-local.ts",
+    "word:sideload": "office-addin-dev-settings sideload manifest.local.xml desktop --app word",
+    "word:remove": "office-addin-dev-settings unregister manifest.local.xml"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -35,6 +38,8 @@
     "@types/office-js": "^1.0.608",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "office-addin-dev-certs": "^3.0.1",
+    "office-addin-dev-settings": "^4.0.1",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "~5.8.2"

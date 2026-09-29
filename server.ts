@@ -1,5 +1,8 @@
 import express, { type NextFunction, type Request, type Response } from "express";
 import path from "path";
+import fs from "fs";
+import os from "os";
+import https from "https";
 import { createHash, timingSafeEqual } from "crypto";
 import { createServer as createViteServer } from "vite";
 import rateLimit from "express-rate-limit";
@@ -215,6 +218,23 @@ async function startServer() {
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
+  }
+
+  // Local HTTPS for Word on the desktop (scripts/word-local.ts, started by INDITAS.bat): Office add-ins must be
+  // served over HTTPS, with the certificate from `npx office-addin-dev-certs install`
+  const localHttpsPort = Number(process.env.LOCAL_HTTPS_PORT);
+  if (localHttpsPort) {
+    const certDir = path.join(os.homedir(), ".office-addin-dev-certs");
+    try {
+      const options = { cert: fs.readFileSync(path.join(certDir, "localhost.crt")), key: fs.readFileSync(path.join(certDir, "localhost.key")) };
+      https.createServer(options, app).listen(localHttpsPort, "127.0.0.1", () => {
+        console.log(`Server running on https://localhost:${localHttpsPort}`);
+      });
+    } catch {
+      console.error(`No development certificate in ${certDir}. Run: npx office-addin-dev-certs install`);
+      process.exit(1);
+    }
+    return;
   }
 
   app.listen(PORT, "0.0.0.0", () => {
