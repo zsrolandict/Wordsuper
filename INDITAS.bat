@@ -31,6 +31,17 @@ if not exist .env (
   exit /b 0
 )
 
+rem --- A .env meg a mintaertekeket tartalmazza? ---
+findstr /C:"MY_APP_ACCESS_KEY" /C:"MY_GEMINI_API_KEY" /C:"IDE_MASOLD" .env >nul
+if not errorlevel 1 (
+  echo.
+  echo A .env fajlban meg mintaertek van ^(MY_GEMINI_API_KEY / MY_APP_ACCESS_KEY^).
+  echo Most megnyitom: ird be a kulcsokat, MENTSD ^(Ctrl+S^), zard be, es inditsd ujra ezt a fajlt.
+  notepad .env
+  pause
+  exit /b 0
+)
+
 rem --- Helyi HTTPS tanusitvany (az elso inditaskor a Windows rakerdez: IGEN) ---
 echo Helyi HTTPS tanusitvany ellenorzese...
 call npx --yes office-addin-dev-certs install --days 365
