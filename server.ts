@@ -108,7 +108,8 @@ async function startServer() {
       masked: !!request.masked,
       maskedValues: request.maskedValues,
       wholeDocument: !!request.wholeDocument,
-      model: ai.provider.model,
+      depth: request.depth ?? "auto",
+      model: ai.provider.modelFor(request.depth),
       location: ai.provider.location,
       durationMs: Date.now() - startedAt,
       ...extra,
@@ -126,10 +127,10 @@ async function startServer() {
       res.setHeader('Connection', 'keep-alive');
 
       // Tells the task pane which model answered and where the text was processed
-      res.write(sseEvent({ meta: { model: ai.provider.model, location: ai.provider.location } }));
+      res.write(sseEvent({ meta: { model: ai.provider.modelFor(request.depth), location: ai.provider.location } }));
 
       const finish = await ai.provider.generate(
-        { systemInstruction, prompt, responseJsonSchema, signal: abortController.signal },
+        { systemInstruction, prompt, responseJsonSchema, signal: abortController.signal, depth: request.depth },
         // Thoughts are only shown in the task pane, never written into the document
         (event) => res.write(sseEvent(event.type === "thought" ? { thought: event.text } : { text: event.text }))
       );

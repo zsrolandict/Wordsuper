@@ -96,3 +96,14 @@ test('dictation uploads are validated', () => {
   assert.ok('error' in parseTranscribeRequest({ audio: 'not base64!', mimeType: 'audio/ogg' }));
   assert.ok('error' in parseTranscribeRequest({ audio: 'A'.repeat(4_000_004), mimeType: 'audio/ogg' }));
 });
+
+test('plain-text modes may ask back; the thinking depth is validated', () => {
+  for (const mode of ['edit', 'comment', 'generate'] as const) {
+    assert.match(buildPrompt({ mode, instruction: 'x', originalText: 'y', documentContext: '' }).systemInstruction, /===CLARIFY===/);
+  }
+  assert.doesNotMatch(buildPrompt({ mode: 'review', instruction: 'x', originalText: '', documentContext: 'doc' }).systemInstruction, /===CLARIFY===/);
+  const deep = parseRequest({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', depth: 'deep' });
+  const odd = parseRequest({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', depth: 'ultra' });
+  assert.ok('value' in deep && deep.value.depth === 'deep');
+  assert.ok('value' in odd && odd.value.depth === undefined);
+});

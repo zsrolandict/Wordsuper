@@ -442,7 +442,7 @@ export interface ReviewInsertOutcome {
 }
 
 /** Finds each quote in the document, attaches its comment there and applies the chosen fixes as tracked changes */
-export async function applyReviewFindings(items: ReviewItem[]): Promise<ReviewInsertOutcome> {
+export async function applyReviewFindings(items: ReviewItem[], options: { select?: boolean } = {}): Promise<ReviewInsertOutcome> {
   return Word.run(async (context) => {
     const body = context.document.body;
     const search = (text: string, matchCase: boolean) => {
@@ -460,6 +460,8 @@ export async function applyReviewFindings(items: ReviewItem[]): Promise<ReviewIn
 
     const outcome: ReviewInsertOutcome = { comments: 0, fixes: 0, notFound: [], fixFailed: [] };
     const toFix: { range: Word.Range; text: string }[] = [];
+    // Where the (last) change landed, to show it when asked
+    let landed: Word.Range | null = null;
     items.forEach((item, i) => {
       const fix = fixSearches[i];
       const fixRange = fix && fix.results.items.length > 0 ? fix.results.items[0] : null;
@@ -472,11 +474,15 @@ export async function applyReviewFindings(items: ReviewItem[]): Promise<ReviewIn
           // Before the fix, so the comment is anchored on the original wording
           hit.insertComment(reviewCommentText(item.finding, !!fixRange));
           outcome.comments++;
+          landed = hit;
         } else {
           outcome.notFound.push(item.finding);
         }
       }
-      if (fix && fixRange) toFix.push({ range: fixRange, text: fix.replacement });
+      if (fix && fixRange) {
+        toFix.push({ range: fixRange, text: fix.replacement });
+        landed = fixRange;
+      }
     });
     await context.sync();
 
@@ -488,7 +494,30 @@ export async function applyReviewFindings(items: ReviewItem[]): Promise<ReviewIn
         }
       });
     }
+    if (options.select && landed) {
+      (landed as Word.Range).select();
+      await context.sync();
+    }
     return outcome;
+  });
+}
+
+/** Selects the quoted passage of a finding, so Word scrolls there; false when it can't be found */
+export async function showFinding(finding: ReviewFinding): Promise<boolean> {
+  return Word.run(async (context) => {
+    const body = context.document.body;
+    const searches = searchCandidates(finding.quote).map(candidate => {
+      const results = body.search(candidate, { matchCase: false });
+      results.load('items/text');
+      return results;
+    });
+    await context.sync();
+    // Same trust rule as when inserting: the full quote's first match, or a shorter candidate that is unique
+    const hit = searches.find((results, k) => (k === 0 ? results.items.length > 0 : results.items.length === 1))?.items[0];
+    if (!hit) return false;
+    hit.select();
+    await context.sync();
+    return true;
   });
 }
 

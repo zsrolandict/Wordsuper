@@ -34,6 +34,9 @@ export type Addressing = typeof ADDRESSING_VALUES[number];
 export const TONE_VALUES = ['', 'legal', 'business', 'plain', 'friendly'] as const;
 export type Tone = typeof TONE_VALUES[number];
 export const SEVERITY_VALUES = ['high', 'medium', 'low'] as const;
+/** How hard the model thinks: auto lets the model decide, fast is quick and cheap, deep is thorough (and may use a stronger model) */
+export const DEPTH_VALUES = ['auto', 'fast', 'deep'] as const;
+export type Depth = typeof DEPTH_VALUES[number];
 export type Severity = typeof SEVERITY_VALUES[number];
 
 export interface StyleProfile {
@@ -62,6 +65,7 @@ export interface AIRequestBody {
   wholeDocument?: boolean;
   /** How many values the client replaced by placeholders; only its count goes into the audit log */
   maskedValues?: number;
+  depth?: Depth;
 }
 
 export interface ReviewFinding {
@@ -116,4 +120,34 @@ export function splitExplanation(answer: string, streaming = false): { text: str
     }
   }
   return { text: answer, explanation: '' };
+}
+
+/** An answer that asks back instead of guessing: this line, then {"question": "...", "options": ["...", ...]} */
+export const CLARIFY_MARKER = '===CLARIFY===';
+
+export interface Clarification {
+  question: string;
+  /** Complete instructions the user can send with one click */
+  options: string[];
+}
+
+/** The clarifying question in an answer, or null when the answer is a normal one */
+export function parseClarification(answer: string): Clarification | null {
+  const text = answer.trim();
+  if (!text.startsWith(CLARIFY_MARKER)) return null;
+  const json = text.slice(CLARIFY_MARKER.length);
+  const start = json.indexOf('{');
+  const end = json.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+  try {
+    const data = JSON.parse(json.slice(start, end + 1));
+    const question = typeof data?.question === 'string' ? data.question.trim() : '';
+    const options = (Array.isArray(data?.options) ? data.options : [])
+      .filter((o: unknown): o is string => typeof o === 'string' && o.trim() !== '')
+      .map((o: string) => o.trim())
+      .slice(0, 4);
+    return question && options.length ? { question, options } : null;
+  } catch {
+    return null;
+  }
 }

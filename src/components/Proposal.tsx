@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb } from 'lucide-react';
+import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb, LocateFixed } from 'lucide-react';
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
@@ -16,6 +16,17 @@ export interface FindingView extends ReviewFinding {
   notFound?: boolean;
   /** Set after inserting: the fix could not be applied, the quote was not found word for word */
   fixFailed?: boolean;
+  /** Decided one by one: inserted, or thrown away */
+  done?: 'applied' | 'dismissed';
+  /** "Mutasd" found nothing */
+  notShown?: boolean;
+}
+
+export interface FindingActions {
+  onToggle: (index: number, field: 'selected' | 'fix') => void;
+  onShow: (index: number) => void;
+  onApplyOne: (index: number) => void;
+  onDismiss: (index: number) => void;
 }
 
 export const SEVERITY_STYLES = {
@@ -78,13 +89,21 @@ function DocumentChangesView({ original, proposal }: { original: string; proposa
   );
 }
 
-function FindingsList({ findings, editable, onToggle }: { findings: FindingView[]; editable: boolean; onToggle: (index: number, field: 'selected' | 'fix') => void }) {
+const smallButton = 'flex items-center px-2 py-1 text-[11px] font-medium rounded-md border disabled:opacity-50';
+
+function FindingsList({ findings, editable, busy, actions }: { findings: FindingView[]; editable: boolean; busy: boolean; actions: FindingActions }) {
+  const { onToggle, onShow, onApplyOne, onDismiss } = actions;
   return (
     <ul className="space-y-2">
       {findings.map((finding, i) => {
         const missed = finding.notFound || finding.fixFailed;
         return (
-          <li key={i} className={`border rounded-lg p-2 ${missed ? 'border-amber-300 bg-amber-50' : 'border-neutral-200 bg-neutral-50'}`}>
+          <li key={i} className={`border rounded-lg p-2 ${finding.done === 'dismissed' ? 'opacity-50 border-neutral-200' : missed ? 'border-amber-300 bg-amber-50' : finding.done === 'applied' ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-neutral-50'}`}>
+            {finding.done && (
+              <span className={`block text-[11px] font-semibold mb-0.5 ${finding.done === 'applied' ? 'text-green-700' : 'text-neutral-500'}`}>
+                {finding.done === 'applied' ? '✓ Beszúrva' : '✖ Elvetve'}
+              </span>
+            )}
             <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded mr-1 ${SEVERITY_STYLES[finding.severity]}`}>
               {SEVERITY_LABELS[finding.severity]}
             </span>
@@ -96,7 +115,7 @@ function FindingsList({ findings, editable, onToggle }: { findings: FindingView[
                 <DiffView original={cleanQuote(finding.quote)} proposal={finding.suggestion} />
               </span>
             )}
-            {editable && (
+            {editable && !finding.done && (
               <span className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-neutral-700">
                 <label className="flex items-center cursor-pointer">
                   <input type="checkbox" checked={finding.selected} onChange={() => onToggle(i, 'selected')} className="mr-1" />
@@ -108,6 +127,35 @@ function FindingsList({ findings, editable, onToggle }: { findings: FindingView[
                     Javítás korrektúrával
                   </label>
                 )}
+              </span>
+            )}
+            {/* One by one: look at it in the document, then take it or leave it */}
+            {(editable || finding.done === 'applied') && finding.done !== 'dismissed' && (
+              <span className="flex flex-wrap gap-1.5 mt-1.5">
+                <button onClick={() => onShow(i)} disabled={busy} className={`${smallButton} border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100`} title="Kijelöli az idézett részt a dokumentumban">
+                  <LocateFixed className="w-3 h-3 mr-1" />Mutasd
+                </button>
+                {editable && !finding.done && (
+                  <>
+                    <button
+                      onClick={() => onApplyOne(i)}
+                      disabled={busy || (!finding.selected && !(finding.fix && finding.suggestion))}
+                      className={`${smallButton} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}
+                      title="Csak ezt az észrevételt szúrja be (a bejelöltek szerint), és odaugrik"
+                    >
+                      <Check className="w-3 h-3 mr-1" />Elfogadom
+                    </button>
+                    <button onClick={() => onDismiss(i)} disabled={busy} className={`${smallButton} border-neutral-300 bg-white text-neutral-700 hover:bg-neutral-100`}>
+                      <X className="w-3 h-3 mr-1" />Elvetem
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
+            {finding.notShown && (
+              <span className="flex items-center text-xs text-amber-700 mt-1">
+                <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
+                Ezt a részt nem találom szó szerint a dokumentumban.
               </span>
             )}
             {finding.notFound && (
@@ -147,7 +195,8 @@ export default function Proposal({
   onApply,
   onReject,
   onAlternative,
-  onToggleFinding,
+  findingActions,
+  onRecheck,
   explanation,
   addExplanation,
   onToggleExplanation,
@@ -162,7 +211,9 @@ export default function Proposal({
   onApply: () => void;
   onReject: () => void;
   onAlternative: () => void;
-  onToggleFinding: (index: number, field: 'selected' | 'fix') => void;
+  findingActions: FindingActions;
+  /** Review: check the result again after only part of the findings was taken */
+  onRecheck?: () => void;
   explanation?: string;
   addExplanation?: boolean;
   onToggleExplanation?: () => void;
@@ -171,8 +222,10 @@ export default function Proposal({
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const isOpen = state === 'pending' || state === 'applying';
-  const commentCount = findings?.filter(f => f.selected).length ?? 0;
-  const fixCount = findings?.filter(f => f.fix && f.suggestion).length ?? 0;
+  // The batch button covers the findings not decided one by one yet
+  const open = findings?.filter(f => !f.done) ?? [];
+  const commentCount = open.filter(f => f.selected).length;
+  const fixCount = open.filter(f => f.fix && f.suggestion).length;
   const hasSuggestions = findings?.some(f => f.suggestion) ?? false;
 
   return (
@@ -185,7 +238,18 @@ export default function Proposal({
               ? 'Mindegyiknél eldöntheted, hogy megjegyzésként, javításként (korrektúrával) vagy mindkettőként kerüljön be:'
               : 'Válaszd ki, melyik kerüljön be megjegyzésként:')}
           </p>
-          <FindingsList findings={findings} editable={state === 'pending'} onToggle={onToggleFinding} />
+          <FindingsList findings={findings} editable={state === 'pending'} busy={busy} actions={findingActions} />
+          {onRecheck && findings.some(f => f.done === 'applied') && findings.some(f => f.done === 'dismissed') && (
+            <div className="mt-2 text-xs bg-blue-50 border border-blue-200 rounded-lg p-2">
+              <p className="text-blue-900">
+                {findings.filter(f => f.done === 'applied').length} észrevételt fogadtál el, {findings.filter(f => f.done === 'dismissed').length}-t vetettél el.
+                Az észrevételek összefügghetnek (számozás, hivatkozások, fogalmak, logika), ezért érdemes a döntéseid után újra átnézni a dokumentumot.
+              </p>
+              <button onClick={onRecheck} disabled={busy} className="mt-1.5 flex items-center px-2.5 py-1 text-[11px] font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-md">
+                <RefreshCw className="w-3 h-3 mr-1" />Ellenőrző átvizsgálás
+              </button>
+            </div>
+          )}
         </>
       ) : mode === 'edit' ? (
         <>
@@ -230,7 +294,7 @@ export default function Proposal({
             >
               {state === 'applying' ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
               {mode === 'review'
-                ? `${APPLY_LABELS.review} (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
+                ? `${findings && open.length < findings.length ? 'A többi kijelölt' : 'Az összes kijelölt'} beszúrása (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
                 : APPLY_LABELS[mode]}
             </button>
             <button

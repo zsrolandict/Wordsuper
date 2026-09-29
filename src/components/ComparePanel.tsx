@@ -113,7 +113,7 @@ export default function ComparePanel({
     };
     if (settings.sound) primeSound();
     const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
-    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile };
+    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth };
     const sentRequest = masker ? maskRequest(request, masker) : request;
     const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
     details.masking = masker ? { summary: masker.summary(), entries: masker.entries() } : null;
@@ -199,7 +199,11 @@ export default function ComparePanel({
   const fullListChars = comparison ? formatChangesForAI(changes, Number.MAX_SAFE_INTEGER).text.length : 0;
   const fitting = comparison ? formatChangesForAI(changes, MAX_COMPARE_CHARS).included : 0;
   const busy = loading || inserting || !!analysis?.running;
-  const presets = [...DEFAULT_PRESETS.compare, ...settings.customPresets.filter(p => p.mode === 'compare').map(p => p.label)];
+  // A saved quick button sends its instruction; the button shows its label
+  const presets = [
+    ...DEFAULT_PRESETS.compare.map(label => ({ label, instruction: label })),
+    ...settings.customPresets.filter(p => p.mode === 'compare').map(p => ({ label: p.label, instruction: p.instruction || p.label })),
+  ];
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-sm">
@@ -237,8 +241,8 @@ export default function ComparePanel({
           <h3 className="text-xs font-semibold text-neutral-700 flex items-center"><Sparkles className="w-3.5 h-3.5 mr-1" />AI-elemzés</h3>
           <div className="flex flex-wrap gap-1.5">
             {presets.map(preset => (
-              <button key={preset} onClick={() => analyze(preset)} disabled={busy} className="px-2.5 py-1 text-[11px] bg-neutral-100 hover:bg-neutral-200 border border-neutral-200 rounded-full disabled:opacity-50">
-                {preset}
+              <button key={preset.label} onClick={() => analyze(preset.instruction)} disabled={busy} title={preset.instruction} className="px-2.5 py-1 text-[11px] bg-neutral-100 hover:bg-neutral-200 border border-neutral-200 rounded-full disabled:opacity-50">
+                {preset.label}
               </button>
             ))}
           </div>

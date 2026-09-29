@@ -30,6 +30,8 @@ export interface GenerateOptions {
   prompt: string;
   /** Standard JSON Schema; when set, the answer must be JSON matching it */
   responseJsonSchema?: object;
+  /** fast / deep map to the model's thinking level; auto (or none) lets the model decide */
+  depth?: "auto" | "fast" | "deep";
   signal: AbortSignal;
 }
 
@@ -37,6 +39,8 @@ export interface GenerateOptions {
 export interface ModelProvider {
   /** Model name, shown in the task pane's details panel */
   readonly model: string;
+  /** The model used for a request: deep may go to a stronger one (AI_MODEL_DEEP) */
+  modelFor(depth?: GenerateOptions["depth"]): string;
   /** Where the request is processed, e.g. "Gemini API" or "Vertex AI (europe-west1)" */
   readonly location: string;
   /** The data is processed only inside the EU (Vertex AI in a europe-* region) */

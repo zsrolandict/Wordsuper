@@ -18,6 +18,7 @@ export interface AuditEntry {
   /** How many values were replaced by placeholders on the client */
   maskedValues?: number;
   wholeDocument?: boolean;
+  depth?: string;
   audioBytes?: number;
   model: string;
   location: string;

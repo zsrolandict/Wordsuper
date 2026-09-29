@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import type { ModelProvider, StreamFinish, TokenUsage } from "./types";
 
 const toUsage = (u: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number }): TokenUsage => ({
@@ -14,6 +14,8 @@ The speaker dictates an instruction for editing a legal or business document. If
 
 export interface GeminiConfig {
   model: string;
+  /** Used for "deep" requests when set, e.g. a Pro model */
+  deepModel?: string;
   /** Gemini Developer API key; used when no Vertex AI project is given */
   apiKey?: string;
   /** Vertex AI keeps the data in the chosen Google Cloud region (e.g. europe-west1); credentials come from the environment */
@@ -41,16 +43,20 @@ export function createGeminiProvider(config: GeminiConfig): ModelProvider {
     model: config.model,
     location: config.vertexProject ? `Vertex AI (${config.vertexLocation})` : "Gemini API",
     // europe-* regions and the "eu" jurisdictional multi-region keep ML processing in the EU
+    modelFor: (depth) => (depth === "deep" && config.deepModel ? config.deepModel : config.model),
     euResident: !!config.vertexProject && /^(europe-|eu$)/.test(config.vertexLocation ?? ""),
 
-    async generate({ systemInstruction, prompt, responseJsonSchema, signal }, onEvent) {
+    async generate({ systemInstruction, prompt, responseJsonSchema, signal, depth }, onEvent) {
       const stream = await ai.models.generateContentStream({
-        model: config.model,
+        model: this.modelFor(depth),
         contents: prompt,
         config: {
           systemInstruction,
           // Stream the model's thought summaries too, so the task pane can show how it reached the answer
-          thinkingConfig: { includeThoughts: true },
+          thinkingConfig: {
+            includeThoughts: true,
+            ...(depth === "fast" ? { thinkingLevel: ThinkingLevel.LOW } : depth === "deep" ? { thinkingLevel: ThinkingLevel.HIGH } : {}),
+          },
           abortSignal: signal,
           ...(responseJsonSchema ? { responseMimeType: "application/json", responseJsonSchema } : {}),
         },

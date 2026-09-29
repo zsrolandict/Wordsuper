@@ -48,6 +48,8 @@ export interface PresetMatch {
   mode: Mode;
   /** One of the user's own quick buttons (not a built-in one) */
   custom: boolean;
+  /** What the AI is asked when it differs from the label */
+  instruction?: string;
 }
 
 const presetKey = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim().replace(/[.!?…]+$/, '');
@@ -57,12 +59,12 @@ const presetKey = (text: string) => text.toLowerCase().replace(/\s+/g, ' ').trim
  * the current mode come first, then their buttons of other modes (the request then runs in that mode), then
  * the built-in ones of the current mode.
  */
-export function matchPreset(instruction: string, mode: Mode, customPresets: { mode: Mode; label: string }[]): PresetMatch | null {
+export function matchPreset(instruction: string, mode: Mode, customPresets: { mode: Mode; label: string; instruction?: string }[]): PresetMatch | null {
   const key = presetKey(instruction);
   if (!key) return null;
   const own = customPresets.filter(p => presetKey(p.label) === key);
   const custom = own.find(p => p.mode === mode) ?? own[0];
-  if (custom) return { label: custom.label, mode: custom.mode, custom: true };
+  if (custom) return { label: custom.label, mode: custom.mode, custom: true, ...(custom.instruction ? { instruction: custom.instruction } : {}) };
   const builtIn = DEFAULT_PRESETS[mode].find(label => presetKey(label) === key);
   return builtIn ? { label: builtIn, mode, custom: false } : null;
 }

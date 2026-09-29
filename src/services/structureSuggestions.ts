@@ -1,5 +1,6 @@
 import type { Mode } from '../shared/aiConfig';
 import type { DocumentGraph, StructureIssue } from './structure';
+import { MAX_INSTRUCTION_CHARS, type ReviewFinding } from '../shared/aiConfig';
 
 /** A request the structure view hands to the assistant: where to put the cursor, and what to ask */
 export interface StructureRequest {
@@ -87,4 +88,40 @@ A szerződés jelenleg ezeket a fogalmakat definiálja (a definíció szövegév
 ${terms || '- (nincs még definiált fogalom)'}
 A definíciók tartalmát a szerződés meglévő szövege alapján fogalmazd meg, ne találj ki új feltételt. Ha a szerződés nagybetűvel, fogalomként használ olyan kifejezést, amely még nincs definiálva, azt is vedd fel, és a meghatározás végén jelöld: [ellenőrizendő].`,
   };
+}
+
+/**
+ * Structure problems that appeared with a change: counted by kind and subject, because paragraph numbers move
+ * when text is inserted.
+ */
+export function newIssues(before: StructureIssue[], after: StructureIssue[]): StructureIssue[] {
+  const key = (issue: StructureIssue) => `${issue.kind}|${issue.subject}`;
+  const counts = new Map<string, number>();
+  before.forEach(issue => counts.set(key(issue), (counts.get(key(issue)) ?? 0) + 1));
+  return after.filter(issue => {
+    const left = counts.get(key(issue)) ?? 0;
+    if (left > 0) {
+      counts.set(key(issue), left - 1);
+      return false;
+    }
+    return true;
+  });
+}
+
+const short = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+/**
+ * After some findings were taken and others left out: ask for a consistency review of the result, telling the AI
+ * what was decided (numbering, references, terms and logic can break when only part of a set of fixes is applied).
+ */
+export function recheckInstruction(applied: ReviewFinding[], dismissed: ReviewFinding[]): string {
+  const head = 'Az előző átvizsgálás észrevételei közül';
+  const tail = `Nézd át a teljes dokumentumot a döntéseim után: maradt-e vagy keletkezett-e következetlenség a számozásban, a kereszthivatkozásokban, a definiált fogalmak használatában és a logikában (pl. egy elfogadott javítás ellentmond egy elvetett rész szövegének). Az elvetett észrevételeket ne ismételd meg, hacsak egy elfogadott javítás miatt most már valódi hibát okoznak.`;
+  const list = (items: ReviewFinding[], max: number) => items.map(f => `- ${short(f.comment, max)}`).join('\n');
+  // The instruction has a length limit: shorten the lines until everything fits
+  for (const max of [160, 110, 70, 40]) {
+    const text = `${head} ezeket fogadtam el (a dokumentumba beírva):\n${list(applied, max) || '- (egyiket sem)'}\nEzeket elvetettem:\n${list(dismissed, max) || '- (egyiket sem)'}\n${tail}`;
+    if (text.length <= MAX_INSTRUCTION_CHARS) return text;
+  }
+  return `${head} ${applied.length}-t elfogadtam, ${dismissed.length}-t elvetettem. ${tail}`.slice(0, MAX_INSTRUCTION_CHARS);
 }

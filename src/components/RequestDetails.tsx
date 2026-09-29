@@ -24,6 +24,8 @@ export interface RequestDetailsData {
   location?: string;
   /** Edit or comment without a selection: the whole document was the text to work on */
   wholeDocument?: boolean;
+  /** How hard the model was asked to think */
+  depth?: 'auto' | 'fast' | 'deep';
   /** What was hidden from the AI; null: masking was off */
   masking?: MaskingInfo | null;
 }
@@ -136,7 +138,7 @@ function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
 
 export default function RequestDetails({ details, isLoading }: { details: RequestDetailsData; isLoading: boolean }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking } = details;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -202,7 +204,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
           </Section>
 
           <p className="text-neutral-400">
-            {model ? `${model} · ${location}` : 'A modell még nem jelentkezett'}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
+            {model ? `${model} · ${location}` : 'A modell még nem jelentkezett'}{depth ? ` · gondolkodás: ${{ auto: 'automatikus', fast: 'gyors', deep: 'alapos' }[depth]}` : ''}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
           </p>
         </div>
       )}

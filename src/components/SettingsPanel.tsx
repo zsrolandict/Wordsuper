@@ -42,6 +42,7 @@ export default function SettingsPanel({
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ state: 'idle' });
   const [presetMode, setPresetMode] = useState<Mode>(currentMode);
   const [presetLabel, setPresetLabel] = useState('');
+  const [presetInstruction, setPresetInstruction] = useState('');
 
   const style = settings.styleProfile;
   const setStyle = (changes: Partial<typeof style>) =>
@@ -70,8 +71,10 @@ export default function SettingsPanel({
   const addPreset = () => {
     const label = presetLabel.trim();
     if (!label) return;
-    onChange(s => ({ ...s, customPresets: [...s.customPresets, { id: newId(), mode: presetMode, label }] }));
+    const instruction = presetInstruction.trim();
+    onChange(s => ({ ...s, customPresets: [...s.customPresets, { id: newId(), mode: presetMode, label, ...(instruction ? { instruction } : {}) }] }));
     setPresetLabel('');
+    setPresetInstruction('');
   };
 
   return (
@@ -275,7 +278,10 @@ export default function SettingsPanel({
                 <ul className="space-y-1">
                   {presets.map(preset => (
                     <li key={preset.id} className="flex items-center justify-between bg-neutral-50 border border-neutral-200 rounded-lg px-2 py-1">
-                      <span className="text-xs truncate">{preset.label}</span>
+                      <span className="text-xs min-w-0">
+                        <span className="font-medium">{preset.label}</span>
+                        {preset.instruction && <span className="block text-[11px] text-neutral-500 truncate">{preset.instruction}</span>}
+                      </span>
                       <button
                         onClick={() => onChange(s => ({ ...s, customPresets: s.customPresets.filter(p => p.id !== preset.id) }))}
                         className="text-neutral-400 hover:text-red-600 ml-2 shrink-0"
@@ -289,26 +295,45 @@ export default function SettingsPanel({
               </div>
             );
           })}
-          {settings.customPresets.length === 0 && <p className="text-xs text-neutral-500">Még nincs saját gyorsgombod. A gomb szövege lesz az utasítás.</p>}
-          <div className="flex space-x-2">
-            <select value={presetMode} onChange={e => setPresetMode(e.target.value as Mode)} className="p-2 border border-neutral-300 rounded-lg text-xs bg-neutral-50" aria-label="Mód">
-              {MODES.map(mode => <option key={mode} value={mode}>{MODE_LABELS[mode].label}</option>)}
-            </select>
-            <input
-              value={presetLabel}
-              onChange={e => setPresetLabel(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') addPreset(); }}
-              maxLength={MAX_INSTRUCTION_CHARS}
-              placeholder="Pl. Fordítsd angolra"
-              className={`${inputClass} flex-1 min-w-0 text-xs`}
-            />
+          {settings.customPresets.length === 0 && (
+            <p className="text-xs text-neutral-500">Még nincs saját gyorsgombod. Egy gomb = egy gyakori kérés egy kattintásra, a kiválasztott módban.</p>
+          )}
+          <div className="space-y-1.5 bg-neutral-50 border border-neutral-200 rounded-lg p-2">
+            <p className="text-[11px] font-medium text-neutral-600">Új gyorsgomb</p>
+            <label className="block text-[11px] text-neutral-600">
+              Melyik módban jelenjen meg
+              <select value={presetMode} onChange={e => setPresetMode(e.target.value as Mode)} className="w-full mt-0.5 p-2 border border-neutral-300 rounded-lg text-xs bg-white" aria-label="Mód">
+                {MODES.map(mode => <option key={mode} value={mode}>{MODE_LABELS[mode].label}</option>)}
+              </select>
+            </label>
+            <label className="block text-[11px] text-neutral-600">
+              A gomb felirata
+              <input
+                value={presetLabel}
+                onChange={e => setPresetLabel(e.target.value)}
+                maxLength={60}
+                placeholder="Pl. ENG"
+                className={`${inputClass} mt-0.5 text-xs bg-white`}
+              />
+            </label>
+            <label className="block text-[11px] text-neutral-600">
+              Mit kérjen az AI-tól <span className="text-neutral-400">(ha üres, a felirat lesz az utasítás)</span>
+              <textarea
+                value={presetInstruction}
+                onChange={e => setPresetInstruction(e.target.value)}
+                maxLength={MAX_INSTRUCTION_CHARS}
+                rows={2}
+                placeholder="Pl. Fordítsd le angolra, jogi szaknyelven, a definiált fogalmakat következetesen."
+                className={`${inputClass} mt-0.5 text-xs bg-white resize-none`}
+              />
+            </label>
             <button
               onClick={addPreset}
               disabled={!presetLabel.trim()}
-              className="shrink-0 px-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
+              className="w-full flex items-center justify-center py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
               aria-label="Gyorsgomb hozzáadása"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5 mr-1" />Gyorsgomb hozzáadása
             </button>
           </div>
         </Card>

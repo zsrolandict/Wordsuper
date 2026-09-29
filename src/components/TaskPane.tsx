@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap } from 'lucide-react';
-import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, splitExplanation, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
+import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
@@ -10,12 +10,15 @@ import {
   insertCommentAt,
   insertGenerated,
   placeAtParagraph,
+  readParagraphs,
   releaseRange,
+  showFinding,
   takeSnapshot,
   type DocumentSnapshot,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
-import type { StructureRequest } from '../services/structureSuggestions';
+import { newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
+import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
@@ -47,6 +50,8 @@ interface Message {
     explanation?: string;
     addExplanation?: boolean;
   };
+  /** The AI asked back instead of guessing: one-click answers, and which one was picked */
+  clarification?: { options: string[]; mode: Mode; picked?: number };
   /** A felhasználó üzenete egy gyorsgomb szövege volt */
   preset?: PresetMatch;
   /** Pl. hibás hozzáférési kulcsnál: gomb a Beállításokhoz */
@@ -82,6 +87,25 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'compare', label: 'Összevetés', icon: <GitCompare className="w-3.5 h-3.5 mr-1" /> },
 ];
 
+/**
+ * Desktop Word shows new documents in "Simple Markup": a tracked change then looks as if it was accepted.
+ * Said once per session, after the first change.
+ */
+let markupHintShown = false;
+function markupHint(): string {
+  const platform = typeof Office !== 'undefined' ? Office.context?.platform : undefined;
+  const desktop = platform === Office?.PlatformType?.PC || platform === Office?.PlatformType?.Mac;
+  if (!desktop || markupHintShown) return '';
+  markupHintShown = true;
+  return ' Ha nem látod az áthúzásokat: Véleményezés → Követés → „Minden korrektúra”.';
+}
+
+const DEPTH_LABELS: Record<Depth, { label: string; title: string }> = {
+  auto: { label: 'Automatikus', title: 'A modell maga dönti el, mennyit gondolkodjon' },
+  fast: { label: '⚡ Gyors', title: 'Szinte gondolkodás nélkül: gyors és olcsó, egyszerű javításokhoz' },
+  deep: { label: '🧠 Alapos', title: 'Mélyebb gondolkodás (lassabb, drágább): bonyolult átírásokhoz, átvizsgáláshoz' },
+};
+
 const newMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export default function TaskPane() {
@@ -115,9 +139,20 @@ export default function TaskPane() {
     busyRef.current = false;
   };
 
+  // Follow new messages and streaming answers only while the user is at the bottom of the chat: whoever scrolled
+  // up to read or tick something stays exactly there, also while the AI is thinking
+  const chatRef = useRef<HTMLDivElement>(null);
+  const followRef = useRef(true);
+  const onChatScroll = () => {
+    const el = chatRef.current;
+    if (el) followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  };
+  const lastMessage = messages[messages.length - 1];
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const el = chatRef.current;
+    // Instant, not smooth: a smooth scroll fires scroll events on its way and would stop following
+    if (el && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [messages.length, lastMessage?.content, lastMessage?.isLoading]);
 
   const setPending = (next: PendingProposal | null) => {
     pendingRef.current = next;
@@ -189,7 +224,8 @@ export default function TaskPane() {
     const chime = (kind: 'done' | 'error') => { if (settings.sound) playSound(kind); };
     // A built-in quick button can stand for a longer instruction; the chat shows the short label
     const preset = displayText ? null : matchPreset(typed, modeOverride ?? mode, settings.customPresets);
-    const instruction = (preset && !preset.custom && PRESET_INSTRUCTIONS[preset.label]) || typed;
+    // A quick button's text stands for its instruction: a built-in long one, or the one the user saved with it
+    const instruction = (preset && (preset.custom ? preset.instruction : PRESET_INSTRUCTIONS[preset.label])) || typed;
     setIsSending(true);
     const controller = new AbortController();
     abortRef.current = controller;
@@ -210,6 +246,8 @@ export default function TaskPane() {
         await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
       }
 
+      // Sending is a fresh start: follow the conversation to the bottom again
+      followRef.current = true;
       addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${displayText ?? typed}`, preset: preset ?? undefined });
 
       if (typeof Word === 'undefined') {
@@ -231,6 +269,7 @@ export default function TaskPane() {
         history: sentRounds,
         styleProfile: settings.styleProfile,
         wholeDocument: !!snapshot.wholeDocument,
+        depth: settings.depth,
       };
       // Names and identifiers are replaced by placeholders before the request leaves the machine
       const masker = refining
@@ -257,6 +296,7 @@ export default function TaskPane() {
           thoughts: '',
           startedAt,
           wholeDocument: !!snapshot.wholeDocument,
+          depth: settings.depth,
           masking: masker ? { summary: masker.summary(), entries: masker.entries() } : null,
         },
       }]);
@@ -282,6 +322,8 @@ export default function TaskPane() {
           onText: chunk => {
             rawText += chunk;
             if (requestMode === 'review') return;
+            // A clarifying question arrives as JSON after a marker line: show nothing until it is parsed
+            if (rawText.trimStart().startsWith('=')) return;
             const shown = requestMode === 'edit' ? splitExplanation(rawText, true).text : rawText;
             updateMessage(loadingId, m => ({ ...m, content: unmask(shown, true), isLoading: false }));
           },
@@ -307,6 +349,16 @@ export default function TaskPane() {
 
       // The answer is here: a soft chime, so the user can work elsewhere meanwhile
       chime('done');
+      // The AI asked back instead of guessing: offer its readings as one-click answers
+      const clarification = requestMode !== 'review' ? parseClarification(result) : null;
+      if (clarification) {
+        finishLoadingMessage({
+          content: unmask(clarification.question),
+          clarification: { options: clarification.options.map(o => unmask(o)), mode: requestMode },
+        });
+        return;
+      }
+
       let findings: ReviewFinding[] | undefined;
       let explanation = '';
       if (requestMode === 'edit') {
@@ -395,9 +447,11 @@ export default function TaskPane() {
 
     try {
       let status: string;
+      let structureNote = '';
       let updatedFindings = findingViews;
       const range = current.snapshot.range;
 
+      const editBefore = current.mode === 'edit' ? await structureIssues() : null;
       if (current.mode === 'edit' && current.snapshot.wholeDocument) {
         const outcome = await applyDocumentEdit(current.snapshot.wholeDocument, current.result, explanation);
         const parts = [
@@ -426,19 +480,28 @@ export default function TaskPane() {
           ? '✅ A véleményezést beszúrtam Megjegyzésként abba a bekezdésbe, ahol a kurzor állt.'
           : '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).';
       } else {
-        const chosen = (findingViews ?? []).filter(f => f.selected || f.fix);
+        const chosen = (findingViews ?? []).filter(f => !f.done && (f.selected || f.fix));
+        const before = await structureIssues();
         const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })));
-        updatedFindings = findingViews?.map(f => ({ ...f, notFound: outcome.notFound.includes(f), fixFailed: outcome.fixFailed.includes(f) }));
+        structureNote = newIssuesNote(before, await structureIssues());
+        updatedFindings = findingViews?.map(f => (f.done ? f : {
+          ...f,
+          done: chosen.includes(f) ? 'applied' as const : 'dismissed' as const,
+          notFound: outcome.notFound.includes(f),
+          fixFailed: outcome.fixFailed.includes(f),
+        }));
         const done = [
           outcome.comments && `${outcome.comments} megjegyzést beszúrtam`,
           outcome.fixes && `${outcome.fixes} javítást beírtam korrektúrával`,
         ].filter(Boolean);
         const missed = outcome.notFound.length + outcome.fixFailed.length;
         status = `✅ ${done.length ? done.join(', ') : 'Nem került be semmi'}.` +
-          (missed ? ' Amit nem találtam meg szó szerint a dokumentumban, azt fent megjelöltem.' : '');
+          (missed ? ' Amit nem találtam meg szó szerint a dokumentumban, azt fent megjelöltem.' : '') + structureNote;
       }
 
       if (explanation) status += ' Az indoklást megjegyzésként mellé tettem.';
+      if (editBefore) status += newIssuesNote(editBefore, await structureIssues());
+      status += markupHint();
       setPending(null);
       updateMessage(messageId, m => ({
         ...m,
@@ -457,6 +520,90 @@ export default function TaskPane() {
           : 'Kész lettem volna a válasszal, de nem tudtam beszúrni a dokumentumba. Esetleg írásvédett a dokumentum, vagy zárolt részre kattintottál? A javaslat megmaradt: újrapróbálhatod vagy elvetheted.',
       });
     }
+  };
+
+  /** The structure problems right now (no AI); null when the document can't be read */
+  const structureIssues = async (): Promise<StructureIssue[] | null> => {
+    try {
+      return buildDocumentGraph(await readParagraphs()).issues;
+    } catch {
+      return null;
+    }
+  };
+
+  /** A warning when a change broke a reference or a definition that was fine before */
+  const newIssuesNote = (before: StructureIssue[] | null, after: StructureIssue[] | null) => {
+    if (!before || !after) return '';
+    const added = newIssues(before, after);
+    if (!added.length) return '';
+    return ` ⚠️ Ezzel ${added.length} új szerkezeti probléma keletkezett: ${added[0].message}${added.length > 1 ? ' …' : ''} Nézd meg a Szerkezet fülön.`;
+  };
+
+  /** After a partial acceptance: a review of the result, told what was taken and what was left out */
+  const runRecheck = (findings: FindingView[]) => {
+    const applied = findings.filter(f => f.done === 'applied');
+    const dismissed = findings.filter(f => f.done === 'dismissed');
+    setMode('review');
+    handleSend(recheckInstruction(applied, dismissed), 'review', 'Ellenőrző átvizsgálás a döntéseim után (számozás, hivatkozások, fogalmak, logika)');
+  };
+
+  const setFinding = (messageId: string, index: number, change: Partial<FindingView>) => {
+    updateMessage(messageId, m => ({
+      ...m,
+      proposal: m.proposal && { ...m.proposal, findings: m.proposal.findings?.map((f, i) => (i === index ? { ...f, ...change } : f)) },
+    }));
+  };
+
+  /** Every finding decided one by one: the proposal is done */
+  const finishIfAllDecided = (messageId: string, findings: FindingView[]) => {
+    if (!findings.every(f => f.done)) return;
+    if (pendingRef.current?.messageId === messageId) setPending(null);
+    updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'applied' } }));
+  };
+
+  const showFindingInDocument = async (messageId: string, finding: FindingView, index: number) => {
+    if (busyRef.current || typeof Word === 'undefined') return;
+    try {
+      const found = await showFinding(finding);
+      setFinding(messageId, index, { notShown: !found });
+    } catch {
+      setFinding(messageId, index, { notShown: true });
+    }
+  };
+
+  /** Inserts one finding (comment and/or fix, as ticked) and selects it in the document */
+  const applyOneFinding = async (messageId: string, findings: FindingView[], index: number) => {
+    const current = pendingRef.current;
+    const finding = findings[index];
+    if (!current || current.messageId !== messageId || !finding || finding.done || !tryLock()) return;
+    setIsApplying(true);
+    try {
+      const before = await structureIssues();
+      const outcome = await applyReviewFindings([{ finding, comment: finding.selected, fix: finding.fix }], { select: true });
+      const note = newIssuesNote(before, await structureIssues());
+      const updated: FindingView = { ...finding, done: 'applied', notFound: outcome.notFound.length > 0, fixFailed: outcome.fixFailed.length > 0 };
+      const next = findings.map((f, i) => (i === index ? updated : f));
+      const done = [outcome.comments && 'megjegyzés', outcome.fixes && 'javítás korrektúrával'].filter(Boolean).join(' és ');
+      updateMessage(messageId, m => ({
+        ...m,
+        proposal: m.proposal && { ...m.proposal, findings: next },
+        status: { text: done ? `✅ Beszúrva: ${done}.${note}${markupHint()}` : '⚠️ Ezt nem tudtam beszúrni, lásd fent.', tone: done && !note ? 'success' : 'neutral' },
+      }));
+      setDocumentVersion(v => v + 1);
+      finishIfAllDecided(messageId, next);
+    } catch (error) {
+      console.error(error);
+      addMessage({ role: 'system', content: 'Nem sikerült beszúrni ezt az észrevételt. Esetleg írásvédett a dokumentum?' });
+    } finally {
+      setIsApplying(false);
+      unlock();
+    }
+  };
+
+  const dismissFinding = (messageId: string, findings: FindingView[], index: number) => {
+    const next = findings.map((f, i) => (i === index ? { ...f, done: 'dismissed' as const } : f));
+    setFinding(messageId, index, { done: 'dismissed' });
+    finishIfAllDecided(messageId, next);
   };
 
   const toggleFinding = (messageId: string, index: number, field: 'selected' | 'fix') => {
@@ -541,7 +688,7 @@ export default function TaskPane() {
 
       <div className={tab === 'assistant' ? 'contents' : 'hidden'}>
       {/* Chat Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={chatRef} onScroll={onChatScroll} className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg) => (
           <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
@@ -575,13 +722,39 @@ export default function TaskPane() {
                   onApply={() => handleApply(msg.id, msg.proposal?.findings, !!msg.proposal?.addExplanation)}
                   onReject={handleReject}
                   onAlternative={() => handleSend(ALTERNATIVE_INSTRUCTION, msg.details!.mode)}
-                  onToggleFinding={(index, field) => toggleFinding(msg.id, index, field)}
+                  onRecheck={msg.proposal.findings ? () => runRecheck(msg.proposal!.findings!) : undefined}
+                  findingActions={{
+                    onToggle: (index, field) => toggleFinding(msg.id, index, field),
+                    onShow: index => msg.proposal?.findings && showFindingInDocument(msg.id, msg.proposal.findings[index], index),
+                    onApplyOne: index => msg.proposal?.findings && applyOneFinding(msg.id, msg.proposal.findings, index),
+                    onDismiss: index => msg.proposal?.findings && dismissFinding(msg.id, msg.proposal.findings, index),
+                  }}
                 />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>
               )}
               {msg.status && (
                 <p className={`mt-2 text-xs font-medium ${msg.status.tone === 'success' ? 'text-green-700' : 'text-neutral-500'}`}>{msg.status.text}</p>
+              )}
+              {msg.clarification && (
+                <div className="mt-2 space-y-1.5">
+                  {msg.clarification.options.map((option, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        updateMessage(msg.id, m => ({ ...m, clarification: m.clarification && { ...m.clarification, picked: i } }));
+                        handleSend(option, msg.clarification!.mode);
+                      }}
+                      disabled={isBusy || msg.clarification!.picked !== undefined}
+                      className={`w-full text-left px-3 py-2 text-xs rounded-lg border transition-colors ${msg.clarification!.picked === i ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-blue-200 text-blue-900 hover:bg-blue-50 disabled:opacity-50'}`}
+                    >
+                      <span className="font-semibold mr-1">{i + 1}.</span>{option}
+                    </button>
+                  ))}
+                  {msg.clarification.picked === undefined && (
+                    <p className="text-[11px] text-neutral-500">Egyik sem? Írd be alul, mire gondoltál.</p>
+                  )}
+                </div>
               )}
               {msg.showSettingsLink && (
                 <button onClick={() => setView('settings')} className="mt-2 flex items-center text-xs font-medium underline">
@@ -642,10 +815,27 @@ export default function TaskPane() {
               key={preset.id}
               onClick={() => handleSend(preset.label)}
               disabled={isBusy}
-              title="Saját gyorsgomb"
+              title={preset.instruction ? `Saját gyorsgomb: ${preset.instruction}` : 'Saját gyorsgomb'}
               className="px-3 py-1.5 text-xs bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-full transition-colors max-w-full truncate disabled:opacity-50"
             >
               {preset.label}
+            </button>
+          ))}
+        </div>
+
+        {/* How hard the AI thinks; remembered in the settings */}
+        <div className="mb-2 flex items-center text-[11px] text-neutral-500" role="radiogroup" aria-label="Gondolkodás">
+          <span className="mr-1.5">Gondolkodás:</span>
+          {(Object.entries(DEPTH_LABELS) as [Depth, { label: string; title: string }][]).map(([depth, { label, title }]) => (
+            <button
+              key={depth}
+              role="radio"
+              aria-checked={settings.depth === depth}
+              title={title}
+              onClick={() => updateSettings(s => ({ ...s, depth }))}
+              className={`px-2 py-0.5 mr-1 rounded-full border ${settings.depth === depth ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 hover:bg-neutral-100'}`}
+            >
+              {label}
             </button>
           ))}
         </div>

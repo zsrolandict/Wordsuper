@@ -5,6 +5,8 @@ import {
   MAX_REVIEW_FINDINGS,
   MAX_SELECTION_CHARS,
   MAX_STYLE_NOTES_CHARS,
+  CLARIFY_MARKER,
+  DEPTH_VALUES,
   EXPLANATION_MARKER,
   MODES,
   SEVERITY_VALUES,
@@ -68,7 +70,7 @@ export function parseRequest(body: unknown): ParseResult {
     notes: asString(rawStyle.notes).trim().substring(0, MAX_STYLE_NOTES_CHARS),
   };
 
-  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
+  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
 }
 
 // Standard JSON Schema, so any provider that supports structured output can use it
@@ -111,6 +113,12 @@ const COMPARE_SCHEMA = {
   required: ["overview", "changes"],
   propertyOrdering: ["overview", "changes"],
 };
+
+// Edit, comment and generate answer in plain text, so they can ask back; review and compare must return JSON
+const CLARIFY_RULE = `
+- ASK BACK instead of guessing when the instruction is unclear: it is garbled or misspelled (e.g. a dictation error), it names no clear action, or it has several plausible readings that would lead to different texts (e.g. "make the contractor consistent" without saying which of the existing terms to keep). Then do not do the task; answer with exactly this and nothing else: a first line containing only ${CLARIFY_MARKER}, then a JSON object {"question": "...", "options": ["...", "...", "..."]}.
+  - The question and the 2-3 options are in the language of the instruction. Each option is a complete, concrete instruction the user could send as it is (e.g. "Egységesítsd a fogalmat mindenhol »Vállalkozó«-ra").
+  - Clear instructions, even very short ones ("Javítsd", "Rövidítsd le", "Tedd hivatalosabbá"), are done without asking.`;
 
 const WHOLE_DOCUMENT_EDIT = `
 - Nothing was selected, so the text to modify is the WHOLE DOCUMENT. Return the whole document with the requested change: copy every paragraph you do not need to change exactly as it is, character for character, in the same order.
@@ -169,7 +177,7 @@ RULES:
 - Return ONLY the newly generated text.
 - Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler.
 - Do NOT use markdown formatting (no **bold**, no # headings).
-- Ensure the tone matches the document context if provided.${style}`,
+- Ensure the tone matches the document context if provided.${CLARIFY_RULE}${style}`,
       prompt: `${contextBlock("for your reference only, to ensure consistent tone, formatting, and terminology. DO NOT output this")}${historyBlock(history)}${instructionBlock}`,
     };
   }
@@ -181,7 +189,7 @@ Your task is to analyze the user's ${whole ? "whole document (nothing was select
 RULES:
 - Return ONLY the text for the comment.
 - Keep it concise, professional, and directly address the instruction.
-- Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler.${style}`,
+- Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler.${CLARIFY_RULE}${style}`,
       prompt: `${contextBlock("for your reference only")}${whole ? "WHOLE DOCUMENT TO ANALYZE" : "SELECTED TEXT TO ANALYZE"}:\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
     };
   }
@@ -230,7 +238,7 @@ RULES:
 - Do NOT use markdown formatting (no **bold**, no # headings).
 - Keep the paragraph structure: return one paragraph per original paragraph, separated by line breaks, unless the instruction requires otherwise.
 - Ensure the tone and content align with the DOCUMENT CONTEXT if provided.${whole ? WHOLE_DOCUMENT_EDIT : ""}
-- After the modified text, add a line containing only ${EXPLANATION_MARKER}, then 1-3 short sentences in the language of the user's instruction explaining why the changes were needed (it may become a Word comment next to them; with several changes, one short point each). Nothing else after it.${style}`,
+- After the modified text, add a line containing only ${EXPLANATION_MARKER}, then 1-3 short sentences in the language of the user's instruction explaining why the changes were needed (it may become a Word comment next to them; with several changes, one short point each). Nothing else after it.${CLARIFY_RULE}${style}`,
     prompt: `${contextBlock("for your reference only to understand the surrounding context. DO NOT output this, only use it to make better decisions for the selection")}ORIGINAL TEXT TO MODIFY (You must rewrite ONLY this part):\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
   };
 }

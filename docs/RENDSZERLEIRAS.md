@@ -54,6 +54,10 @@ Szerver (Node.js + Express)
 **Átvizsgálás részletei:**
 - Az AI JSON-listát ad vissza, legfeljebb 15 észrevétellel. Mindegyikben van szó szerinti idézet, megjegyzés, súlyosság (magas / közepes / alacsony), és ha szövegcserével javítható, **javasolt szöveg** is.
 - A felhasználó észrevételenként dönt: **Megjegyzés**, **Javítás korrektúrával**, vagy mindkettő.
+- **Egyenkénti döntés:** minden észrevételnél van **Mutasd** (kijelöli az idézett részt a dokumentumban), **Elfogadom** (csak azt szúrja be, és odaugrik) és **Elvetem** gomb. A tömeges gomb csak a még el nem döntötteket kezeli.
+- **Következetesség:**
+  - Minden beírás után AI nélkül lefut a szerkezeti ellenőrzés. Ha a javítás új problémát okozott (pl. megszűnt egy hivatkozott pont), azonnal jelzi.
+  - Ha a felhasználó csak részben fogad el, **„Ellenőrző átvizsgálás”** indítható. Ez közli az AI-val, mit fogadott el és mit vetett el, és a számozás, a hivatkozások, a fogalmak és a logika következetességét nézeti át.
 - A javítás csak akkor kerül a szövegbe, ha az idézet szó szerint megtalálható. Ha nem, a javasolt szöveg a megjegyzésbe kerül, hogy ne vesszen el.
 - Az átvizsgálás a Word **automatikus számozását** is látja, szögletes zárójelben (`[5.2.] …`), így a pontszámozást és a kereszthivatkozásokat is ellenőrizni tudja.
 
@@ -78,6 +82,14 @@ Szerver (Node.js + Express)
 **Szándékfelismerés:** ha Szerkesztés vagy Vélemény módban az egész dokumentum átnézését kérik (pl. „nézd át, van-e benne ellentmondás”), egy kis gomb felajánlja az Átvizsgálást. Magától sosem vált módot.
 
 **Hangjelzés:** halk, kéthangú csengés, ha elkészült a válasz, és egy mélyebb hang hiba esetén, így közben nyugodtan lehet a dokumentumban dolgozni. A Beállításokban ki- és bekapcsolható, és ki is próbálható.
+
+**Visszakérdezés:** ha az utasítás nem egyértelmű (elgépelt vagy félrediktált, vagy több ésszerű olvasata van), az AI nem találgat. Megkérdezi, mire gondolt a felhasználó, és 2–3 kész utasítást ajánl egy kattintással; más választ alul lehet beírni. Ez a Szerkesztés, a Vélemény és a Generálás módban működik.
+
+**Gondolkodás:** a küldés fölött lehet választani.
+- **Automatikus** (alapértelmezés): a modell maga dönti el, mennyit gondolkodjon.
+- **Gyors:** alacsony gondolkodási szint.
+- **Alapos:** magas gondolkodási szint, és ha be van állítva, erősebb modell (`AI_MODEL_DEEP`).
+- Mély kutatás (Deep Research) szándékosan nincs: az a nyílt weben keres, és a Google 30 napig tárolja hozzá az adatokat.
 
 **Finomítás:** amíg egy javaslat döntésre vár, az új utasítás azt módosítja („legyen rövidebb”). Az AI az első és a legutóbbi köröket látja, legfeljebb 5-öt.
 

@@ -1,11 +1,15 @@
 import { useCallback, useState } from 'react';
 import { LOCAL_MODELS, type LocalModel } from './localSpeech';
+import { DEPTH_VALUES, type Depth } from '../shared/aiConfig';
 import { ADDRESSING_VALUES, MODES, TONE_VALUES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
 
 export interface CustomPreset {
   id: string;
   mode: Mode;
+  /** The button's text, e.g. "ENG" */
   label: string;
+  /** What the AI is asked, e.g. "Fordítsd le angolra, jogi szaknyelven"; the label itself when empty */
+  instruction?: string;
 }
 
 export interface Settings {
@@ -26,6 +30,8 @@ export interface Settings {
    * cloud: the server's AI transcribes it; only allowed when the server processes data in the EU.
    */
   dictation: { engine: 'local' | 'cloud'; localModel: LocalModel };
+  /** How hard the AI thinks: auto lets the model decide */
+  depth: Depth;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -38,6 +44,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sound: true,
   // base misunderstands Hungarian too often to be the default
   dictation: { engine: 'local', localModel: 'small' },
+  depth: 'auto',
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -56,7 +63,7 @@ function sanitize(raw: unknown): Settings {
     },
     customPresets: (Array.isArray(value.customPresets) ? value.customPresets : []).filter(
       (p): p is CustomPreset => !!p && typeof p.id === 'string' && typeof p.label === 'string' && (MODES as readonly string[]).includes(p.mode)
-    ),
+    ).map(p => ({ id: p.id, mode: p.mode, label: p.label, ...(typeof p.instruction === 'string' && p.instruction.trim() ? { instruction: p.instruction } : {}) })),
     autoApply: value.autoApply === true,
     // Older settings had no masking entry: masking is on unless it was switched off explicitly
     masking: {
@@ -64,6 +71,7 @@ function sanitize(raw: unknown): Settings {
       extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
     },
     sound: value.sound !== false,
+    depth: (DEPTH_VALUES as readonly unknown[]).includes(value.depth) ? value.depth as Depth : 'auto',
     dictation: {
       engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
       localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'small',

@@ -16,18 +16,19 @@ const DEFAULT_VERTEX_LOCATION = "europe-west1";
  */
 export function providerFromEnv(env: NodeJS.ProcessEnv): { provider: ModelProvider } | { problem: string } {
   const model = env.AI_MODEL?.trim() || DEFAULT_MODEL;
+  const deepModel = env.AI_MODEL_DEEP?.trim() || undefined;
   const kind = (env.AI_PROVIDER?.trim() || "gemini").toLowerCase();
 
   if (kind === "vertex") {
     const project = env.GOOGLE_CLOUD_PROJECT?.trim();
     if (!project) return { problem: "AI_PROVIDER=vertex needs GOOGLE_CLOUD_PROJECT." };
     const location = env.GOOGLE_CLOUD_LOCATION?.trim() || DEFAULT_VERTEX_LOCATION;
-    return { provider: createGeminiProvider({ model, vertexProject: project, vertexLocation: location }) };
+    return { provider: createGeminiProvider({ model, deepModel, vertexProject: project, vertexLocation: location }) };
   }
   if (kind === "gemini") {
     const apiKey = env.GEMINI_API_KEY?.trim();
     if (!apiKey) return { problem: "GEMINI_API_KEY is not configured on the server." };
-    return { provider: createGeminiProvider({ model, apiKey }) };
+    return { provider: createGeminiProvider({ model, deepModel, apiKey }) };
   }
   return { problem: `Unknown AI_PROVIDER "${kind}" (use "gemini" or "vertex").` };
 }
