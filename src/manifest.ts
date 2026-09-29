@@ -20,14 +20,14 @@ export function generateManifest(appUrl: string): string {
   <!-- Basic Add-in Settings -->
   <Id>${guid}</Id>
   <Version>1.1.0.0</Version>
-  <ProviderName>AI Studio User</ProviderName>
+  <ProviderName>ICT Europa Legal</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Word Writer (ICT Europa Legal)" />
   <Description DefaultValue="A helpful assistant right inside your Word document."/>
   
-  <!-- Icon for the add-in (using Microsoft's default placeholder or a valid HTTPS URL) -->
-  <IconUrl DefaultValue="https://developer.microsoft.com/en-us/fabric/assets/brand-icons/product/svg/word_48x1.svg"/>
-  <HighResolutionIconUrl DefaultValue="https://developer.microsoft.com/en-us/fabric/assets/brand-icons/product/svg/word_96x1.svg"/>
+  <!-- Icons must be PNG (or JPG/GIF/BMP): desktop Word refuses a manifest with SVG icons -->
+  <IconUrl DefaultValue="${baseUrl}/assets/icons/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="${baseUrl}/assets/icons/icon-64.png"/>
 
   <SupportUrl DefaultValue="${baseUrl}" />
   <AppDomains>
@@ -95,9 +95,9 @@ export function generateManifest(appUrl: string): string {
     
     <Resources>
       <bt:Images>
-        <bt:Image id="Icon.16x16" DefaultValue="https://developer.microsoft.com/en-us/fabric/assets/brand-icons/product/svg/word_16x1.svg"/>
-        <bt:Image id="Icon.32x32" DefaultValue="https://developer.microsoft.com/en-us/fabric/assets/brand-icons/product/svg/word_32x1.svg"/>
-        <bt:Image id="Icon.80x80" DefaultValue="https://developer.microsoft.com/en-us/fabric/assets/brand-icons/product/svg/word_96x1.svg"/>
+        <bt:Image id="Icon.16x16" DefaultValue="${baseUrl}/assets/icons/icon-16.png"/>
+        <bt:Image id="Icon.32x32" DefaultValue="${baseUrl}/assets/icons/icon-32.png"/>
+        <bt:Image id="Icon.80x80" DefaultValue="${baseUrl}/assets/icons/icon-80.png"/>
       </bt:Images>
       <bt:Urls>
         <bt:Url id="GetStarted.LearnMoreUrl" DefaultValue="${baseUrl}" />
