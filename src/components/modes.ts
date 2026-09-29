@@ -66,3 +66,12 @@ export function matchPreset(instruction: string, mode: Mode, customPresets: { mo
   const builtIn = DEFAULT_PRESETS[mode].find(label => presetKey(label) === key);
   return builtIn ? { label: builtIn, mode, custom: false } : null;
 }
+
+/**
+ * An edit or comment instruction that really asks for a review of the whole document ("nézd át, van-e benne
+ * ellentmondás"). Only used to offer the Review mode; the mode never changes by itself.
+ */
+export function looksLikeReview(instruction: string): boolean {
+  const text = instruction.toLowerCase();
+  return /(nézd|vizsgáld|ellenőrizd) (át |végig |meg )?(az? )?(egész|teljes)|átvizsgál|(egész|teljes) (dokumentum|szerződés|anyag)(ot|ban|et)?\b.*\b(hib|ellentmond|kockázat|hiány)|ellentmondás(ok)?(at)? (keres|van)|van-e benne ellentmondás/.test(text);
+}

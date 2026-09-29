@@ -28,7 +28,7 @@ import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
 import DictationButton from './DictationButton';
 import Logo from './Logo';
-import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
+import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, looksLikeReview, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 
 interface Message {
   id: string;
@@ -95,6 +95,7 @@ export default function TaskPane() {
   const [settings, updateSettings] = useSettings();
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const [pending, setPendingState] = useState<PendingProposal | null>(null);
+  const [dismissedReviewHint, setDismissedReviewHint] = useState<string | null>(null);
   // Minden dokumentum-módosítás után nő, hogy a korlátjelző újra lemérje a méretet
   const [documentVersion, setDocumentVersion] = useState(0);
   const pendingRef = useRef<PendingProposal | null>(null);
@@ -470,6 +471,8 @@ export default function TaskPane() {
 
 
   const refining = pending !== null && pending.mode === mode;
+  // "Nézd át az egész dokumentumot…" typed in Edit or Comment mode: offer the Review mode (never switch by itself)
+  const offerReview = !refining && (mode === 'edit' || mode === 'comment') && input !== dismissedReviewHint && looksLikeReview(input);
   const customPresets = settings.customPresets.filter(p => p.mode === mode);
 
   return (
@@ -656,6 +659,16 @@ export default function TaskPane() {
             >
               Elvetés
             </button>
+          </div>
+        )}
+
+        {offerReview && !isBusy && (
+          <div className="mb-2 flex items-center justify-between text-[11px] text-emerald-900 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+            <span>🔍 Ez az egész dokumentum átnézésének tűnik. Futtassam inkább Átvizsgálásként?</span>
+            <span className="flex shrink-0 ml-2 space-x-2">
+              <button onClick={() => { setMode('review'); handleSend(undefined, 'review'); }} className="font-semibold underline">Igen</button>
+              <button onClick={() => setDismissedReviewHint(input)} className="underline">Nem</button>
+            </span>
           </div>
         )}
 
