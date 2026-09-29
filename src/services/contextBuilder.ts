@@ -17,6 +17,9 @@ export interface ContextInfo {
   /** Character range of the document sent around the selection (0-based, end exclusive) */
   windowStart?: number;
   windowEnd?: number;
+  /** Version comparison: how many of the changes fit into the request */
+  includedItems?: number;
+  totalItems?: number;
 }
 
 interface BuildOptions {

@@ -1,6 +1,10 @@
 // Shared by the server (server.ts) and the task pane, so the UI can show exactly what the AI received
 
-export const MODES = ['edit', 'comment', 'generate', 'review'] as const;
+/** Modes of the assistant tab */
+export const ASSISTANT_MODES = ['edit', 'comment', 'generate', 'review'] as const;
+export type AssistantMode = typeof ASSISTANT_MODES[number];
+/** Every request mode the server accepts; "compare" comes from the version comparison tab */
+export const MODES = [...ASSISTANT_MODES, 'compare'] as const;
 export type Mode = typeof MODES[number];
 
 // The server truncates anything longer than these before sending it to the model
@@ -8,6 +12,8 @@ export const MAX_SELECTION_CHARS = 10000;
 export const MAX_CONTEXT_CHARS = 40000;
 /** Whole-document review sends the document itself, so it gets a bigger budget */
 export const MAX_REVIEW_CHARS = 150000;
+/** Version comparison sends the list of changes */
+export const MAX_COMPARE_CHARS = 60000;
 export const MAX_INSTRUCTION_CHARS = 2000;
 /** How many earlier rounds of a refinement the AI gets to see (the first one always stays) */
 export const MAX_HISTORY_TURNS = 5;
@@ -64,7 +70,8 @@ export type ApiErrorCode =
   /** The model stopped early (length limit, safety filter…), so the answer is incomplete */
   | 'INCOMPLETE';
 
-export const contextLimitFor = (mode: Mode) => (mode === 'review' ? MAX_REVIEW_CHARS : MAX_CONTEXT_CHARS);
+export const contextLimitFor = (mode: Mode) =>
+  mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;
 
 /**
  * The rounds the AI gets to see: the first one (it holds the original intent) and the most recent ones.

@@ -3,6 +3,7 @@ import { buildDocumentContext, type ContextInfo } from './contextBuilder';
 import { planParagraphEdits, tokenizeLikeWord, type DiffHunk } from './textDiff';
 import { searchCandidates } from './review';
 import { formatNumber } from './format';
+import type { ParagraphInfo } from './structure';
 
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
@@ -299,4 +300,95 @@ export function onSelectionChanged(handler: () => void): () => void {
   if (!document?.addHandlerAsync) return () => {};
   document.addHandlerAsync(Office.EventType.DocumentSelectionChanged, handler);
   return () => document.removeHandlerAsync(Office.EventType.DocumentSelectionChanged, { handler });
+}
+
+/** Every paragraph of the body with Word's automatic numbering, for the structure map and the comparison */
+export async function readParagraphs(): Promise<ParagraphInfo[]> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text,items/isListItem');
+    await context.sync();
+    // The number Word shows ("5.2.") is not part of paragraph.text
+    const listItems = paragraphs.items.map(p => (p.isListItem ? p.listItemOrNullObject : null));
+    listItems.forEach(item => item?.load('listString'));
+    await context.sync();
+    return paragraphs.items.map((p, i) => {
+      const item = listItems[i];
+      return { text: p.text, listString: item && !item.isNullObject ? item.listString : undefined };
+    });
+  });
+}
+
+/** The paragraph the cursor is in, and the cursor's offset inside its text */
+export async function readCursor(): Promise<{ paragraphText: string; offset: number }> {
+  return Word.run(async (context) => {
+    const selection = context.document.getSelection();
+    const paragraph = selection.paragraphs.getFirst();
+    paragraph.load('text');
+    const before = paragraph.getRange('Start').expandTo(selection.getRange('Start'));
+    before.load('text');
+    await context.sync();
+    return { paragraphText: paragraph.text, offset: before.text.length };
+  });
+}
+
+/**
+ * Selects a paragraph, so Word scrolls to it. With rememberPosition the current selection is tracked and
+ * returned, so the user can jump back to where they were.
+ */
+export async function jumpToParagraph(index: number, rememberPosition: boolean): Promise<Word.Range | null> {
+  return Word.run(async (context) => {
+    const previous = rememberPosition ? context.document.getSelection() : null;
+    if (previous) context.trackedObjects.add(previous);
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    const target = paragraphs.items[index];
+    if (!target) {
+      if (previous) {
+        context.trackedObjects.remove(previous);
+        await context.sync();
+      }
+      throw new UserFacingError('Ez a bekezdés már nincs meg a dokumentumban. Frissítsd a nézetet.');
+    }
+    target.select();
+    await context.sync();
+    return previous;
+  });
+}
+
+/** Returns to a position remembered by jumpToParagraph and releases it */
+export async function jumpBack(range: Word.Range) {
+  await Word.run(range, async (context) => {
+    range.select();
+    await context.sync();
+    await untrack(context, range);
+  });
+}
+
+const sameText = (a: string, b: string) => a.replace(/\s+/g, ' ').trim() === b.replace(/\s+/g, ' ').trim();
+
+/**
+ * Attaches comments to paragraphs by index. A paragraph whose text is no longer what it was when the list was
+ * made (the document changed since) is skipped rather than commented in the wrong place.
+ */
+export async function insertCommentsAtParagraphs(items: { paragraph: number; expectedText: string; comment: string }[]): Promise<{ inserted: number; skipped: number[] }> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    let inserted = 0;
+    const skipped: number[] = [];
+    items.forEach((item, i) => {
+      const paragraph = paragraphs.items[item.paragraph];
+      if (paragraph && sameText(paragraph.text, item.expectedText)) {
+        paragraph.getRange('Whole').insertComment(item.comment);
+        inserted++;
+      } else {
+        skipped.push(i);
+      }
+    });
+    await context.sync();
+    return { inserted, skipped };
+  });
 }

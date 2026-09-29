@@ -12,14 +12,14 @@ export interface FindingView extends ReviewFinding {
   notFound?: boolean;
 }
 
-const SEVERITY_STYLES = {
+export const SEVERITY_STYLES = {
   high: 'bg-red-100 text-red-800',
   medium: 'bg-amber-100 text-amber-800',
   low: 'bg-neutral-200 text-neutral-700',
 };
 
 /** Word-level changes: deleted words struck through in red, new words in green */
-function DiffView({ original, proposal }: { original: string; proposal: string }) {
+export function DiffView({ original, proposal }: { original: string; proposal: string }) {
   const segments = useMemo(() => diffForDisplay(original, proposal), [original, proposal]);
   if (!segments) return <span className="whitespace-pre-wrap">{proposal}</span>;
   if (segments.every(s => s.type === 'equal')) {
@@ -77,6 +77,7 @@ const APPLY_LABELS: Record<Mode, string> = {
   generate: 'Beszúrás',
   comment: 'Megjegyzés beszúrása',
   review: 'Megjegyzések beszúrása',
+  compare: 'Megjegyzések beszúrása',
 };
 
 export default function Proposal({

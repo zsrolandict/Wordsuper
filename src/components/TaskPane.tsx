@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound } from 'lucide-react';
-import { MAX_INSTRUCTION_CHARS, MODES, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
+import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare } from 'lucide-react';
+import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, trimHistory, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
@@ -19,6 +19,8 @@ import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import Proposal, { type FindingView, type ProposalState } from './Proposal';
 import LimitsBar from './LimitsBar';
 import SettingsPanel from './SettingsPanel';
+import StructurePanel from './StructurePanel';
+import ComparePanel from './ComparePanel';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, modeLabel } from './modes';
 
 interface Message {
@@ -54,6 +56,13 @@ const WELCOME_MESSAGE: Message = {
 
 const ALTERNATIVE_INSTRUCTION = 'Kérek egy másik változatot.';
 
+type Tab = 'assistant' | 'structure' | 'compare';
+const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
+  { id: 'assistant', label: 'Asszisztens', icon: <MessageSquare className="w-3.5 h-3.5 mr-1" /> },
+  { id: 'structure', label: 'Szerkezet', icon: <ListTree className="w-3.5 h-3.5 mr-1" /> },
+  { id: 'compare', label: 'Összevetés', icon: <GitCompare className="w-3.5 h-3.5 mr-1" /> },
+];
+
 const newMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export default function TaskPane() {
@@ -63,6 +72,7 @@ export default function TaskPane() {
   const [isApplying, setIsApplying] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
   const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const [tab, setTab] = useState<Tab>('assistant');
   const [settings, updateSettings] = useSettings();
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const [pending, setPendingState] = useState<PendingProposal | null>(null);
@@ -353,15 +363,19 @@ export default function TaskPane() {
     }));
   };
 
-  if (view === 'settings') {
-    return <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} onRateLimit={setRateLimit} />;
-  }
 
   const refining = pending !== null && pending.mode === mode;
   const customPresets = settings.customPresets.filter(p => p.mode === mode);
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
+      {/* Settings open as a layer above, so the panels below keep their state */}
+      {view === 'settings' && (
+        <div className="fixed inset-0 z-30">
+          <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} onRateLimit={setRateLimit} />
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-blue-600 px-4 py-4 text-white shrink-0 shadow-md z-10 flex items-start justify-between">
         <div>
@@ -372,7 +386,7 @@ export default function TaskPane() {
           <p className="text-blue-100 text-xs mt-1">Szerkessz, véleményezz, vagy generálj!</p>
         </div>
         <div className="flex items-center space-x-1.5 shrink-0">
-          {messages.length > 1 && (
+          {tab === 'assistant' && messages.length > 1 && (
             <button
               onClick={goToMainMenu}
               disabled={isBusy}
@@ -394,6 +408,29 @@ export default function TaskPane() {
         </div>
       </div>
 
+      {/* Tabs: every panel stays mounted, so switching doesn't lose a comparison or a conversation */}
+      <div className="flex bg-white border-b border-neutral-200 shrink-0" role="tablist">
+        {TABS.map(t => (
+          <button
+            key={t.id}
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 flex items-center justify-center py-2 text-xs font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'}`}
+          >
+            {t.icon}{t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className={tab === 'structure' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+        <StructurePanel active={tab === 'structure'} />
+      </div>
+      <div className={tab === 'compare' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+        <ComparePanel settings={settings} onRateLimit={setRateLimit} onOpenSettings={() => setView('settings')} />
+      </div>
+
+      <div className={tab === 'assistant' ? 'contents' : 'hidden'}>
       {/* Chat Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map((msg) => (
@@ -457,7 +494,7 @@ export default function TaskPane() {
 
         {/* Mode Toggle */}
         <div className="grid grid-cols-4 gap-1 mb-3 bg-neutral-100 p-1 rounded-lg w-full">
-          {MODES.map(m => (
+          {ASSISTANT_MODES.map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
@@ -542,6 +579,7 @@ export default function TaskPane() {
           )}
         </div>
         <p className="text-[10px] text-center text-neutral-400 mt-2">Nyomj Entert a küldéshez{isSending ? ' · a piros gombbal leállíthatod' : ''}</p>
+      </div>
       </div>
     </div>
   );

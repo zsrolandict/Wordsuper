@@ -47,7 +47,7 @@ export function parseRequest(body: unknown): ParseResult {
   }
 
   const documentContext = toLineFeeds(asString(raw.documentContext)).substring(0, contextLimitFor(mode));
-  if (mode === "review" && !documentContext.trim()) {
+  if ((mode === "review" || mode === "compare") && !documentContext.trim()) {
     return { error: "Missing documentContext" };
   }
 
@@ -85,6 +85,29 @@ const REVIEW_SCHEMA = {
     // Gemini extension: generate the quote first, so the comment is written with the exact spot in mind
     propertyOrdering: ["quote", "comment", "severity"],
   },
+};
+
+const COMPARE_SCHEMA = {
+  type: "object",
+  properties: {
+    overview: { type: "string", description: "Short overall summary of what the counterparty changed and the main risks." },
+    changes: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "The CHANGE number from the list." },
+          summary: { type: "string", description: "What changed in substance, in one or two sentences." },
+          risk: { type: "string", enum: [...SEVERITY_VALUES] },
+          recommendation: { type: "string", description: "Accept, reject or negotiate, and why." },
+        },
+        required: ["id", "summary", "risk", "recommendation"],
+        propertyOrdering: ["id", "summary", "risk", "recommendation"],
+      },
+    },
+  },
+  required: ["overview", "changes"],
+  propertyOrdering: ["overview", "changes"],
 };
 
 function styleInstructions(style: StyleProfile | undefined): string {
@@ -149,6 +172,20 @@ RULES:
 - Keep it concise, professional, and directly address the instruction.
 - Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler.${style}`,
       prompt: `${contextBlock("for your reference only")}SELECTED TEXT TO ANALYZE:\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
+    };
+  }
+
+  if (mode === "compare") {
+    return {
+      systemInstruction: `You are a professional legal and business advisor AI operating within Microsoft Word.
+The user compares an earlier version of a document with the current one, typically to see what the counterparty changed.
+Your task is to assess the listed changes according to the user's instruction.
+RULES:
+- Answer with JSON: an overview, and one entry per change you assess, using the CHANGE numbers from the list as ids.
+- Judge the substance and the risk from the user's point of view; purely formal changes are low risk unless they change the meaning.
+- Write in the language of the user's instruction.${style}`,
+      prompt: `CHANGES BETWEEN THE EARLIER AND THE CURRENT VERSION:\n${documentContext}\n\n${historyBlock(history)}${instructionBlock}`,
+      responseJsonSchema: COMPARE_SCHEMA,
     };
   }
 

@@ -57,6 +57,16 @@ export function Warning({ children }: { children: React.ReactNode }) {
 }
 
 function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
+  if (mode === 'compare') {
+    return (
+      <>
+        <p>Az AI nem a teljes dokumentumot, hanem csak a változások listáját kapta meg ({formatNumber(info.includedItems ?? 0)} változás, {formatNumber(info.sentChars)} karakter).</p>
+        {(info.includedItems ?? 0) < (info.totalItems ?? 0) && (
+          <Warning>A {formatNumber(info.totalItems ?? 0)} változásból csak {formatNumber(info.includedItems ?? 0)} fért bele a korlátba, a többit az AI nem látta.</Warning>
+        )}
+      </>
+    );
+  }
   switch (info.strategy) {
     case 'empty':
       return <p>A dokumentum üres volt, így az AI nem kapott háttérinformációt.</p>;
@@ -119,7 +129,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
                 <p>A kijelölt szöveget az AI nem kapta meg, a generált szöveg ennek a helyére kerül.</p>
               </Section>
             )
-          ) : mode !== 'review' && (
+          ) : (mode === 'edit' || mode === 'comment') && (
             <Section title={`Kijelölt szöveg (${formatNumber(selectionText.length)} karakter)`}>
               <div className="max-h-32 overflow-y-auto whitespace-pre-wrap bg-neutral-50 border border-neutral-200 rounded-md p-2">
                 {toLineFeeds(selectionText.substring(0, MAX_SELECTION_CHARS))}
@@ -130,7 +140,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
             </Section>
           )}
 
-          <Section title={mode === 'review' ? 'Átvizsgált szöveg' : 'Dokumentum-kontextus'}>
+          <Section title={mode === 'review' ? 'Átvizsgált szöveg' : mode === 'compare' ? 'Összevetett változások' : 'Dokumentum-kontextus'}>
             <ContextDescription info={contextInfo} mode={mode} />
           </Section>
 

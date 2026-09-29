@@ -51,6 +51,15 @@ test('style preferences go into the system instruction; review asks for JSON', (
   assert.ok(review.prompt.includes('DOCUMENT TO REVIEW:\ndoc'));
 });
 
+test('compare mode needs the change list and answers with JSON', () => {
+  assert.ok('error' in parseRequest({ mode: 'compare', instruction: 'x', documentContext: '' }));
+  const parsed = parseRequest({ mode: 'compare', instruction: 'Mi a kockázat?', documentContext: 'CHANGE 1 (added):\nAFTER: Kötbér.' });
+  assert.ok('value' in parsed);
+  const built = buildPrompt(parsed.value);
+  assert.ok(built.responseJsonSchema);
+  assert.ok(built.prompt.startsWith('CHANGES BETWEEN THE EARLIER AND THE CURRENT VERSION:\nCHANGE 1'));
+});
+
 test('Word paragraph marks reach the model as line breaks', () => {
   const parsed = parseRequest({ ...valid, originalText: 'Első\rMásodik', documentContext: 'A\r\nB', history: [{ instruction: 'x', result: 'C\rD' }] });
   assert.ok('value' in parsed);
