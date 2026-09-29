@@ -1,5 +1,5 @@
 /**
- * Local HTTPS mode for Word on the desktop: https://localhost:3443 with the Office add-in development certificate
+ * Local HTTPS mode for Word on the desktop: https://localhost:3444 with the Office add-in development certificate
  * (npx office-addin-dev-certs install), and a manifest pointing there for sideloading. Started by INDITAS.bat.
  */
 // The keys come from the .env file next to package.json (INDITAS.bat creates it on the first run)
@@ -8,7 +8,7 @@ import fs from "fs";
 import path from "path";
 import { generateManifest } from "../src/manifest";
 
-export const LOCAL_HTTPS_PORT = 3443;
+export const LOCAL_HTTPS_PORT = 3444;
 const manifestPath = path.join(process.cwd(), "manifest.local.xml");
 
 fs.writeFileSync(manifestPath, generateManifest(`https://localhost:${LOCAL_HTTPS_PORT}`));

@@ -163,7 +163,7 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 
 ## 7. Kész az indításhoz
 
-- **Egykattintásos helyi indító Windowsra:** `INDITAS.bat`. Első indításkor telepíti a függőségeket, létrehozza a `.env`-et, és telepíti a HTTPS-tanúsítványt. Minden indításkor elindítja a szervert a `https://localhost:3443` címen, és megnyitja a Wordöt a bővítménnyel.
+- **Egykattintásos helyi indító Windowsra:** `INDITAS.bat`. Első indításkor telepíti a függőségeket, létrehozza a `.env`-et, és telepíti a HTTPS-tanúsítványt. Minden indításkor elindítja a szervert a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel.
 - **Arculat:** ICT Europa Legal logó a fejlécben (a végleges logófájl még hiányzik).
 - **Következő fázis (II.):** Microsoft-fiókos belépés (ellenőrzött felhasználó az auditnaplóban), költségkövetés ügyfélcímkénként.
 

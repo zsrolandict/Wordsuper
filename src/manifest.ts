@@ -6,7 +6,8 @@ export function generateManifest(appUrl: string): string {
   const baseUrl = appUrl.replace(/\/$/, '');
   
   // Generating a stable random GUID based on the URL (or just a fixed one for this project)
-  const guid = "e0b04a11-1a3b-4c55-83f1-3dc885e35490";
+  // Own ID (not the one of the original word-add-in), so both versions can be installed side by side
+  const guid = "65d98045-a095-4bc5-921a-95bff0ef2573";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <OfficeApp 
@@ -21,7 +22,7 @@ export function generateManifest(appUrl: string): string {
   <Version>1.1.0.0</Version>
   <ProviderName>AI Studio User</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Word Writer Add-in" />
+  <DisplayName DefaultValue="Word Writer (ICT Europa Legal)" />
   <Description DefaultValue="A helpful assistant right inside your Word document."/>
   
   <!-- Icon for the add-in (using Microsoft's default placeholder or a valid HTTPS URL) -->
@@ -105,7 +106,7 @@ export function generateManifest(appUrl: string): string {
       <bt:ShortStrings>
         <bt:String id="GetStarted.Title" DefaultValue="Get started with Word Writer"/>
         <bt:String id="CommandsGroup.Label" DefaultValue="Word Writer"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="Open AI Writer"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="Word Writer"/>
       </bt:ShortStrings>
       <bt:LongStrings>
         <bt:String id="GetStarted.Description" DefaultValue="Your AI assistant inside Word is loaded."/>

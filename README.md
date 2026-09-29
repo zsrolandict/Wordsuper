@@ -31,14 +31,14 @@ Kattints duplán az **`INDITAS.bat`**-ra. Az első indításkor:
 2. létrehozza a `.env`-et, és megnyitja kitöltésre (Gemini-kulcs, saját hozzáférési kulcs);
 3. telepíti a helyi HTTPS-tanúsítványt (a Windows rákérdez: **Igen**).
 
-Utána elindítja a szervert a `https://localhost:3443` címen, és megnyitja a Wordöt a bővítménnyel. Eltávolítás: `npm run word:remove`.
+Utána elindítja a szervert a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel. Eltávolítás: `npm run word:remove`.
 
 | Parancs | Mit csinál |
 |---|---|
 | `npm run lint` | TypeScript-ellenőrzés |
 | `npm test` | egységtesztek (Node beépített tesztfuttatója) |
 | `npm run build` | production build (`dist/`) |
-| `npm run word:server` | helyi HTTPS-szerver asztali Wordhöz (`https://localhost:3443`, `manifest.local.xml`) |
+| `npm run word:server` | helyi HTTPS-szerver asztali Wordhöz (`https://localhost:3444`, `manifest.local.xml`) |
 | `npm run word:sideload` | Word megnyitása a bővítménnyel (Windows/Mac) |
 
 A környezeti változók leírása: [.env.example](.env.example). Vertex AI-jal EU-régióban: `AI_PROVIDER=vertex`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_CLOUD_LOCATION`.

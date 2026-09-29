@@ -37,12 +37,12 @@ call npx --yes office-addin-dev-certs install --days 365
 if errorlevel 1 goto hiba
 
 rem --- Szerver ---
-netstat -ano | findstr ":3443" | findstr "LISTENING" >nul
+netstat -ano | findstr ":3444" | findstr "LISTENING" >nul
 if errorlevel 1 (
-  echo Szerver inditasa: https://localhost:3443
+  echo Szerver inditasa: https://localhost:3444
   start "Word Writer szerver" cmd /k "npm run word:server"
   echo Varok, amig a szerver elindul...
-  powershell -NoProfile -Command "$i=0; while ($i -lt 60) { try { Invoke-WebRequest -UseBasicParsing https://localhost:3443/ -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
+  powershell -NoProfile -Command "$i=0; while ($i -lt 60) { try { Invoke-WebRequest -UseBasicParsing https://localhost:3444/ -TimeoutSec 2 | Out-Null; exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
   if errorlevel 1 (
     echo A szerver nem indult el 60 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
     goto hiba
@@ -56,7 +56,7 @@ echo Word megnyitasa a bovitmennyel...
 call npm run word:sideload
 if errorlevel 1 goto hiba
 echo.
-echo Kesz. A Word Kezdolap szalagjan kattints az "Open AI Writer" gombra.
+echo Kesz. A Word Kezdolap szalagjan kattints a "Word Writer" gombra.
 echo A szerver ablakot hagyd nyitva, amig hasznalod. Eltavolitas: npm run word:remove
 pause
 exit /b 0
