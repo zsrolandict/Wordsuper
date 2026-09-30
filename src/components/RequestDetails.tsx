@@ -38,7 +38,8 @@ export interface MaskingInfo {
 
 const MAX_MASK_ROWS = 40;
 
-function MaskingDescription({ masking }: { masking: MaskingInfo | null }) {
+function MaskingDescription({ masking, onNeverHide }: { masking: MaskingInfo | null; onNeverHide?: (value: string) => void }) {
+  const [shown, setShown] = useState<Set<string>>(new Set());
   if (!masking) {
     return <p>A maszkolás ki volt kapcsolva: az AI a szöveget változtatás nélkül kapta meg. (Beállítások → Adatvédelem)</p>;
   }
@@ -54,6 +55,21 @@ function MaskingDescription({ masking }: { masking: MaskingInfo | null }) {
             <tr key={token} className="border-t border-neutral-100">
               <td className="py-0.5 pr-2 font-mono text-[10px] text-neutral-500 whitespace-nowrap align-top">{token}</td>
               <td className="py-0.5 break-words">{value}</td>
+              {onNeverHide && (
+                <td className="py-0.5 pl-2 text-right whitespace-nowrap align-top">
+                  {shown.has(value) ? (
+                    <span className="text-[10px] text-green-700">✓ a következő kéréstől látja</span>
+                  ) : (
+                    <button
+                      onClick={() => { onNeverHide(value); setShown(s => new Set(s).add(value)); }}
+                      title="Ezt nem kell elrejteni: a következő kéréstől az AI látja (Beállítások → Adatvédelem → Soha ne rejtsd el)"
+                      className="text-[10px] font-medium text-blue-700 hover:text-blue-900"
+                    >
+                      Ne rejtsd
+                    </button>
+                  )}
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -136,7 +152,12 @@ function ContextDescription({ info, mode }: { info: ContextInfo; mode: Mode }) {
   }
 }
 
-export default function RequestDetails({ details, isLoading }: { details: RequestDetailsData; isLoading: boolean }) {
+export default function RequestDetails({ details, isLoading, onNeverHide }: {
+  details: RequestDetailsData;
+  isLoading: boolean;
+  /** A masked value the user wants the AI to see from now on */
+  onNeverHide?: (value: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth } = details;
 
@@ -188,7 +209,7 @@ export default function RequestDetails({ details, isLoading }: { details: Reques
 
           {masking !== undefined && (
             <Section title="Adatvédelem">
-              <MaskingDescription masking={masking} />
+              <MaskingDescription masking={masking} onNeverHide={onNeverHide} />
             </Section>
           )}
 

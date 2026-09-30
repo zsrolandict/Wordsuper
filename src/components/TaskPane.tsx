@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap } from 'lucide-react';
+import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
@@ -11,9 +11,16 @@ import {
   insertGenerated,
   placeAtParagraph,
   readParagraphs,
+  readDocumentLength,
+  readSelectionLength,
   releaseRange,
   selectionMovedFrom,
   showFinding,
+  canUndo,
+  newUndoRecord,
+  releaseUndo,
+  undoChanges,
+  type UndoRecord,
   showRange,
   jumpToParagraph,
   takeSnapshot,
@@ -26,6 +33,7 @@ import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
+import { formatNumber } from '../services/format';
 import { useDocumentStats } from '../services/useDocumentStats';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import Proposal, { type FindingView, type ProposalState } from './Proposal';
@@ -58,6 +66,8 @@ interface Message {
   };
   /** The AI asked back instead of guessing: one-click answers, and which one was picked */
   clarification?: { options: string[]; mode: Mode; picked?: number };
+  /** What this proposal inserted, so it can be taken back (tracked changes and comments) */
+  undo?: UndoRecord[];
   /** A felhasználó üzenete egy gyorsgomb szövege volt */
   preset?: PresetMatch;
   /** Pl. hibás hozzáférési kulcsnál: gomb a Beállításokhoz */
@@ -121,6 +131,12 @@ interface Confirmation {
   text: string;
   choices: { label: string; primary?: boolean; run: () => void }[];
 }
+
+/** How many insertions keep their "Visszavonom" button */
+const MAX_UNDOABLE = 10;
+
+/** Above this, an edit of the whole document (nothing selected) is confirmed before it starts */
+const WHOLE_DOCUMENT_CONFIRM_CHARS = 3000;
 
 const DEPTH_LABELS: Record<Depth, { label: string; title: string }> = {
   auto: { label: 'Automatikus', title: 'A modell maga dönti el, mennyit gondolkodjon' },
@@ -187,12 +203,26 @@ export default function TaskPane() {
   };
 
   const addMessage = (message: Omit<Message, 'id'>) => {
-    setMessages(prev => [...prev, { id: newMessageId(), ...message }]);
+    const id = newMessageId();
+    setMessages(prev => [...prev, { id, ...message }]);
+    return id;
   };
 
   const updateMessage = (id: string, update: (m: Message) => Message) => {
     setMessages(prev => prev.map(m => (m.id === id ? update(m) : m)));
   };
+
+  /**
+   * "Visszavonom" stays on the last few insertions only: every kept range is tracked by Word, and many of them
+   * slow Word down. Older ones are released.
+   */
+  useEffect(() => {
+    const withUndo = messages.filter(m => m.undo?.length);
+    if (withUndo.length <= MAX_UNDOABLE) return;
+    const old = withUndo.slice(0, withUndo.length - MAX_UNDOABLE);
+    old.forEach(m => updateMessage(m.id, x => ({ ...x, undo: undefined })));
+    releaseUndo(old.flatMap(m => m.undo!));
+  }, [messages]);
 
   /** Findings of the pending review nobody decided about yet (0 when no review is pending) */
   const undecidedFindings = () => {
@@ -251,6 +281,8 @@ export default function TaskPane() {
     if (!tryLock()) return;
     try {
       await closePending('rejected', '✖️ Elvetve.');
+      // A new conversation has no undo buttons: let Word forget the kept ranges
+      await releaseUndo(messagesRef.current.flatMap(m => m.undo ?? []));
       setMessages([WELCOME_MESSAGE]);
       setInput('');
       setMode('edit');
@@ -296,6 +328,18 @@ export default function TaskPane() {
         setConfirmation({ text: undecidedWarning(open), choices: [{ label: 'Új kérés indítása', primary: true, run: () => again({ confirmed: true }) }] });
         return;
       }
+      // Nothing selected in Edit mode: the whole document gets rewritten. For a longer one, ask first
+      // (read from Word now: the limits bar's numbers are refreshed only every few seconds)
+      if (!refining && !options.confirmed && requestMode === 'edit' && typeof Word !== 'undefined') {
+        const documentChars = (await readSelectionLength().catch(() => 1)) === 0 ? await readDocumentLength().catch(() => 0) : 0;
+        if (documentChars > WHOLE_DOCUMENT_CONFIRM_CHARS) {
+          setConfirmation({
+            text: `Nem jelöltél ki semmit, ezért az egész dokumentumot (${formatNumber(documentChars)} karakter) átírnám. Ez hosszabb ideig tart. Biztosan az egészre gondoltál?`,
+            choices: [{ label: 'Igen, az egész dokumentumon', primary: true, run: () => again({ confirmed: true }) }],
+          });
+          return;
+        }
+      }
       // Typed or quick-button instruction while something else is selected: new request or refinement?
       if (refining && !options.explicitRefine && !options.confirmed && typeof Word !== 'undefined') {
         const moved = await selectionMovedFrom(current!.snapshot).catch(() => false);
@@ -340,7 +384,7 @@ export default function TaskPane() {
 
       // Sending is a fresh start: follow the conversation to the bottom again
       followRef.current = true;
-      addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${displayText ?? typed}`, preset: preset ?? undefined });
+      const userMessageId = addMessage({ role: 'user', content: `[${modeLabel(requestMode)}${refining ? ' · finomítás' : ''}] ${displayText ?? typed}`, preset: preset ?? undefined });
 
       if (typeof Word === 'undefined') {
         addMessage({ role: 'system', content: 'Hiba: A Word API nem érhető el. Kérlek a Wordön belül használd a beépülőt!' });
@@ -348,6 +392,10 @@ export default function TaskPane() {
       }
 
       const snapshot = refining ? current!.snapshot : await takeSnapshot(requestMode);
+      // Say it in the chat too: without a selection the request covers the whole document
+      if (!refining && snapshot.wholeDocument) {
+        updateMessage(userMessageId, m => ({ ...m, content: m.content.replace(/^\[([^\]]+)\]/, '[$1 · egész dokumentum]') }));
+      }
       if (!refining) unclaimedRange = snapshot.range;
       const rounds: HistoryTurn[] = refining ? current!.rounds : [];
       // Hosszú finomításnál az első és a legutóbbi körök mennek el (a szerver is így vág)
@@ -366,7 +414,7 @@ export default function TaskPane() {
       // Names and identifiers are replaced by placeholders before the request leaves the machine
       const masker = refining
         ? current!.masker
-        : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
+        : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
       const sentRequest = masker ? maskRequest(request, masker) : request;
       const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
 
@@ -537,6 +585,8 @@ export default function TaskPane() {
     const explanation = addExplanation ? current.explanation : '';
     updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'applying' } }));
 
+    // Remembers what gets inserted, so "Visszavonom" can take it back
+    const undo = canUndo() ? newUndoRecord() : undefined;
     try {
       let status: string;
       let structureNote = '';
@@ -549,7 +599,7 @@ export default function TaskPane() {
       if (current.mode === 'edit' && current.snapshot.wholeDocument) {
         const whole = current.snapshot.wholeDocument;
         const text = excluded.size ? composeDocument(whole.reviewed, planDocumentEdits(whole.reviewed, current.result), excluded) : current.result;
-        const outcome = await applyDocumentEdit(whole, text, explanation);
+        const outcome = await applyDocumentEdit(whole, text, explanation, undo);
         const parts = [
           outcome.changed && `${outcome.changed} bekezdést módosítottam`,
           outcome.inserted && `${outcome.inserted} új bekezdést szúrtam be`,
@@ -559,7 +609,7 @@ export default function TaskPane() {
           ? `✅ Az egész dokumentumon: ${parts.join(', ')}, korrektúrával. A többi bekezdéshez nem nyúltam.`
           : '✅ A javaslat megegyezik a dokumentummal, nem kellett semmit módosítani.';
       } else if (current.mode === 'edit') {
-        const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation);
+        const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation, undo);
         status = outcome.pendingChanges
           ? '✅ A kijelölést kicseréltem, korrektúrával. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).'
           : outcome.strategy === 'words'
@@ -568,17 +618,17 @@ export default function TaskPane() {
           ? '✅ A javaslat megegyezik az eredetivel, nem kellett semmit módosítani.'
           : '✅ A kijelölést kicseréltem, korrektúrával. Mivel a bekezdések száma megváltozott (vagy a kijelölés bekezdés közepén kezdődik), itt a formázás egyszerűsödhetett.';
       } else if (current.mode === 'generate') {
-        await insertGenerated(range!, current.result);
+        await insertGenerated(range!, current.result, undo);
         status = '✅ A szöveget beszúrtam a dokumentumba!';
       } else if (current.mode === 'comment') {
-        await insertCommentAt(range!, current.result);
+        await insertCommentAt(range!, current.result, undo);
         status = current.snapshot.wholeDocument
           ? '✅ A véleményezést beszúrtam Megjegyzésként abba a bekezdésbe, ahol a kurzor állt.'
           : '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).';
       } else {
         const chosen = (findingViews ?? []).filter(f => !f.done && (f.selected || f.fix));
         const before = await structureIssues();
-        const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })));
+        const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })), { undo });
         structureNote = newIssuesNote(before, await structureIssues());
         updatedFindings = findingViews?.map(f => (f.done ? f : {
           ...f,
@@ -603,6 +653,7 @@ export default function TaskPane() {
         ...m,
         proposal: m.proposal && { ...m.proposal, state: 'applied', findings: updatedFindings },
         status: { text: status, tone: 'success' },
+        undo: undo?.ranges.length ? [...(m.undo ?? []), undo] : m.undo,
       }));
       setDocumentVersion(v => v + 1);
     } catch (writeError) {
@@ -690,7 +741,8 @@ export default function TaskPane() {
     setIsApplying(true);
     try {
       const before = await structureIssues();
-      const outcome = await applyReviewFindings([{ finding, comment: finding.selected, fix: finding.fix }], { select: true });
+      const undo = canUndo() ? newUndoRecord() : undefined;
+      const outcome = await applyReviewFindings([{ finding, comment: finding.selected, fix: finding.fix }], { select: true, undo });
       const note = newIssuesNote(before, await structureIssues());
       const updated: FindingView = { ...finding, done: 'applied', notFound: outcome.notFound.length > 0, fixFailed: outcome.fixFailed.length > 0 };
       const next = findings.map((f, i) => (i === index ? updated : f));
@@ -699,6 +751,7 @@ export default function TaskPane() {
         ...m,
         proposal: m.proposal && { ...m.proposal, findings: next },
         status: { text: done ? `✅ Beszúrva: ${done}.${note}${markupHint()}` : '⚠️ Ezt nem tudtam beszúrni, lásd fent.', tone: done && !note ? 'success' : 'neutral' },
+        undo: undo?.ranges.length ? [...(m.undo ?? []), undo] : m.undo,
       }));
       setDocumentVersion(v => v + 1);
       finishIfAllDecided(messageId, next);
@@ -715,6 +768,40 @@ export default function TaskPane() {
     const next = findings.map((f, i) => (i === index ? { ...f, done: 'dismissed' as const } : f));
     setFinding(messageId, index, { done: 'dismissed' });
     finishIfAllDecided(messageId, next);
+  };
+
+  /** Takes back everything this proposal inserted: its tracked changes are rejected, its comments deleted */
+  const undoMessage = async (messageId: string) => {
+    const records = messagesRef.current.find(m => m.id === messageId)?.undo;
+    if (!records?.length || !tryLock()) return;
+    setIsApplying(true);
+    try {
+      const { changes, comments } = await undoChanges(records);
+      const stillPending = pendingRef.current?.messageId === messageId;
+      updateMessage(messageId, m => ({
+        ...m,
+        undo: undefined,
+        proposal: m.proposal && {
+          ...m.proposal,
+          // A review still open: the taken-back findings can be decided again
+          state: stillPending ? m.proposal.state : 'rejected',
+          findings: m.proposal.findings?.map(f => (f.done === 'applied' ? { ...f, done: stillPending ? undefined : 'dismissed', notFound: false, fixFailed: false } : f)),
+        },
+        status: {
+          text: changes || comments
+            ? `↩️ Visszavontam: ${[changes && `${changes} korrektúra`, comments && `${comments} megjegyzés`].filter(Boolean).join(', ')}.`
+            : '↩️ Nem találtam visszavonnivalót (lehet, hogy már elfogadtad vagy elutasítottad a korrektúrákat a Wordben).',
+          tone: 'neutral',
+        },
+      }));
+      setDocumentVersion(v => v + 1);
+    } catch (error) {
+      console.error(error);
+      addMessage({ role: 'system', content: 'Nem sikerült visszavonni. A Wordben a Véleményezés lapon a korrektúrákat egyenként is elutasíthatod.' });
+    } finally {
+      setIsApplying(false);
+      unlock();
+    }
   };
 
   const toggleFinding = (messageId: string, index: number, field: 'selected' | 'fix') => {
@@ -814,7 +901,12 @@ export default function TaskPane() {
         <StructurePanel active={tab === 'structure'} busy={isBusy} documentVersion={documentVersion} onRequest={runStructureRequest} />
       </div>
       <div className={tab === 'compare' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-        <ComparePanel settings={settings} onRateLimit={setRateLimit} onOpenSettings={() => setView('settings')} />
+        <ComparePanel
+          settings={settings}
+          onRateLimit={setRateLimit}
+          onOpenSettings={() => setView('settings')}
+          onNeverHide={value => updateSettings(s => ({ ...s, masking: { ...s.masking, neverHide: [s.masking.neverHide.trim(), value].filter(Boolean).join('\n') } }))}
+        />
       </div>
 
       <div className={tab === 'assistant' ? 'contents' : 'hidden'}>
@@ -879,6 +971,7 @@ export default function TaskPane() {
                     onShow: index => msg.proposal?.findings && showFindingInDocument(msg.id, msg.proposal.findings[index], index),
                     onApplyOne: index => msg.proposal?.findings && applyOneFinding(msg.id, msg.proposal.findings, index),
                     onDismiss: index => msg.proposal?.findings && dismissFinding(msg.id, msg.proposal.findings, index),
+                    onRestore: index => setFinding(msg.id, index, { done: undefined }),
                   }}
                 />
               ) : (
@@ -907,13 +1000,23 @@ export default function TaskPane() {
                   )}
                 </div>
               )}
+              {msg.undo && msg.undo.length > 0 && (
+                <button
+                  onClick={() => undoMessage(msg.id)}
+                  disabled={isBusy}
+                  title="Elutasítja a javaslat által beírt korrektúrákat és törli a megjegyzéseit"
+                  className="mt-1.5 flex items-center text-xs font-medium text-neutral-600 hover:text-neutral-900 disabled:opacity-50"
+                >
+                  <Undo2 className="w-3.5 h-3.5 mr-1" />Visszavonom
+                </button>
+              )}
               {msg.showSettingsLink && (
                 <button onClick={() => setView('settings')} className="mt-2 flex items-center text-xs font-medium underline">
                   <KeyRound className="w-3.5 h-3.5 mr-1" />
                   Beállítások megnyitása
                 </button>
               )}
-              {msg.details && <RequestDetails details={msg.details} isLoading={!!msg.isLoading} />}
+              {msg.details && <RequestDetails details={msg.details} isLoading={!!msg.isLoading} onNeverHide={value => updateSettings(s => ({ ...s, masking: { ...s.masking, neverHide: [s.masking.neverHide.trim(), value].filter(Boolean).join('\n') } }))} />}
             </div>
           </div>
         ))}

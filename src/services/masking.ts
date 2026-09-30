@@ -83,10 +83,15 @@ export class Masker {
   private counters = new Map<EntityKind, number>();
   private kinds = new Map<string, EntityKind>();
   private extraTerms: string[];
+  private neverHide: Set<string>;
 
-  /** extraTerms: the user's own list of words to always hide (names, project codes…) */
-  constructor(extraTerms: string[] = []) {
+  /**
+   * extraTerms: the user's own list of words to always hide (names, project codes…).
+   * neverHide: values the rules recognize but the user wants the AI to see (e.g. a public authority's name).
+   */
+  constructor(extraTerms: string[] = [], neverHide: string[] = []) {
     this.extraTerms = extraTerms.map(t => t.trim()).filter(t => t.length >= 2).sort((a, b) => b.length - a.length);
+    this.neverHide = new Set(neverHide.map(t => t.trim()).filter(Boolean));
   }
 
   private tokenFor(value: string, kind: EntityKind): string {
@@ -122,7 +127,7 @@ export class Masker {
       result = result.replace(rule.pattern, (...args) => {
         const match = args[0] as string;
         const value = rule.group ? (args[rule.group] as string | undefined) : match;
-        if (!value || /\[[A-ZÁÉÍÓÖŐÚÜŰ]+_\d+\]/.test(value)) return match;
+        if (!value || /\[[A-ZÁÉÍÓÖŐÚÜŰ]+_\d+\]/.test(value) || this.neverHide.has(value.trim())) return match;
         return match.replace(value, this.tokenFor(value.trim(), rule.kind));
       });
     }

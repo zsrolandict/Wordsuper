@@ -173,6 +173,74 @@ export async function selectionMovedFrom(snapshot: DocumentSnapshot): Promise<bo
   });
 }
 
+/**
+ * What one insertion touched, so it can be taken back: the ranges (kept tracked across Word.run calls) and when it
+ * happened. Undo rejects the tracked changes and deletes the comments inside those ranges made since then.
+ */
+export interface UndoRecord {
+  ranges: Word.Range[];
+  since: number;
+}
+
+export const newUndoRecord = (): UndoRecord => ({ ranges: [], since: Date.now() });
+
+/** Taking back needs the tracked-changes API (WordApi 1.6, e.g. Microsoft 365) */
+export const canUndo = () =>
+  typeof Office !== 'undefined' && !!Office.context?.requirements?.isSetSupported('WordApi', '1.6');
+
+function remember(context: Word.RequestContext, undo: UndoRecord | undefined, range: Word.Range) {
+  if (!undo) return;
+  context.trackedObjects.add(range);
+  undo.ranges.push(range);
+}
+
+/**
+ * Takes back what the records inserted: tracked changes are rejected, comments deleted. Only changes inside the
+ * touched ranges and not older than the insertion count (Word keeps revision times to the minute), so earlier
+ * tracked changes of the user in the same sentence stay.
+ */
+export async function undoChanges(records: UndoRecord[]): Promise<{ changes: number; comments: number }> {
+  const ranges = records.flatMap(r => r.ranges.map(range => ({ range, since: Math.floor(r.since / 60000) * 60000 })));
+  if (!ranges.length) return { changes: 0, comments: 0 };
+  return Word.run(ranges.map(r => r.range), async (context) => {
+    let changes = 0;
+    let comments = 0;
+    // One range at a time: overlapping ranges would otherwise try to reject the same change twice
+    for (const { range, since } of ranges) {
+      try {
+        const tracked = range.getTrackedChanges();
+        tracked.load('items/date');
+        const notes = range.getComments();
+        notes.load('items/creationDate');
+        await context.sync();
+        const newer = (date: Date | string) => new Date(date).getTime() >= since;
+        tracked.items.filter(change => newer(change.date)).forEach(change => { change.reject(); changes++; });
+        notes.items.filter(comment => newer(comment.creationDate)).forEach(comment => { comment.delete(); comments++; });
+        await context.sync();
+      } catch {
+        // Already taken back through an overlapping range, or the text is gone
+      }
+    }
+    ranges.forEach(({ range }) => context.trackedObjects.remove(range));
+    await context.sync().catch(() => {});
+    return { changes, comments };
+  });
+}
+
+/** Lets Word forget the ranges kept for taking changes back (many tracked objects slow Word down) */
+export async function releaseUndo(records: UndoRecord[]) {
+  const ranges = records.flatMap(r => r.ranges);
+  if (!ranges.length) return;
+  try {
+    await Word.run(ranges, async (context) => {
+      ranges.forEach(range => context.trackedObjects.remove(range));
+      await context.sync();
+    });
+  } catch {
+    // Already gone
+  }
+}
+
 /** Stops tracking a snapshot's selection; harmless if it is already gone */
 export async function releaseRange(range: Word.Range | null) {
   if (!range) return;
@@ -319,13 +387,15 @@ const consistentWords = (collections: Word.RangeCollection[], texts: string[]) =
   collections.every((collection, i) => wordTexts(collection).join('\u0000') === tokenizeLikeWord(texts[i]).join('\u0000'));
 
 /** Applies an edit of the tracked selection with Track Changes; the explanation, if any, goes on it as a comment */
-export async function applyEdit(range: Word.Range, newText: string, explanation = ''): Promise<EditOutcome> {
+export async function applyEdit(range: Word.Range, newText: string, explanation = '', undo?: UndoRecord): Promise<EditOutcome> {
   return Word.run(range, async (context) => {
     const outcome = await withTrackChanges(context, () => editRange(context, range, newText));
     if (explanation && outcome.strategy !== 'unchanged') range.insertComment(explanation);
     // Show where it happened: the user may have scrolled away while the AI was working
     range.select();
     await context.sync();
+    // Kept tracked when it may be taken back; the snapshot's own tracking is released either way
+    if (undo) remember(context, undo, range.getRange('Whole'));
     await untrack(context, range);
     return outcome;
   });
@@ -344,7 +414,8 @@ export interface DocumentEditOutcome {
 export async function applyDocumentEdit(
   snapshot: NonNullable<DocumentSnapshot['wholeDocument']>,
   newText: string,
-  explanation = ''
+  explanation = '',
+  undo?: UndoRecord
 ): Promise<DocumentEditOutcome> {
   const { paragraphs: expectedParagraphs, reviewed } = snapshot;
   return Word.run(async (context) => {
@@ -376,10 +447,12 @@ export async function applyDocumentEdit(
         const paragraph = items[op.type === 'insert' ? Math.max(op.after, 0) : op.paragraph];
         // Processed last to first, so after the loop this holds the first place that changed
         firstChanged = paragraph;
+        if (op.type !== 'insert') remember(context, undo, paragraph.getRange('Whole'));
         if (op.type === 'insert') {
           if (op.after === -1) {
             op.texts.forEach((text, i) => {
               const inserted = paragraph.insertParagraph(text, 'Before');
+              remember(context, undo, inserted.getRange('Whole'));
               if (i === 0) firstChanged = inserted;
             });
           } else {
@@ -389,6 +462,7 @@ export async function applyDocumentEdit(
               previous = previous
                 ? previous.insertParagraph(text, 'After')
                 : paragraph.tableNestingLevel > 0 ? paragraph.parentTable.insertParagraph(text, 'After') : paragraph.insertParagraph(text, 'After');
+              remember(context, undo, previous.getRange('Whole'));
               if (i === 0) firstChanged = previous;
             });
           }
@@ -422,7 +496,7 @@ export async function applyDocumentEdit(
  * Inserts generated text at the tracked selection (replacing it, if there was one). At the start or the end of
  * a non-empty paragraph it becomes paragraphs of its own instead of gluing onto that paragraph's text.
  */
-export async function insertGenerated(range: Word.Range, text: string) {
+export async function insertGenerated(range: Word.Range, text: string, undo?: UndoRecord) {
   await Word.run(range, async (context) => {
     range.load('text');
     const paragraph = range.paragraphs.getFirst();
@@ -437,17 +511,23 @@ export async function insertGenerated(range: Word.Range, text: string) {
       if (offset === 0) insert = `${text}\n`;
       else if (offset >= paragraph.text.length) insert = `\n${text}`;
     }
-    range.insertText(insert, 'Replace').select();
-    await context.sync();
+    // Inserted with Track Changes, like every other change
+    await withTrackChanges(context, async () => {
+      const inserted = range.insertText(insert, 'Replace');
+      inserted.select();
+      remember(context, undo, inserted);
+      await context.sync();
+    });
     await untrack(context, range);
   });
 }
 
-export async function insertCommentAt(range: Word.Range, text: string) {
+export async function insertCommentAt(range: Word.Range, text: string, undo?: UndoRecord) {
   await Word.run(range, async (context) => {
     range.insertComment(text);
     range.select();
     await context.sync();
+    if (undo) remember(context, undo, range.getRange('Whole'));
     await untrack(context, range);
   });
 }
@@ -470,7 +550,7 @@ export interface ReviewInsertOutcome {
 }
 
 /** Finds each quote in the document, attaches its comment there and applies the chosen fixes as tracked changes */
-export async function applyReviewFindings(items: ReviewItem[], options: { select?: boolean } = {}): Promise<ReviewInsertOutcome> {
+export async function applyReviewFindings(items: ReviewItem[], options: { select?: boolean; undo?: UndoRecord } = {}): Promise<ReviewInsertOutcome> {
   return Word.run(async (context) => {
     const body = context.document.body;
     const search = (text: string, matchCase: boolean) => {
@@ -503,6 +583,7 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
           hit.insertComment(reviewCommentText(item.finding, !!fixRange));
           outcome.comments++;
           landed = hit;
+          if (!fixRange) remember(context, options.undo, hit);
         } else {
           outcome.notFound.push(item.finding);
         }
@@ -510,6 +591,7 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
       if (fix && fixRange) {
         toFix.push({ range: fixRange, text: fix.replacement });
         landed = fixRange;
+        remember(context, options.undo, fixRange);
       }
     });
     await context.sync();

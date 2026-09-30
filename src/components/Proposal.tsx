@@ -27,6 +27,8 @@ export interface FindingActions {
   onShow: (index: number) => void;
   onApplyOne: (index: number) => void;
   onDismiss: (index: number) => void;
+  /** Takes a dismissed finding back into the list */
+  onRestore: (index: number) => void;
 }
 
 export const SEVERITY_STYLES = {
@@ -160,7 +162,7 @@ function DocumentChangesView({ original, proposal, onShowParagraph, excluded = [
 const smallButton = 'flex items-center px-2 py-1 text-[11px] font-medium rounded-md border disabled:opacity-50';
 
 function FindingsList({ findings, editable, busy, actions }: { findings: FindingView[]; editable: boolean; busy: boolean; actions: FindingActions }) {
-  const { onToggle, onShow, onApplyOne, onDismiss } = actions;
+  const { onToggle, onShow, onApplyOne, onDismiss, onRestore } = actions;
   return (
     <ul className="space-y-2">
       {findings.map((finding, i) => {
@@ -168,8 +170,11 @@ function FindingsList({ findings, editable, busy, actions }: { findings: Finding
         return (
           <li key={i} className={`border rounded-lg p-2 ${finding.done === 'dismissed' ? 'opacity-50 border-neutral-200' : missed ? 'border-amber-300 bg-amber-50' : finding.done === 'applied' ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-neutral-50'}`}>
             {finding.done && (
-              <span className={`block text-[11px] font-semibold mb-0.5 ${finding.done === 'applied' ? 'text-green-700' : 'text-neutral-500'}`}>
+              <span className={`flex items-center justify-between text-[11px] font-semibold mb-0.5 ${finding.done === 'applied' ? 'text-green-700' : 'text-neutral-500'}`}>
                 {finding.done === 'applied' ? '✓ Beszúrva' : '✖ Elvetve'}
+                {finding.done === 'dismissed' && editable && (
+                  <button onClick={() => onRestore(i)} disabled={busy} className="font-medium text-blue-700 hover:text-blue-900 disabled:opacity-50">Visszaállítom</button>
+                )}
               </span>
             )}
             <span className={`inline-block text-[10px] font-semibold px-1.5 py-0.5 rounded mr-1 ${SEVERITY_STYLES[finding.severity]}`}>

@@ -22,7 +22,7 @@ export interface Settings {
   /** Insert without the preview step */
   autoApply: boolean;
   /** Replace sensitive values with placeholders before anything is sent to the AI */
-  masking: { enabled: boolean; extraTerms: string };
+  masking: { enabled: boolean; extraTerms: string; neverHide: string };
   /** A soft chime when an answer is ready */
   sound: boolean;
   /**
@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   styleProfile: { addressing: '', tone: '', notes: '' },
   customPresets: [],
   autoApply: false,
-  masking: { enabled: true, extraTerms: '' },
+  masking: { enabled: true, extraTerms: '', neverHide: '' },
   sound: true,
   // base misunderstands Hungarian too often to be the default
   dictation: { engine: 'local', localModel: 'small' },
@@ -69,6 +69,7 @@ function sanitize(raw: unknown): Settings {
     masking: {
       enabled: value.masking?.enabled !== false,
       extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
+      neverHide: typeof value.masking?.neverHide === 'string' ? value.masking.neverHide : '',
     },
     sound: value.sound !== false,
     depth: (DEPTH_VALUES as readonly unknown[]).includes(value.depth) ? value.depth as Depth : 'auto',

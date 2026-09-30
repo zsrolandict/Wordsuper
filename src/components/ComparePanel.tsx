@@ -53,8 +53,11 @@ export default function ComparePanel({
   settings,
   onRateLimit,
   onOpenSettings,
+  onNeverHide,
 }: {
   settings: Settings;
+  /** A masked value the user wants the AI to see from now on */
+  onNeverHide?: (value: string) => void;
   onRateLimit: (info: RateLimitInfo) => void;
   onOpenSettings: () => void;
 }) {
@@ -115,7 +118,7 @@ export default function ComparePanel({
       startedAt,
     };
     if (settings.sound) primeSound();
-    const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms)) : null;
+    const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
     const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth };
     const sentRequest = masker ? maskRequest(request, masker) : request;
     const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
@@ -307,7 +310,7 @@ export default function ComparePanel({
                 </div>
               )}
               {insertStatus && <p className="font-medium text-green-700">{insertStatus}</p>}
-              <RequestDetails details={analysis.details} isLoading={analysis.running} />
+              <RequestDetails details={analysis.details} isLoading={analysis.running} onNeverHide={onNeverHide} />
             </div>
           )}
         </div>

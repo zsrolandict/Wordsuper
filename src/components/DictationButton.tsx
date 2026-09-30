@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Mic, Square, Loader2 } from 'lucide-react';
+import { Mic, Square, Loader2, X } from 'lucide-react';
 import { describeRequestError, transcribeAudio } from '../services/aiService';
 import { transcribeLocally, type LocalModel } from '../services/localSpeech';
 
@@ -139,25 +139,32 @@ export default function DictationButton({ accessKey, userId, engine, localModel,
       </button>
     );
   }
-  if (state.kind === 'transcribing' && state.download !== null) {
+  // Downloading the model or transcribing: can be cancelled (the recording is thrown away)
+  if (state.kind === 'transcribing') {
     return (
-      <span className="h-11 px-2 shrink-0 flex items-center text-[11px] text-neutral-600 border border-neutral-300 rounded-xl" title="Első használat: a beszédfelismerő modell letöltése, utána a gépről töltődik">
+      <span
+        className="h-11 pl-2 pr-1 shrink-0 flex items-center text-[11px] text-neutral-600 border border-neutral-300 rounded-xl"
+        title={state.download !== null ? 'Első használat: a beszédfelismerő modell letöltése, utána a gépről töltődik' : 'Átírás folyamatban'}
+      >
         <Loader2 className="w-4 h-4 mr-1 animate-spin" />
-        Modell {Math.round(state.download * 100)}%
+        {state.download !== null ? `Modell ${Math.round(state.download * 100)}%` : 'Átírás…'}
+        <button onClick={() => abortRef.current?.abort()} aria-label="Diktálás megszakítása" title="Mégse" className="ml-1 p-1 rounded-md hover:bg-neutral-100">
+          <X className="w-3.5 h-3.5" />
+        </button>
       </span>
     );
   }
   return (
     <button
       onClick={start}
-      disabled={disabled || state.kind === 'transcribing'}
+      disabled={disabled}
       title={engine === 'local'
         ? 'Diktálás: mondd el, mit szeretnél. Ezen a gépen írom át szöveggé, a hang nem hagyja el a gépet.'
         : 'Diktálás: mondd el, mit szeretnél. A szerver AI-ja (EU) írja át szöveggé; a hangot nem lehet maszkolni.'}
       aria-label="Diktálás"
       className="w-11 h-11 shrink-0 flex items-center justify-center border border-neutral-300 text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 rounded-xl transition-colors"
     >
-      {state.kind === 'transcribing' ? <Loader2 className="w-5 h-5 animate-spin" /> : <Mic className="w-5 h-5" />}
+      <Mic className="w-5 h-5" />
     </button>
   );
 }

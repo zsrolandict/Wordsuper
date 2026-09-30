@@ -19,6 +19,12 @@ export interface LocalProgress {
 let worker: Worker | null = null;
 let nextId = 1;
 
+/** Stops the recognition thread (a download or a transcription in progress); the next dictation starts a new one */
+export function stopLocalSpeech() {
+  worker?.terminate();
+  worker = null;
+}
+
 function getWorker(): Worker {
   worker ??= new Worker(new URL('../workers/whisper.worker.ts', import.meta.url), { type: 'module' });
   return worker;
@@ -47,6 +53,8 @@ export async function transcribeLocally(recording: Blob, model: LocalModel, onPr
     };
     const onAbort = () => {
       cleanup();
+      // The thread would keep downloading or transcribing: stop it
+      stopLocalSpeech();
       reject(new DOMException('Aborted', 'AbortError'));
     };
     const onMessage = (event: MessageEvent<WorkerResponse>) => {

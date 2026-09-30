@@ -232,6 +232,17 @@ export default function SettingsPanel({
             />
             <span className="block text-[10px] text-neutral-400 font-normal">Amit a szabályok nem ismernek fel (projektnevek, becenevek, termékek). Pontos egyezésre keresem.</span>
           </label>
+          <label className="block text-xs font-medium text-neutral-700">
+            Soha ne rejtsd el
+            <textarea
+              value={settings.masking.neverHide}
+              onChange={e => onChange(s => ({ ...s, masking: { ...s.masking, neverHide: e.target.value } }))}
+              rows={2}
+              placeholder={'Soronként egy, pl.\nNemzeti Adó- és Vámhivatal'}
+              className={`${inputClass} mt-1 resize-none font-normal`}
+            />
+            <span className="block text-[10px] text-neutral-400 font-normal">Amit a szabály tévesen rejtene el (pl. hatóság, közismert cég). A Részletek panelen a „Ne rejtsd” gombbal is ide kerül.</span>
+          </label>
         </Card>
 
         <Card title="Stílusprofil">

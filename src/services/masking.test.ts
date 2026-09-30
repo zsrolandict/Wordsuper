@@ -71,3 +71,8 @@ test('placeholders the AI invented are reported', () => {
   masker.mask('Vevő: ABC Kft.');
   assert.deepEqual(leftoverPlaceholders(masker.unmask('A [CÉG_1] és a [CÉG_2], valamint [CÉG_2] és [A_1].')), ['[CÉG_2]']);
 });
+
+test('values the user wants the AI to see are never hidden', () => {
+  const masker = new Masker([], ['Nemzeti Adó- és Vámhivatal Kft.', 'ABC Kft.']);
+  assert.equal(masker.mask('Az ABC Kft. és a XYZ Kft. szerződik.'), 'Az ABC Kft. és a [CÉG_1] szerződik.');
+});
