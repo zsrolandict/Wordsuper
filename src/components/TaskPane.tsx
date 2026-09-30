@@ -14,6 +14,8 @@ import {
   releaseRange,
   selectionMovedFrom,
   showFinding,
+  showRange,
+  jumpToParagraph,
   takeSnapshot,
   type DocumentSnapshot,
 } from '../services/wordDocument';
@@ -652,10 +654,21 @@ export default function TaskPane() {
     updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'applied' } }));
   };
 
+  /** Selects what the pending proposal is about: its selection, or where generated text will go */
+  const showPendingPlace = async () => {
+    const range = pendingRef.current?.snapshot.range;
+    if (!range || busyRef.current) return;
+    try {
+      await showRange(range);
+    } catch {
+      addMessage({ role: 'system', content: 'Ezt a helyet már nem találom a dokumentumban.' });
+    }
+  };
+
   const showFindingInDocument = async (messageId: string, finding: FindingView, index: number) => {
     if (busyRef.current || typeof Word === 'undefined') return;
     try {
-      const found = await showFinding(finding);
+      const found = await showFinding(finding, finding.done === 'applied' && finding.fix);
       setFinding(messageId, index, { notShown: !found });
     } catch {
       setFinding(messageId, index, { notShown: true });
@@ -791,7 +804,7 @@ export default function TaskPane() {
       </div>
 
       <div className={tab === 'structure' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-        <StructurePanel active={tab === 'structure'} busy={isBusy} onRequest={runStructureRequest} />
+        <StructurePanel active={tab === 'structure'} busy={isBusy} documentVersion={documentVersion} onRequest={runStructureRequest} />
       </div>
       <div className={tab === 'compare' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <ComparePanel settings={settings} onRateLimit={setRateLimit} onOpenSettings={() => setView('settings')} />
@@ -844,6 +857,8 @@ export default function TaskPane() {
                     }
                   }}
                   onRecheck={msg.proposal.findings ? () => runRecheck(msg.proposal!.findings!) : undefined}
+                  onShow={pending?.messageId === msg.id && pending.snapshot.range ? () => showPendingPlace() : undefined}
+                  onShowParagraph={pending?.messageId === msg.id && pending.snapshot.wholeDocument ? index => { jumpToParagraph(index, false).catch(() => {}); } : undefined}
                   findingActions={{
                     onToggle: (index, field) => toggleFinding(msg.id, index, field),
                     onShow: index => msg.proposal?.findings && showFindingInDocument(msg.id, msg.proposal.findings[index], index),

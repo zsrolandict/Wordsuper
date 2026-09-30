@@ -19,7 +19,8 @@ const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
 
 /** Share of common words (Dice coefficient over word multisets), 0..1 */
 export function similarity(a: string, b: string): number {
-  const words = (s: string) => normalize(s).toLowerCase().split(' ').filter(Boolean);
+  // Punctuation stuck to a word ("mondat." vs "mondat,") must not make two versions of a sentence look unrelated
+  const words = (s: string) => normalize(s).toLowerCase().replace(/[.,;:!?()[\]„”“"'«»–-]+/g, ' ').split(/\s+/).filter(Boolean);
   const wa = words(a);
   const wb = words(b);
   if (!wa.length || !wb.length) return 0;

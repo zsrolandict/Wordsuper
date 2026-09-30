@@ -32,8 +32,10 @@ function JumpButton({ onClick, label = 'Ugrás' }: { onClick: () => void; label?
  * Szerkezet nézet: definiált fogalmak, kereszthivatkozások és a hibáik – AI nélkül, azonnal.
  * A kurzor alatti fogalom definíciója vagy a hivatkozott pont szövege görgetés nélkül látszik.
  */
-export default function StructurePanel({ active, busy, onRequest }: {
+export default function StructurePanel({ active, busy, documentVersion, onRequest }: {
   active: boolean;
+  /** Goes up whenever the assistant changed the document: the map is read again when the tab is open */
+  documentVersion: number;
   /** An AI request is running; the suggestion buttons wait for it */
   busy: boolean;
   /** Hands a fix or a new section over to the assistant */
@@ -41,6 +43,8 @@ export default function StructurePanel({ active, busy, onRequest }: {
 }) {
   const [data, setData] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
+  // The document version the map was built for; an older map is rebuilt as soon as the tab is shown
+  const [builtFor, setBuiltFor] = useState(-1);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [atCursor, setAtCursor] = useState<FoundAt | null>(null);
@@ -53,6 +57,7 @@ export default function StructurePanel({ active, busy, onRequest }: {
 
   const rebuild = useCallback(async () => {
     if (typeof Word === 'undefined') return;
+    setBuiltFor(documentVersion);
     setLoading(true);
     setError(null);
     try {
@@ -64,12 +69,12 @@ export default function StructurePanel({ active, busy, onRequest }: {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [documentVersion]);
 
-  // First build when the tab is opened
+  // First build when the tab is opened, and again after the assistant changed the document
   useEffect(() => {
-    if (active && !data && !loading) rebuild();
-  }, [active, data, loading, rebuild]);
+    if (active && !loading && (!data || builtFor !== documentVersion)) rebuild();
+  }, [active, data, loading, rebuild, builtFor, documentVersion]);
 
   // Release a remembered position when the pane goes away
   useEffect(() => () => { releaseRange(backRef.current); }, []);

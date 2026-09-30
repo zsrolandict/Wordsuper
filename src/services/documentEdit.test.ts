@@ -30,3 +30,9 @@ test('a new title goes before the first paragraph', () => {
   const ops = planDocumentEdits(['Első bekezdés szövege.'], 'Cím\nElső bekezdés szövege.');
   assert.deepEqual(ops, [{ type: 'insert', after: -1, texts: ['Cím'] }]);
 });
+
+test('a sentence that only gained a clause is an edit, not a delete and an insert', () => {
+  const ops = planDocumentEdits(['Első mondat.', 'Második mondat.', 'Harmadik mondat.'], 'Első mondat.\nMásodik mondat, pontosítva.\nHarmadik mondat.');
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].type, 'edit');
+});

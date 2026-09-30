@@ -322,10 +322,10 @@ const consistentWords = (collections: Word.RangeCollection[], texts: string[]) =
 export async function applyEdit(range: Word.Range, newText: string, explanation = ''): Promise<EditOutcome> {
   return Word.run(range, async (context) => {
     const outcome = await withTrackChanges(context, () => editRange(context, range, newText));
-    if (explanation && outcome.strategy !== 'unchanged') {
-      range.insertComment(explanation);
-      await context.sync();
-    }
+    if (explanation && outcome.strategy !== 'unchanged') range.insertComment(explanation);
+    // Show where it happened: the user may have scrolled away while the AI was working
+    range.select();
+    await context.sync();
     await untrack(context, range);
     return outcome;
   });
@@ -408,8 +408,10 @@ export async function applyDocumentEdit(
       }
       await context.sync();
     });
-    if (explanation && firstChanged) {
-      (firstChanged as Word.Paragraph).getRange("Whole").insertComment(explanation);
+    if (firstChanged) {
+      const place = (firstChanged as Word.Paragraph).getRange('Whole');
+      if (explanation) place.insertComment(explanation);
+      place.select();
       await context.sync();
     }
     return summary;
@@ -435,7 +437,7 @@ export async function insertGenerated(range: Word.Range, text: string) {
       if (offset === 0) insert = `${text}\n`;
       else if (offset >= paragraph.text.length) insert = `\n${text}`;
     }
-    range.insertText(insert, 'Replace');
+    range.insertText(insert, 'Replace').select();
     await context.sync();
     await untrack(context, range);
   });
@@ -444,6 +446,7 @@ export async function insertGenerated(range: Word.Range, text: string) {
 export async function insertCommentAt(range: Word.Range, text: string) {
   await Word.run(range, async (context) => {
     range.insertComment(text);
+    range.select();
     await context.sync();
     await untrack(context, range);
   });
@@ -527,11 +530,24 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
   });
 }
 
-/** Selects the quoted passage of a finding, so Word scrolls there; false when it can't be found */
-export async function showFinding(finding: ReviewFinding): Promise<boolean> {
+/** Selects a pending proposal's place (its selection, or the insertion point), so Word scrolls there */
+export async function showRange(range: Word.Range) {
+  await Word.run(range, async (context) => {
+    range.select();
+    await context.sync();
+  });
+}
+
+/**
+ * Selects the quoted passage of a finding, so Word scrolls there; false when it can't be found. After its fix was
+ * written in, the new wording is looked for first (the quote then only survives as tracked deleted text).
+ */
+export async function showFinding(finding: ReviewFinding, fixApplied = false): Promise<boolean> {
   return Word.run(async (context) => {
     const body = context.document.body;
-    const searches = searchCandidates(finding.quote).map(candidate => {
+    const fix = fixApplied ? reviewFix(finding) : null;
+    const texts = fix ? [...searchCandidates(fix.replacement), ...searchCandidates(finding.quote)] : searchCandidates(finding.quote);
+    const searches = texts.map(candidate => {
       const results = body.search(candidate, { matchCase: false });
       results.load('items/text');
       return results;

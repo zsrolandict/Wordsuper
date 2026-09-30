@@ -63,23 +63,33 @@ export function DiffView({ original, proposal }: { original: string; proposal: s
 }
 
 /** A rewrite of the whole document: only the paragraphs that change, new or go, not the whole text */
-function DocumentChangesView({ original, proposal }: { original: string; proposal: string }) {
+function DocumentChangesView({ original, proposal, onShowParagraph }: { original: string; proposal: string; onShowParagraph?: (index: number) => void }) {
   const oldParagraphs = useMemo(() => original.split('\n'), [original]);
   const ops = useMemo(() => planDocumentEdits(oldParagraphs, proposal), [oldParagraphs, proposal]);
   if (!ops.length) return <span className="text-xs text-neutral-500">Nincs változás a dokumentumhoz képest.</span>;
-  const label = (text: string) => <span className="block text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-0.5">{text}</span>;
+  // A heading per change, with a jump to the paragraph in the document
+  const label = (text: string, paragraph: number) => (
+    <span className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-0.5">
+      {text}
+      {onShowParagraph && (
+        <button onClick={() => onShowParagraph(paragraph)} className="flex items-center normal-case tracking-normal font-medium text-blue-700 hover:text-blue-900">
+          <LocateFixed className="w-3 h-3 mr-0.5" />Mutasd
+        </button>
+      )}
+    </span>
+  );
   return (
     <div className="space-y-2">
       <p className="text-xs text-neutral-500">Csak a változó részeket mutatom, a dokumentum többi része érintetlen marad.</p>
       {ops.map((op, i) => (
         <div key={i} className="border-l-2 border-neutral-200 pl-2">
           {op.type === 'edit' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – módosul`)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
+            <>{label(`${op.paragraph + 1}. bekezdés – módosul`, op.paragraph)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
           ) : op.type === 'delete' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
+            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`, op.paragraph)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
           ) : (
             <>
-              {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`)}
+              {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`, Math.max(op.after, 0))}
               {op.texts.map((text, k) => <ins key={k} className="block no-underline bg-green-50 text-green-800 whitespace-pre-wrap">{text}</ins>)}
             </>
           )}
@@ -197,6 +207,8 @@ export default function Proposal({
   onAlternative,
   findingActions,
   onRecheck,
+  onShow,
+  onShowParagraph,
   explanation,
   addExplanation,
   onToggleExplanation,
@@ -214,6 +226,10 @@ export default function Proposal({
   findingActions: FindingActions;
   /** Review: check the result again after only part of the findings was taken */
   onRecheck?: () => void;
+  /** Selects the place the proposal is for (its selection or insertion point) */
+  onShow?: () => void;
+  /** Whole-document edit: jumps to a paragraph of the document */
+  onShowParagraph?: (index: number) => void;
   explanation?: string;
   addExplanation?: boolean;
   onToggleExplanation?: () => void;
@@ -266,7 +282,7 @@ export default function Proposal({
           </div>
           {!showChanges
             ? <span className="whitespace-pre-wrap">{text}</span>
-            : wholeDocument ? <DocumentChangesView original={originalText} proposal={text} /> : <DiffView original={originalText} proposal={text} />}
+            : wholeDocument ? <DocumentChangesView original={originalText} proposal={text} onShowParagraph={onShowParagraph} /> : <DiffView original={originalText} proposal={text} />}
           {explanation && (
             <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md p-2">
               <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />Miért?</p>
@@ -281,7 +297,12 @@ export default function Proposal({
           )}
         </>
       ) : (
-        <span className="whitespace-pre-wrap">{text}</span>
+        <>
+          <span className="whitespace-pre-wrap">{text}</span>
+          {mode === 'generate' && isOpen && (
+            <span className="block mt-1.5 text-[11px] text-neutral-500">Oda kerül, ahol a kurzor a kérés elküldésekor állt (akkor is, ha azóta máshova kattintottál). A „Mutasd” gomb megmutatja.</span>
+          )}
+        </>
       )}
 
       {isOpen && (
@@ -297,6 +318,17 @@ export default function Proposal({
                 ? `${findings && open.length < findings.length ? 'A többi kijelölt' : 'Az összes kijelölt'} beszúrása (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
                 : APPLY_LABELS[mode]}
             </button>
+            {onShow && (
+              <button
+                onClick={onShow}
+                disabled={busy}
+                className="flex items-center px-3 py-1.5 text-xs font-medium bg-white hover:bg-neutral-100 disabled:opacity-50 border border-neutral-300 text-neutral-700 rounded-lg transition-colors"
+                title="Kijelöli a dokumentumban, mire vonatkozik a javaslat"
+              >
+                <LocateFixed className="w-3.5 h-3.5 mr-1" />
+                Mutasd
+              </button>
+            )}
             <button
               onClick={onAlternative}
               disabled={busy || state === 'applying'}
