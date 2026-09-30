@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDocumentGraph } from './structure';
-import { newIssues, recheckInstruction, requestForDefinitionsSection, requestForIssue } from './structureSuggestions';
+import { alternativeReviewInstruction, newIssues, recheckInstruction, requestForDefinitionsSection, requestForIssue } from './structureSuggestions';
 import { MAX_INSTRUCTION_CHARS } from '../shared/aiConfig';
 
 const paragraphs = [
@@ -44,4 +44,11 @@ test('the recheck instruction lists the decisions and stays within the limit', (
   assert.match(text, /fogadtam el[^]*A vételár ellentmondásos\.[^]*elvetettem:\n- A határidő hiányzik\./);
   const long = recheckInstruction(Array.from({ length: 15 }, () => f('x'.repeat(300))), Array.from({ length: 15 }, () => f('y'.repeat(300))));
   assert.ok(long.length <= MAX_INSTRUCTION_CHARS);
+});
+
+test('another version of a partly decided review names what not to repeat', () => {
+  const f = (comment: string) => ({ quote: 'q', comment, severity: 'medium' as const, suggestion: '' });
+  assert.equal(alternativeReviewInstruction([], []), 'Kérek egy másik változatot.');
+  const text = alternativeReviewInstruction([f('Vételár.')], [f('Határidő.')]);
+  assert.match(text, /már beírtam a dokumentumba:\n- Vételár\.\nEzeket elvetettem, nem kérem újra:\n- Határidő\./);
 });

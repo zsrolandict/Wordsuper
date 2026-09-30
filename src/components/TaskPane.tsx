@@ -12,12 +12,13 @@ import {
   placeAtParagraph,
   readParagraphs,
   releaseRange,
+  selectionMovedFrom,
   showFinding,
   takeSnapshot,
   type DocumentSnapshot,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
-import { newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
+import { alternativeReviewInstruction, newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
@@ -100,6 +101,22 @@ function markupHint(): string {
   return ' Ha nem látod az áthúzásokat: Véleményezés → Követés → „Minden korrektúra”.';
 }
 
+interface SendOptions {
+  /** The user already answered a question about this request */
+  confirmed?: boolean;
+  /** The instruction came from the input field, which is cleared when the request starts */
+  clearInput?: boolean;
+  /** A new request even if a proposal of the same mode is pending */
+  forceNew?: boolean;
+  /** Surely meant for the pending proposal (Másik változat, a clarification answer): no selection check */
+  explicitRefine?: boolean;
+}
+
+interface Confirmation {
+  text: string;
+  choices: { label: string; primary?: boolean; run: () => void }[];
+}
+
 const DEPTH_LABELS: Record<Depth, { label: string; title: string }> = {
   auto: { label: 'Automatikus', title: 'A modell maga dönti el, mennyit gondolkodjon' },
   fast: { label: '⚡ Gyors', title: 'Szinte gondolkodás nélkül: gyors és olcsó, egyszerű javításokhoz' },
@@ -120,9 +137,14 @@ export default function TaskPane() {
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const [pending, setPendingState] = useState<PendingProposal | null>(null);
   const [dismissedReviewHint, setDismissedReviewHint] = useState<string | null>(null);
+  // A question before something that would lose work (Office add-ins can't use window.confirm)
+  const [confirmation, setConfirmation] = useState<Confirmation | null>(null);
   // Minden dokumentum-módosítás után nő, hogy a korlátjelző újra lemérje a méretet
   const [documentVersion, setDocumentVersion] = useState(0);
   const pendingRef = useRef<PendingProposal | null>(null);
+  // The latest messages for checks made outside of render (how many findings are still undecided)
+  const messagesRef = useRef<Message[]>([]);
+  messagesRef.current = messages;
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stats = useDocumentStats(documentVersion);
@@ -167,6 +189,15 @@ export default function TaskPane() {
     setMessages(prev => prev.map(m => (m.id === id ? update(m) : m)));
   };
 
+  /** Findings of the pending review nobody decided about yet (0 when no review is pending) */
+  const undecidedFindings = () => {
+    const current = pendingRef.current;
+    if (!current || current.mode !== 'review') return 0;
+    return messagesRef.current.find(m => m.id === current.messageId)?.proposal?.findings?.filter(f => !f.done).length ?? 0;
+  };
+  const undecidedWarning = (count: number) =>
+    `Az átvizsgálásban még ${count} észrevételről nem döntöttél. Ha folytatod, ezek elvesznek (amit már beszúrtál, az a dokumentumban marad).`;
+
   /** Lezárja a függő javaslatot a dokumentum módosítása nélkül (a hívó tartja a zárat) */
   const closePending = async (state: 'rejected' | 'superseded', statusText: string) => {
     const current = pendingRef.current;
@@ -203,7 +234,15 @@ export default function TaskPane() {
   };
 
   // Vissza a kezdőképernyőre, új beszélgetéssel
-  const goToMainMenu = async () => {
+  const goToMainMenu = async (confirmed = false) => {
+    if (!confirmed && pendingRef.current) {
+      const open = undecidedFindings();
+      setConfirmation({
+        text: open ? undecidedWarning(open) : 'Van egy döntésre váró javaslat. Új beszélgetésnél ez elvész (a dokumentumhoz nem nyúlok).',
+        choices: [{ label: 'Új beszélgetés', primary: true, run: () => goToMainMenu(true) }],
+      });
+      return;
+    }
     if (!tryLock()) return;
     try {
       await closePending('rejected', '✖️ Elvetve.');
@@ -216,8 +255,14 @@ export default function TaskPane() {
   };
 
   /** From the structure view: put the cursor in place, then ask the assistant */
-  const runStructureRequest = async (request: StructureRequest) => {
+  const runStructureRequest = async (request: StructureRequest, confirmed = false) => {
     if (busyRef.current) return;
+    const open = undecidedFindings();
+    if (!confirmed && open) {
+      setTab('assistant');
+      setConfirmation({ text: undecidedWarning(open), choices: [{ label: 'Folytatom a javaslattal', primary: true, run: () => runStructureRequest(request, true) }] });
+      return;
+    }
     try {
       await placeAtParagraph(request.paragraph, request.cursor, request.expectedText);
     } catch (error) {
@@ -227,12 +272,41 @@ export default function TaskPane() {
     }
     setTab('assistant');
     setMode(request.mode);
-    await handleSend(request.instruction, request.mode, request.label);
+    await handleSend(request.instruction, request.mode, request.label, { confirmed: true, forceNew: true });
   };
 
-  const handleSend = async (instructionOverride?: string, modeOverride?: Mode, displayText?: string) => {
+  const handleSend = async (instructionOverride?: string, modeOverride?: Mode, displayText?: string, options: SendOptions = {}) => {
     const typed = (instructionOverride ?? input).trim();
-    if (!typed || !tryLock()) return;
+    if (!typed || busyRef.current) return;
+    const fromInput = instructionOverride === undefined || !!options.clearInput;
+    const again = (extra: SendOptions) => handleSend(typed, modeOverride, displayText, { ...options, ...extra, clearInput: fromInput });
+    {
+      const preset = displayText ? null : matchPreset(typed, modeOverride ?? mode, settings.customPresets);
+      const requestMode = modeOverride ?? preset?.mode ?? mode;
+      const current = pendingRef.current;
+      const refining = !options.forceNew && current !== null && current.mode === requestMode;
+      // A half-decided review is not closed without asking
+      const open = !refining ? undecidedFindings() : 0;
+      if (!options.confirmed && open) {
+        setConfirmation({ text: undecidedWarning(open), choices: [{ label: 'Új kérés indítása', primary: true, run: () => again({ confirmed: true }) }] });
+        return;
+      }
+      // Typed or quick-button instruction while something else is selected: new request or refinement?
+      if (refining && !options.explicitRefine && !options.confirmed && typeof Word !== 'undefined') {
+        const moved = await selectionMovedFrom(current!.snapshot).catch(() => false);
+        if (moved) {
+          setConfirmation({
+            text: 'Amióta a javaslat elkészült, mást jelöltél ki a dokumentumban. Mire vonatkozzon az új utasítás?',
+            choices: [
+              { label: 'Új kérés az új kijelölésre', primary: true, run: () => again({ confirmed: true, forceNew: true }) },
+              { label: 'A fenti javaslat finomítása', run: () => again({ confirmed: true }) },
+            ],
+          });
+          return;
+        }
+      }
+    }
+    if (!tryLock()) return;
     if (settings.sound) primeSound();
     const chime = (kind: 'done' | 'error') => { if (settings.sound) playSound(kind); };
     // A built-in quick button can stand for a longer instruction; the chat shows the short label
@@ -246,15 +320,15 @@ export default function TaskPane() {
     let unclaimedRange: Word.Range | null = null;
 
     try {
-      if (instructionOverride === undefined) setInput('');
+      if (fromInput) setInput('');
 
       // A begépelt vagy kattintott gyorsgombot felismerjük; egy másik módhoz mentett saját gyorsgomb abban a módban fut
       const requestMode = modeOverride ?? preset?.mode ?? mode;
       if (requestMode !== mode) setMode(requestMode);
       const current = pendingRef.current;
       // Amíg van döntésre váró javaslat ugyanebben a módban, az új utasítás azt finomítja
-      // A request from the structure view is always a new one
-      const refining = displayText === undefined && current !== null && current.mode === requestMode;
+      // A request from the structure view, a re-check or "new request" is always a new one
+      const refining = !options.forceNew && current !== null && current.mode === requestMode;
       if (current && !refining) {
         await closePending('rejected', '✖️ Elvetve, mert új kérést indítottál.');
       }
@@ -561,7 +635,7 @@ export default function TaskPane() {
     const applied = findings.filter(f => f.done === 'applied');
     const dismissed = findings.filter(f => f.done === 'dismissed');
     setMode('review');
-    handleSend(recheckInstruction(applied, dismissed), 'review', 'Ellenőrző átvizsgálás a döntéseim után (számozás, hivatkozások, fogalmak, logika)');
+    handleSend(recheckInstruction(applied, dismissed), 'review', 'Ellenőrző átvizsgálás a döntéseim után (számozás, hivatkozások, fogalmak, logika)', { forceNew: true });
   };
 
   const setFinding = (messageId: string, index: number, change: Partial<FindingView>) => {
@@ -648,6 +722,26 @@ export default function TaskPane() {
         </div>
       )}
 
+      {confirmation && (
+        <div className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4" role="dialog" aria-modal="true">
+          <div className="bg-white rounded-xl shadow-lg p-4 max-w-sm w-full space-y-3">
+            <p className="text-sm text-neutral-800">{confirmation.text}</p>
+            <div className="flex flex-col space-y-1.5">
+              {confirmation.choices.map(choice => (
+                <button
+                  key={choice.label}
+                  onClick={() => { setConfirmation(null); choice.run(); }}
+                  className={`px-3 py-2 text-xs font-medium rounded-lg ${choice.primary ? 'bg-blue-600 hover:bg-blue-700 text-white' : 'border border-neutral-300 text-neutral-700 hover:bg-neutral-100'}`}
+                >
+                  {choice.label}
+                </button>
+              ))}
+              <button onClick={() => setConfirmation(null)} className="px-3 py-2 text-xs text-neutral-500 hover:text-neutral-800">Mégse</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 shrink-0 shadow-sm z-10 flex items-center justify-between">
         <div className="min-w-0">
@@ -661,7 +755,7 @@ export default function TaskPane() {
         <div className="flex items-center space-x-1.5 shrink-0">
           {tab === 'assistant' && messages.length > 1 && (
             <button
-              onClick={goToMainMenu}
+              onClick={() => goToMainMenu()}
               disabled={isBusy}
               title={isBusy ? 'Várd meg, amíg befejeződik a művelet' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
               className="flex items-center px-2.5 py-1.5 text-xs font-medium text-[#0f2350] bg-neutral-100 hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-neutral-100 rounded-lg transition-colors"
@@ -738,7 +832,17 @@ export default function TaskPane() {
                   onToggleExplanation={() => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, addExplanation: !m.proposal.addExplanation } }))}
                   onApply={() => handleApply(msg.id, msg.proposal?.findings, !!msg.proposal?.addExplanation)}
                   onReject={handleReject}
-                  onAlternative={() => handleSend(ALTERNATIVE_INSTRUCTION, msg.details!.mode)}
+                  onAlternative={() => {
+                    const findings = msg.proposal?.findings ?? [];
+                    const applied = findings.filter(f => f.done === 'applied');
+                    const dismissed = findings.filter(f => f.done === 'dismissed');
+                    // A partly decided review: the new version must not offer again what is in or was refused
+                    if (msg.details!.mode === 'review' && (applied.length || dismissed.length)) {
+                      handleSend(alternativeReviewInstruction(applied, dismissed), 'review', ALTERNATIVE_INSTRUCTION, { explicitRefine: true });
+                    } else {
+                      handleSend(ALTERNATIVE_INSTRUCTION, msg.details!.mode, undefined, { explicitRefine: true });
+                    }
+                  }}
                   onRecheck={msg.proposal.findings ? () => runRecheck(msg.proposal!.findings!) : undefined}
                   findingActions={{
                     onToggle: (index, field) => toggleFinding(msg.id, index, field),
@@ -760,7 +864,7 @@ export default function TaskPane() {
                       key={i}
                       onClick={() => {
                         updateMessage(msg.id, m => ({ ...m, clarification: m.clarification && { ...m.clarification, picked: i } }));
-                        handleSend(option, msg.clarification!.mode);
+                        handleSend(option, msg.clarification!.mode, undefined, { explicitRefine: true });
                       }}
                       disabled={isBusy || msg.clarification!.picked !== undefined}
                       className={`w-full text-left px-3 py-2 text-xs rounded-lg border transition-colors ${msg.clarification!.picked === i ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-blue-200 text-blue-900 hover:bg-blue-50 disabled:opacity-50'}`}

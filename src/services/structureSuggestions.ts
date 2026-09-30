@@ -112,18 +112,40 @@ export function newIssues(before: StructureIssue[], after: StructureIssue[]): St
 
 const short = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 
+/** The decisions as short lists, shortened line by line until the whole instruction fits the limit */
+function withDecisions(head: string, applied: ReviewFinding[], dismissed: ReviewFinding[], tail: string, appliedTitle: string, dismissedTitle: string): string {
+  const list = (items: ReviewFinding[], max: number) => items.map(f => `- ${short(f.comment, max)}`).join('\n');
+  for (const max of [160, 110, 70, 40]) {
+    const text = `${head}\n${appliedTitle}\n${list(applied, max) || '- (egyiket sem)'}\n${dismissedTitle}\n${list(dismissed, max) || '- (egyiket sem)'}\n${tail}`.trim();
+    if (text.length <= MAX_INSTRUCTION_CHARS) return text;
+  }
+  return `${head} (${applied.length} beírva, ${dismissed.length} elvetve.) ${tail}`.trim().slice(0, MAX_INSTRUCTION_CHARS);
+}
+
 /**
  * After some findings were taken and others left out: ask for a consistency review of the result, telling the AI
  * what was decided (numbering, references, terms and logic can break when only part of a set of fixes is applied).
  */
 export function recheckInstruction(applied: ReviewFinding[], dismissed: ReviewFinding[]): string {
-  const head = 'Az előző átvizsgálás észrevételei közül';
-  const tail = `Nézd át a teljes dokumentumot a döntéseim után: maradt-e vagy keletkezett-e következetlenség a számozásban, a kereszthivatkozásokban, a definiált fogalmak használatában és a logikában (pl. egy elfogadott javítás ellentmond egy elvetett rész szövegének). Az elvetett észrevételeket ne ismételd meg, hacsak egy elfogadott javítás miatt most már valódi hibát okoznak.`;
-  const list = (items: ReviewFinding[], max: number) => items.map(f => `- ${short(f.comment, max)}`).join('\n');
-  // The instruction has a length limit: shorten the lines until everything fits
-  for (const max of [160, 110, 70, 40]) {
-    const text = `${head} ezeket fogadtam el (a dokumentumba beírva):\n${list(applied, max) || '- (egyiket sem)'}\nEzeket elvetettem:\n${list(dismissed, max) || '- (egyiket sem)'}\n${tail}`;
-    if (text.length <= MAX_INSTRUCTION_CHARS) return text;
-  }
-  return `${head} ${applied.length}-t elfogadtam, ${dismissed.length}-t elvetettem. ${tail}`.slice(0, MAX_INSTRUCTION_CHARS);
+  return withDecisions(
+    'Az előző átvizsgálás észrevételei közül',
+    applied,
+    dismissed,
+    'Nézd át a teljes dokumentumot a döntéseim után: maradt-e vagy keletkezett-e következetlenség a számozásban, a kereszthivatkozásokban, a definiált fogalmak használatában és a logikában (pl. egy elfogadott javítás ellentmond egy elvetett rész szövegének). Az elvetett észrevételeket ne ismételd meg, hacsak egy elfogadott javítás miatt most már valódi hibát okoznak.',
+    'ezeket fogadtam el (a dokumentumba beírva):',
+    'Ezeket elvetettem:'
+  );
+}
+
+/** "Másik változat" for a review that was partly decided: the AI must not offer again what is already in or was refused */
+export function alternativeReviewInstruction(applied: ReviewFinding[], dismissed: ReviewFinding[]): string {
+  if (!applied.length && !dismissed.length) return 'Kérek egy másik változatot.';
+  return withDecisions(
+    'Kérek egy másik változatot az észrevételekre.',
+    applied,
+    dismissed,
+    'Ezeket ne ismételd meg; keress helyettük más, eddig nem említett problémákat.',
+    'Ezeket már beírtam a dokumentumba:',
+    'Ezeket elvetettem, nem kérem újra:'
+  );
 }

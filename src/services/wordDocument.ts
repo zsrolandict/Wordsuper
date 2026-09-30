@@ -148,6 +148,31 @@ async function wholeDocumentSnapshot(context: Word.RequestContext, mode: Mode, s
   };
 }
 
+/**
+ * Whether the user selected something else since the snapshot was taken: then a new instruction is more likely a
+ * new request than a refinement of the pending proposal.
+ */
+export async function selectionMovedFrom(snapshot: DocumentSnapshot): Promise<boolean> {
+  const range = snapshot.range;
+  // Whole-document request: a new, non-empty selection means the user now wants to work on that part
+  if (snapshot.wholeDocument && !range) {
+    return Word.run(async (context) => {
+      const selection = context.document.getSelection();
+      selection.load('text');
+      await context.sync();
+      return (selection.text || '').trim() !== '';
+    });
+  }
+  // A review has no selection to move away from
+  if (!range) return false;
+  return Word.run(range, async (context) => {
+    const selection = context.document.getSelection();
+    const relation = range.compareLocationWith(selection);
+    await context.sync();
+    return relation.value !== 'Equal';
+  });
+}
+
 /** Stops tracking a snapshot's selection; harmless if it is already gone */
 export async function releaseRange(range: Word.Range | null) {
   if (!range) return;
