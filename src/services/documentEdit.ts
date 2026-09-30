@@ -1,4 +1,4 @@
-import { diffTokens, splitParagraphs, tokenizeLikeWord, type DiffHunk } from './textDiff';
+import { diffTokens, planParagraphEdits, splitParagraphs, tokenizeLikeWord, type DiffHunk } from './textDiff';
 import { similarity } from './versionCompare';
 
 /**
@@ -93,4 +93,52 @@ export function summarizeDocumentEdits(ops: DocumentEditOp[]) {
     inserted: ops.reduce((n, op) => n + (op.type === 'insert' ? op.texts.length : 0), 0),
     deleted: ops.filter(op => op.type === 'delete').length,
   };
+}
+
+/**
+ * The changes of an edit, word by word, as they will be applied: one entry per changed place (hunk), numbered in
+ * document order. null when the paragraphs don't line up (then the proposal can only be taken as a whole).
+ */
+export function editHunks(original: string, proposal: string) {
+  const paragraphs = splitParagraphs(original);
+  const tokens = paragraphs.map(tokenizeLikeWord);
+  const plan = planParagraphEdits(tokens, proposal);
+  if (!plan) return null;
+  let next = 0;
+  const numbered = plan.map(edit => ({ ...edit, hunks: edit.hunks.map(hunk => ({ ...hunk, id: next++ })) }));
+  return { paragraphs, tokens, plan: numbered, count: next };
+}
+
+/** The proposal with some of its changes left out: the excluded places keep the original words */
+export function applyChosenHunks(original: string, proposal: string, excluded: Set<number>): string {
+  if (!excluded.size) return proposal;
+  const hunks = editHunks(original, proposal);
+  if (!hunks) return proposal;
+  const result = [...hunks.paragraphs];
+  for (const edit of hunks.plan) {
+    const chosen = edit.hunks.filter(h => !excluded.has(h.id));
+    // A paragraph with none of its changes chosen keeps its original text as is
+    if (!chosen.length) continue;
+    const words = [...hunks.tokens[edit.paragraphIndex]];
+    // Last to first, so the positions of earlier changes stay valid
+    for (const h of [...chosen].reverse()) words.splice(h.oldStart, h.oldEnd - h.oldStart, ...h.newTokens);
+    result[edit.paragraphIndex] = words.join(' ');
+  }
+  return result.join('\n');
+}
+
+/** The whole document with only the chosen operations applied (by their index in the plan) */
+export function composeDocument(oldParagraphs: string[], ops: DocumentEditOp[], excluded: Set<number>): string {
+  const chosen = ops.map((op, i) => ({ op, i })).filter(({ i }) => !excluded.has(i)).map(({ op }) => op);
+  const out: string[] = [];
+  const insertsAfter = (index: number) => chosen.forEach(op => { if (op.type === 'insert' && op.after === index) out.push(...op.texts); });
+  insertsAfter(-1);
+  oldParagraphs.forEach((text, index) => {
+    const own = chosen.find(op => op.type !== 'insert' && op.paragraph === index);
+    if (!own) out.push(text);
+    else if (own.type === 'edit') out.push(own.newText);
+    // a chosen delete leaves the paragraph out
+    insertsAfter(index);
+  });
+  return out.join('\n');
 }

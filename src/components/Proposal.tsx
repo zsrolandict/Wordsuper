@@ -3,7 +3,7 @@ import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb, LocateFixed } from 'l
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
-import { planDocumentEdits } from '../services/documentEdit';
+import { editHunks, planDocumentEdits } from '../services/documentEdit';
 
 export type ProposalState = 'pending' | 'applying' | 'applied' | 'rejected' | 'superseded';
 
@@ -62,15 +62,73 @@ export function DiffView({ original, proposal }: { original: string; proposal: s
   );
 }
 
+/**
+ * The changes of an edit, each one clickable: a left-out change shows the original words again and is not written
+ * into the document. Falls back to the plain diff when the paragraphs don't line up.
+ */
+function SelectableDiff({ original, proposal, excluded, onToggle }: { original: string; proposal: string; excluded: number[]; onToggle?: (id: number) => void }) {
+  const hunks = useMemo(() => editHunks(original, proposal), [original, proposal]);
+  if (!hunks || hunks.count < 2 || !onToggle) return <DiffView original={original} proposal={proposal} />;
+  const off = new Set(excluded);
+  return (
+    <div>
+      <p className="text-[11px] text-neutral-500 mb-1">Kattints egy változásra, ha azt nem kéred ({hunks.count - off.size}/{hunks.count} kiválasztva).</p>
+      {hunks.paragraphs.map((_, index) => {
+        const words = hunks.tokens[index];
+        const changes = hunks.plan.find(e => e.paragraphIndex === index)?.hunks ?? [];
+        const parts: React.ReactNode[] = [];
+        let at = 0;
+        for (const change of changes) {
+          if (change.oldStart > at) parts.push(words.slice(at, change.oldStart).join(' ') + ' ');
+          const left = off.has(change.id);
+          const removed = words.slice(change.oldStart, change.oldEnd).join(' ');
+          const added = change.newTokens.join(' ');
+          parts.push(
+            <button
+              key={change.id}
+              onClick={() => onToggle(change.id)}
+              title={left ? 'Kihagyva: az eredeti marad. Kattints, ha mégis kéred.' : 'Kattints, ha ezt a változást nem kéred'}
+              className={`rounded px-0.5 mr-1 border ${left ? 'border-dashed border-neutral-300 bg-neutral-50' : 'border-transparent hover:border-blue-300'}`}
+            >
+              {removed && (left
+                ? <span className="text-neutral-800">{removed}</span>
+                : <del className="bg-red-50 text-red-700 decoration-red-400">{removed}</del>)}
+              {removed && added && ' '}
+              {added && (left
+                ? <span className="text-neutral-400 line-through">{added}</span>
+                : <ins className="bg-green-50 text-green-800 no-underline border-b border-green-400">{added}</ins>)}
+            </button>
+          );
+          at = change.oldEnd;
+        }
+        if (at < words.length) parts.push(words.slice(at).join(' '));
+        return <p key={index} className="whitespace-pre-wrap min-h-[1em]">{parts}</p>;
+      })}
+    </div>
+  );
+}
+
 /** A rewrite of the whole document: only the paragraphs that change, new or go, not the whole text */
-function DocumentChangesView({ original, proposal, onShowParagraph }: { original: string; proposal: string; onShowParagraph?: (index: number) => void }) {
+function DocumentChangesView({ original, proposal, onShowParagraph, excluded = [], onToggle }: {
+  original: string;
+  proposal: string;
+  onShowParagraph?: (index: number) => void;
+  /** Indexes of the changes left out */
+  excluded?: number[];
+  onToggle?: (index: number) => void;
+}) {
   const oldParagraphs = useMemo(() => original.split('\n'), [original]);
   const ops = useMemo(() => planDocumentEdits(oldParagraphs, proposal), [oldParagraphs, proposal]);
   if (!ops.length) return <span className="text-xs text-neutral-500">Nincs változás a dokumentumhoz képest.</span>;
   // A heading per change, with a jump to the paragraph in the document
-  const label = (text: string, paragraph: number) => (
+  const label = (text: string, paragraph: number, i: number) => (
     <span className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-0.5">
-      {text}
+      {onToggle ? (
+        <label className="flex items-center cursor-pointer">
+          <input type="checkbox" checked={!excluded.includes(i)} onChange={() => onToggle(i)} className="mr-1" />
+          {text}
+        </label>
+      ) : text}
       {onShowParagraph && (
         <button onClick={() => onShowParagraph(paragraph)} className="flex items-center normal-case tracking-normal font-medium text-blue-700 hover:text-blue-900">
           <LocateFixed className="w-3 h-3 mr-0.5" />Mutasd
@@ -82,14 +140,14 @@ function DocumentChangesView({ original, proposal, onShowParagraph }: { original
     <div className="space-y-2">
       <p className="text-xs text-neutral-500">Csak a változó részeket mutatom, a dokumentum többi része érintetlen marad.</p>
       {ops.map((op, i) => (
-        <div key={i} className="border-l-2 border-neutral-200 pl-2">
+        <div key={i} className={`border-l-2 border-neutral-200 pl-2 ${excluded.includes(i) ? 'opacity-40' : ''}`}>
           {op.type === 'edit' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – módosul`, op.paragraph)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
+            <>{label(`${op.paragraph + 1}. bekezdés – módosul`, op.paragraph, i)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
           ) : op.type === 'delete' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`, op.paragraph)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
+            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`, op.paragraph, i)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
           ) : (
             <>
-              {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`, Math.max(op.after, 0))}
+              {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`, Math.max(op.after, 0), i)}
               {op.texts.map((text, k) => <ins key={k} className="block no-underline bg-green-50 text-green-800 whitespace-pre-wrap">{text}</ins>)}
             </>
           )}
@@ -209,6 +267,8 @@ export default function Proposal({
   onRecheck,
   onShow,
   onShowParagraph,
+  excluded = [],
+  onToggleChange,
   explanation,
   addExplanation,
   onToggleExplanation,
@@ -230,6 +290,9 @@ export default function Proposal({
   onShow?: () => void;
   /** Whole-document edit: jumps to a paragraph of the document */
   onShowParagraph?: (index: number) => void;
+  /** Edit: the changes left out (word-level places, or paragraphs of a whole-document edit) */
+  excluded?: number[];
+  onToggleChange?: (id: number) => void;
   explanation?: string;
   addExplanation?: boolean;
   onToggleExplanation?: () => void;
@@ -238,6 +301,12 @@ export default function Proposal({
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const isOpen = state === 'pending' || state === 'applying';
+  // Every change of an edit left out: nothing to accept
+  const changeCount = useMemo(() => {
+    if (mode !== 'edit') return 0;
+    return wholeDocument ? planDocumentEdits(originalText.split('\n'), text).length : editHunks(originalText, text)?.count ?? 0;
+  }, [mode, wholeDocument, originalText, text]);
+  const allLeftOut = mode === 'edit' && changeCount > 0 && excluded.length >= changeCount;
   // The batch button covers the findings not decided one by one yet
   const open = findings?.filter(f => !f.done) ?? [];
   const commentCount = open.filter(f => f.selected).length;
@@ -282,7 +351,9 @@ export default function Proposal({
           </div>
           {!showChanges
             ? <span className="whitespace-pre-wrap">{text}</span>
-            : wholeDocument ? <DocumentChangesView original={originalText} proposal={text} onShowParagraph={onShowParagraph} /> : <DiffView original={originalText} proposal={text} />}
+            : wholeDocument
+            ? <DocumentChangesView original={originalText} proposal={text} onShowParagraph={onShowParagraph} excluded={excluded} onToggle={state === 'pending' ? onToggleChange : undefined} />
+            : <SelectableDiff original={originalText} proposal={text} excluded={excluded} onToggle={state === 'pending' ? onToggleChange : undefined} />}
           {explanation && (
             <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md p-2">
               <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />Miért?</p>
@@ -310,13 +381,13 @@ export default function Proposal({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={onApply}
-              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0)}
+              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0) || allLeftOut}
               className="flex items-center px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors"
             >
               {state === 'applying' ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
               {mode === 'review'
                 ? `${findings && open.length < findings.length ? 'A többi kijelölt' : 'Az összes kijelölt'} beszúrása (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
-                : APPLY_LABELS[mode]}
+                : excluded.length && mode === 'edit' ? 'Elfogadom a kiválasztottakat' : APPLY_LABELS[mode]}
             </button>
             {onShow && (
               <button

@@ -20,6 +20,7 @@ import {
   type DocumentSnapshot,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
+import { applyChosenHunks, composeDocument, planDocumentEdits } from '../services/documentEdit';
 import { alternativeReviewInstruction, newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
@@ -49,6 +50,8 @@ interface Message {
   proposal?: {
     state: ProposalState;
     findings?: FindingView[];
+    /** Edit: changes the user left out (word-level places, or paragraphs of a whole-document edit) */
+    excluded?: number[];
     /** Edit: why the change was needed, and whether it goes into the document as a comment */
     explanation?: string;
     addExplanation?: boolean;
@@ -541,8 +544,12 @@ export default function TaskPane() {
       const range = current.snapshot.range;
 
       const editBefore = current.mode === 'edit' || current.mode === 'generate' ? await structureIssues() : null;
+      // Changes the user left out keep the original text
+      const excluded = new Set<number>(messagesRef.current.find(m => m.id === messageId)?.proposal?.excluded ?? []);
       if (current.mode === 'edit' && current.snapshot.wholeDocument) {
-        const outcome = await applyDocumentEdit(current.snapshot.wholeDocument, current.result, explanation);
+        const whole = current.snapshot.wholeDocument;
+        const text = excluded.size ? composeDocument(whole.reviewed, planDocumentEdits(whole.reviewed, current.result), excluded) : current.result;
+        const outcome = await applyDocumentEdit(whole, text, explanation);
         const parts = [
           outcome.changed && `${outcome.changed} bekezdést módosítottam`,
           outcome.inserted && `${outcome.inserted} új bekezdést szúrtam be`,
@@ -552,7 +559,7 @@ export default function TaskPane() {
           ? `✅ Az egész dokumentumon: ${parts.join(', ')}, korrektúrával. A többi bekezdéshez nem nyúltam.`
           : '✅ A javaslat megegyezik a dokumentummal, nem kellett semmit módosítani.';
       } else if (current.mode === 'edit') {
-        const outcome = await applyEdit(range!, current.result, explanation);
+        const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation);
         status = outcome.pendingChanges
           ? '✅ A kijelölést kicseréltem, korrektúrával. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).'
           : outcome.strategy === 'words'
@@ -759,9 +766,9 @@ export default function TaskPane() {
       <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 shrink-0 shadow-sm z-10 flex items-center justify-between">
         <div className="min-w-0">
           <Logo className="h-5 max-w-full" />
-          <h1 className="text-xs font-semibold text-[#0f2350] flex items-center mt-1">
-            <PenTool className="w-3.5 h-3.5 mr-1 text-[#29abe2]" />
-            Word Writer
+          <h1 className="text-xs font-semibold text-[#0f2350] flex items-center mt-1 min-w-0">
+            <PenTool className="w-3.5 h-3.5 mr-1 text-[#29abe2] shrink-0" />
+            <span className="whitespace-nowrap">Word Writer</span>
             <span className="ml-1.5 font-normal text-neutral-500 truncate">· szerkessz, véleményezz, generálj</span>
           </h1>
         </div>
@@ -840,6 +847,14 @@ export default function TaskPane() {
                   findings={msg.proposal.findings}
                   busy={isBusy}
                   wholeDocument={!!msg.details.wholeDocument}
+                  excluded={msg.proposal.excluded}
+                  onToggleChange={id => updateMessage(msg.id, m => ({
+                    ...m,
+                    proposal: m.proposal && {
+                      ...m.proposal,
+                      excluded: m.proposal.excluded?.includes(id) ? m.proposal.excluded.filter(x => x !== id) : [...(m.proposal.excluded ?? []), id],
+                    },
+                  }))}
                   explanation={msg.proposal.explanation}
                   addExplanation={!!msg.proposal.addExplanation}
                   onToggleExplanation={() => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, addExplanation: !m.proposal.addExplanation } }))}

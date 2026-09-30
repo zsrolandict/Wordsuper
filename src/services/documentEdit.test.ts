@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { planDocumentEdits, summarizeDocumentEdits } from './documentEdit';
+import { applyChosenHunks, composeDocument, editHunks, planDocumentEdits, summarizeDocumentEdits } from './documentEdit';
 
 const doc = ['Adásvételi szerződés', '', '1. Az Eladó eladja a Vevőnek az ingatlant.', '2. A vételár 45 000 000 Ft.', 'Kelt: Budapest'];
 
@@ -35,4 +35,23 @@ test('a sentence that only gained a clause is an edit, not a delete and an inser
   const ops = planDocumentEdits(['Első mondat.', 'Második mondat.', 'Harmadik mondat.'], 'Első mondat.\nMásodik mondat, pontosítva.\nHarmadik mondat.');
   assert.equal(ops.length, 1);
   assert.equal(ops[0].type, 'edit');
+});
+
+test('an edit can be taken in part: the left-out places keep the original words', () => {
+  const original = 'A megbizott köteles a munkát határidőre elvégezni.\nA díj 100 Ft.';
+  const proposal = 'A Megbízott köteles a munkát határidőre, szakszerűen elvégezni.\nA díj 150 Ft.';
+  const hunks = editHunks(original, proposal)!;
+  assert.equal(hunks.count, 3);
+  // Leave out the second change ("határidőre," + "szakszerűen")
+  assert.equal(applyChosenHunks(original, proposal, new Set([1])), 'A Megbízott köteles a munkát határidőre elvégezni.\nA díj 150 Ft.');
+  assert.equal(applyChosenHunks(original, proposal, new Set()), proposal);
+  assert.equal(applyChosenHunks(original, proposal, new Set([0, 1, 2])), original);
+});
+
+test('a whole-document edit can be taken in part', () => {
+  const doc = ['Cím', 'Első.', 'Második mondat.', 'Harmadik.'];
+  const ops = planDocumentEdits(doc, 'Cím\nElső.\nMásodik mondat, pontosítva.\nHarmadik.\nAláírás');
+  assert.equal(ops.length, 2);
+  assert.equal(composeDocument(doc, ops, new Set([1])), 'Cím\nElső.\nMásodik mondat, pontosítva.\nHarmadik.');
+  assert.deepEqual(planDocumentEdits(doc, composeDocument(doc, ops, new Set([0]))), [ops[1]]);
 });
