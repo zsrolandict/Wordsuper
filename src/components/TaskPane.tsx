@@ -172,11 +172,24 @@ export default function TaskPane() {
     const current = pendingRef.current;
     if (!current) return;
     setPending(null);
-    updateMessage(current.messageId, m => ({
-      ...m,
-      proposal: m.proposal && { ...m.proposal, state },
-      status: { text: statusText, tone: 'neutral' },
-    }));
+    updateMessage(current.messageId, m => {
+      // A review decided in part: what was inserted stays, only the undecided findings are dropped
+      const findings = m.proposal?.findings;
+      const applied = findings?.filter(f => f.done === 'applied').length ?? 0;
+      const open = findings?.filter(f => !f.done).length ?? 0;
+      return {
+        ...m,
+        proposal: m.proposal && {
+          ...m.proposal,
+          state,
+          findings: findings?.map(f => (f.done ? f : { ...f, done: 'dismissed' as const })),
+        },
+        status: {
+          text: applied ? `✖️ A hátralévő ${open} észrevételt elvetettem. A már beszúrt ${applied} a dokumentumban marad.` : statusText,
+          tone: 'neutral',
+        },
+      };
+    });
     await releaseRange(current.snapshot.range);
   };
 
@@ -451,7 +464,7 @@ export default function TaskPane() {
       let updatedFindings = findingViews;
       const range = current.snapshot.range;
 
-      const editBefore = current.mode === 'edit' ? await structureIssues() : null;
+      const editBefore = current.mode === 'edit' || current.mode === 'generate' ? await structureIssues() : null;
       if (current.mode === 'edit' && current.snapshot.wholeDocument) {
         const outcome = await applyDocumentEdit(current.snapshot.wholeDocument, current.result, explanation);
         const parts = [
@@ -536,6 +549,10 @@ export default function TaskPane() {
     if (!before || !after) return '';
     const added = newIssues(before, after);
     if (!added.length) return '';
+    // Typical after a definitions section: the old "(a továbbiakban: …)" definitions became redundant
+    if (added.every(issue => issue.kind === 'duplicate-inline')) {
+      return ` ℹ️ ${added.length} fogalom zárójeles definíciója a szövegben most már felesleges. A Szerkezet fülön egy kattintással törölheted őket (korrektúrával).`;
+    }
     return ` ⚠️ Ezzel ${added.length} új szerkezeti probléma keletkezett: ${added[0].message}${added.length > 1 ? ' …' : ''} Nézd meg a Szerkezet fülön.`;
   };
 

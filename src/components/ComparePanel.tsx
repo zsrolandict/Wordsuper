@@ -64,6 +64,8 @@ export default function ComparePanel({
   const [instruction, setInstruction] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  /** Per change: its comment is in the document, or it was skipped because the paragraph changed since */
+  const [inserted, setInserted] = useState<Map<number, 'inserted' | 'skipped'>>(new Map());
   const [inserting, setInserting] = useState(false);
   const [insertStatus, setInsertStatus] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -73,6 +75,7 @@ export default function ComparePanel({
     setLoading(true);
     setError(null);
     setAnalysis(null);
+    setInserted(new Map());
     setInsertStatus(null);
     try {
       const earlier = await readDocxParagraphs(await file.arrayBuffer());
@@ -146,6 +149,7 @@ export default function ComparePanel({
       // Parsed with the placeholders in it, then each text is unmasked
       const assessments = new Map([...parsed.assessments].map(([id, a]) => [id, { ...a, summary: unmask(a.summary), recommendation: unmask(a.recommendation) }]));
       setSelected(new Set(assessments.keys()));
+      setInserted(new Map());
       if (settings.sound) playSound('done');
       setAnalysis(a => a && { ...a, running: false, overview: unmask(parsed.overview), assessments, details: { ...a.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt } });
     } catch (e) {
@@ -160,9 +164,12 @@ export default function ComparePanel({
     }
   };
 
-  const insertComments = async () => {
+  /** Inserts the comments of the given changes (default: the ticked ones not inserted yet); each only once */
+  const insertComments = async (only?: number[]) => {
     if (!comparison || !analysis?.assessments) return;
-    const chosen = comparison.changes.filter(c => selected.has(c.id) && analysis.assessments!.has(c.id));
+    const wanted = only ? new Set(only) : selected;
+    const chosen = comparison.changes.filter(c => wanted.has(c.id) && analysis.assessments!.has(c.id) && !inserted.has(c.id));
+    if (!chosen.length) return;
     setInserting(true);
     setInsertStatus(null);
     try {
@@ -171,6 +178,13 @@ export default function ComparePanel({
         expectedText: comparison.currentTexts[c.paragraph] ?? '',
         comment: commentFor(c, analysis.assessments!.get(c.id)!),
       })));
+      setInserted(previous => {
+        const next = new Map(previous);
+        chosen.forEach((c, i) => next.set(c.id, outcome.skipped.includes(i) ? 'skipped' : 'inserted'));
+        return next;
+      });
+      // One by one: show where it went
+      if (only?.length === 1 && outcome.inserted === 1) await jumpToParagraph(chosen[0].paragraph, false).catch(() => {});
       setInsertStatus(`✅ ${outcome.inserted} megjegyzést beszúrtam.` +
         (outcome.skipped.length ? ` ${outcome.skipped.length} bekezdés azóta megváltozott, ezeket kihagytam – futtasd újra az összevetést.` : ''));
     } catch (e) {
@@ -199,6 +213,8 @@ export default function ComparePanel({
   const fullListChars = comparison ? formatChangesForAI(changes, Number.MAX_SAFE_INTEGER).text.length : 0;
   const fitting = comparison ? formatChangesForAI(changes, MAX_COMPARE_CHARS).included : 0;
   const busy = loading || inserting || !!analysis?.running;
+  // The batch button only covers ticked changes whose comment is not in the document yet
+  const toInsert = [...selected].filter(id => analysis?.assessments?.has(id) && !inserted.has(id)).length;
   // A saved quick button sends its instruction; the button shows its label
   const presets = [
     ...DEFAULT_PRESETS.compare.map(label => ({ label, instruction: label })),
@@ -281,12 +297,12 @@ export default function ComparePanel({
               {analysis.assessments && (
                 <div className="flex items-center justify-between">
                   <button
-                    onClick={insertComments}
-                    disabled={busy || selected.size === 0}
+                    onClick={() => insertComments()}
+                    disabled={busy || toInsert === 0}
                     className="flex items-center px-3 py-1.5 font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
                   >
                     {inserting ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <MessageSquarePlus className="w-3.5 h-3.5 mr-1" />}
-                    Megjegyzések beszúrása ({selected.size})
+                    {inserted.size ? 'A többi kijelölt beszúrása' : 'Megjegyzések beszúrása'} ({toInsert})
                   </button>
                 </div>
               )}
@@ -315,23 +331,40 @@ export default function ComparePanel({
                 : <del className="bg-red-50 text-red-700 whitespace-pre-wrap">{change.oldText}</del>}
             </div>
             {assessment && (
-              <label className="flex items-start space-x-2 pt-1 border-t border-neutral-100 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={selected.has(change.id)}
-                  onChange={() => setSelected(s => {
-                    const next = new Set(s);
-                    if (next.has(change.id)) next.delete(change.id);
-                    else next.add(change.id);
-                    return next;
-                  })}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="text-neutral-800">{assessment.summary}</span>
-                  {assessment.recommendation && <span className="block text-neutral-500">Javaslat: {assessment.recommendation}</span>}
-                </span>
-              </label>
+              <div className="pt-1 border-t border-neutral-100">
+                <label className={`flex items-start space-x-2 ${inserted.has(change.id) ? '' : 'cursor-pointer'}`}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(change.id) || inserted.get(change.id) === 'inserted'}
+                    disabled={inserted.has(change.id)}
+                    onChange={() => setSelected(s => {
+                      const next = new Set(s);
+                      if (next.has(change.id)) next.delete(change.id);
+                      else next.add(change.id);
+                      return next;
+                    })}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="text-neutral-800">{assessment.summary}</span>
+                    {assessment.recommendation && <span className="block text-neutral-500">Javaslat: {assessment.recommendation}</span>}
+                  </span>
+                </label>
+                {inserted.get(change.id) === 'inserted' ? (
+                  <p className="mt-1 text-[11px] font-semibold text-green-700">✓ Megjegyzés beszúrva</p>
+                ) : inserted.get(change.id) === 'skipped' ? (
+                  <p className="mt-1 text-[11px] text-amber-700">A bekezdés azóta megváltozott, ezt kihagytam. Futtasd újra az összevetést.</p>
+                ) : (
+                  <button
+                    onClick={() => insertComments([change.id])}
+                    disabled={busy}
+                    className="mt-1 flex items-center px-2 py-1 text-[11px] font-medium rounded-md border border-blue-600 bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                    title="Csak ezt a megjegyzést szúrja be, és odaugrik"
+                  >
+                    <MessageSquarePlus className="w-3 h-3 mr-1" />Beszúrom ezt
+                  </button>
+                )}
+              </div>
             )}
           </div>
         );

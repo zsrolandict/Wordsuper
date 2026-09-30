@@ -59,6 +59,8 @@ Ha a szerződés más szóval hivatkozik ugyanarra, igazítsd hozzá a definíci
 Egészítsd ki a bekezdést úgy, hogy itt, az első előfordulásnál legyen definiálva, a dokumentum tartalma alapján (pl. „… (a továbbiakban: ${issue.subject})”). A bekezdés többi részét ne változtasd meg.`,
       };
     case 'missing-annex':
+    // Removed without AI, straight from the structure view
+    case 'duplicate-inline':
       return null;
   }
 }

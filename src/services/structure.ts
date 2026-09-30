@@ -45,8 +45,12 @@ export interface CrossReference extends Occurrence {
   target: number | null;
 }
 
-/** missing-annex is only a note: annexes are often separate files */
-export type IssueKind = 'unused' | 'duplicate' | 'broken-reference' | 'missing-annex' | 'undefined-quoted';
+/**
+ * missing-annex is only a note: annexes are often separate files.
+ * duplicate-inline: defined in the definitions list and again in the text "(a továbbiakban: …)", typically after a
+ * definitions section was added; the inline one can be removed without AI.
+ */
+export type IssueKind = 'unused' | 'duplicate' | 'duplicate-inline' | 'broken-reference' | 'missing-annex' | 'undefined-quoted';
 
 export interface StructureIssue {
   kind: IssueKind;
@@ -54,6 +58,8 @@ export interface StructureIssue {
   at: Occurrence;
   /** The term or the reference text the issue is about */
   subject: string;
+  /** duplicate-inline: the exact text to delete from the paragraph (the parenthesis or its "a továbbiakban" part) */
+  removal?: string;
 }
 
 export interface DocumentGraph {
@@ -153,6 +159,25 @@ export function withAutoNumbers(paragraphs: ParagraphInfo[]): string[] {
   });
 }
 
+/**
+ * What to delete to drop an inline definition, as the exact text of the paragraph:
+ * "ABC Kft. (a továbbiakban: Megbízó) fizet" → " (a továbbiakban: Megbízó)";
+ * "(székhely: Budapest; a továbbiakban: Megbízó)" → "; a továbbiakban: Megbízó";
+ * "(a továbbiakban: Megbízó; székhely: Budapest)" → "a továbbiakban: Megbízó; ".
+ */
+export function inlineDefinitionRemoval(text: string, start: number, end: number): string | undefined {
+  const before = text.slice(0, start);
+  const after = text.slice(end);
+  const open = /\s*\(\s*$/.exec(before);
+  const close = /^\s*\)/.exec(after);
+  if (open && close) return text.slice(open.index, end + close[0].length);
+  const semicolonBefore = /;\s*$/.exec(before);
+  if (semicolonBefore && close) return text.slice(semicolonBefore.index, end);
+  const semicolonAfter = /^\s*;\s*/.exec(after);
+  if (open && semicolonAfter) return text.slice(start, end + semicolonAfter[0].length);
+  return undefined;
+}
+
 export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   const terms: DefinedTerm[] = [];
   const issues: StructureIssue[] = [];
@@ -160,12 +185,27 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
   /** Spans that are part of a definition itself, so they don't count as uses */
   const definitionSpans: Occurrence[] = [];
 
-  const addTerm = (term: string, kind: DefinedTerm['kind'], at: Occurrence, definition: string) => {
+  /** Inline definitions whose parenthesis defines a single term, so it can be removed as a whole */
+  const inlineRemovals = new Map<string, string>();
+  const addTerm = (term: string, kind: DefinedTerm['kind'], at: Occurrence, definition: string, removal?: string) => {
     if (!looksLikeTerm(term)) return;
+    if (kind === 'inline' && removal) inlineRemovals.set(`${at.paragraph}:${at.start}`, removal);
     const existing = byTerm.get(term);
     if (existing) {
       if (existing.definedAt.paragraph !== at.paragraph) {
-        issues.push({ kind: 'duplicate', message: `„${term}” kétszer van definiálva (az első a ${existing.definedAt.paragraph + 1}. bekezdésben).`, at, subject: term });
+        if (existing.kind !== kind) {
+          // Once in the definitions list, once in the text: the inline one is the one to go
+          const inline = kind === 'inline' ? at : existing.definedAt;
+          issues.push({
+            kind: 'duplicate-inline',
+            message: `„${term}” a fogalommeghatározások között és a szövegben zárójelben is definiálva van.`,
+            at: inline,
+            subject: term,
+            removal: inlineRemovals.get(`${inline.paragraph}:${inline.start}`),
+          });
+        } else {
+          issues.push({ kind: 'duplicate', message: `„${term}” kétszer van definiálva (az első a ${existing.definedAt.paragraph + 1}. bekezdésben).`, at, subject: term });
+        }
       }
       return;
     }
@@ -181,9 +221,12 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
       const end = start + match[0].length;
       definitionSpans.push({ paragraph, start, end });
       // "együtt: Felek, külön-külön: Fél" → two terms
-      for (const piece of match[1].split(',')) {
+      const pieces = match[1].split(',');
+      // Only a parenthesis that defines one term can be removed as a whole
+      const removal = pieces.length === 1 ? inlineDefinitionRemoval(text, start, end) : undefined;
+      for (const piece of pieces) {
         const term = normalizeTerm(piece.replace(/^\s*(?:(?:együtt(?:esen)?|külön-külön|külön|egyenként|mint)\s*)*:?\s*/iu, ''));
-        addTerm(term, 'inline', { paragraph, start, end }, sentenceBefore(text, end));
+        addTerm(term, 'inline', { paragraph, start, end }, sentenceBefore(text, end), removal);
       }
     }
     for (const match of text.matchAll(INLINE_EN)) {

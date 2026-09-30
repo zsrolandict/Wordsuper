@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildDocumentGraph, findAt, sectionPreview, termPattern, type ParagraphInfo } from './structure';
-import { withAutoNumbers } from './structure';
+import { inlineDefinitionRemoval, withAutoNumbers } from './structure';
 
 const contract: ParagraphInfo[] = [
   { text: 'MEGBÍZÁSI SZERZŐDÉS' },                                                                                  // 0
@@ -135,4 +135,28 @@ test('automatic numbering is shown in brackets, levels rebuilt', () => {
     ]),
     ['[1.] Fogalmak', '[1.1.] Vételár: …', '[a)] felsorolás', 'Sima bekezdés']
   );
+});
+
+test('a term defined both in the definitions section and inline is flagged with the text to remove', () => {
+  const graph = buildDocumentGraph([
+    { text: 'Az ABC Kft. (a továbbiakban: Megbízó) és az XYZ Zrt. (székhely: Budapest; a továbbiakban: Megbízott) között.' },
+    { text: 'Fogalommeghatározások' },
+    { text: '„Megbízó”: jelenti az ABC Kft.-t.' },
+    { text: '„Megbízott”: jelenti az XYZ Zrt.-t.' },
+    { text: 'A Megbízó fizet, a Megbízott teljesít.' },
+  ]);
+  const inline = graph.issues.filter(i => i.kind === 'duplicate-inline');
+  assert.deepEqual(inline.map(i => [i.subject, i.at.paragraph, i.removal]), [
+    ['Megbízó', 0, ' (a továbbiakban: Megbízó)'],
+    ['Megbízott', 0, '; a továbbiakban: Megbízott'],
+  ]);
+  assert.ok(!graph.issues.some(i => i.kind === 'duplicate'));
+});
+
+test('inline definition removal keeps the rest of the parenthesis', () => {
+  const text = 'ABC Kft. (a továbbiakban: Megbízó; székhely: Budapest) fizet.';
+  const start = text.indexOf('a továbbiakban');
+  assert.equal(inlineDefinitionRemoval(text, start, text.indexOf(';')), 'a továbbiakban: Megbízó; ');
+  const plain = 'ABC Kft., a továbbiakban: Megbízó, fizet.';
+  assert.equal(inlineDefinitionRemoval(plain, plain.indexOf('a továbbiakban'), plain.indexOf(', fizet')), undefined);
 });

@@ -630,6 +630,33 @@ export async function placeAtParagraph(index: number, where: 'select' | 'before'
   });
 }
 
+/**
+ * Deletes exact texts from paragraphs with Track Changes (e.g. an inline definition that the definitions section
+ * made redundant). A paragraph that changed since the structure map was built is left alone.
+ */
+export async function deleteTextsInParagraphs(items: { paragraph: number; expectedText: string; text: string }[]): Promise<{ deleted: number; skipped: number }> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    const searches = items.map(item => {
+      const paragraph = paragraphs.items[item.paragraph];
+      if (!paragraph || !sameText(paragraph.text, item.expectedText) || item.text.length > 255) return null;
+      const results = paragraph.search(item.text.replace(/\^/g, '^^'), { matchCase: true });
+      results.load('items/text');
+      return results;
+    });
+    await context.sync();
+    const targets = searches.map(results => results?.items[0] ?? null);
+    await withTrackChanges(context, async () => {
+      targets.forEach(range => range?.delete());
+      await context.sync();
+    });
+    const deleted = targets.filter(Boolean).length;
+    return { deleted, skipped: items.length - deleted };
+  });
+}
+
 /** Returns to a position remembered by jumpToParagraph and releases it */
 export async function jumpBack(range: Word.Range) {
   await Word.run(range, async (context) => {

@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus } from 'lucide-react';
+import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus, Eraser } from 'lucide-react';
 import { requestForDefinitionsSection, requestForIssue, type StructureRequest } from '../services/structureSuggestions';
-import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo } from '../services/structure';
-import { UserFacingError, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
+import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo, type StructureIssue } from '../services/structure';
+import { UserFacingError, deleteTextsInParagraphs, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
 import { formatNumber } from '../services/format';
 
 interface Loaded {
@@ -14,6 +14,7 @@ const ISSUE_ICONS: Record<IssueKind, React.ReactNode> = {
   'broken-reference': <Unlink className="w-3.5 h-3.5 text-red-600" />,
   'missing-annex': <Info className="w-3.5 h-3.5 text-neutral-500" />,
   duplicate: <Copy className="w-3.5 h-3.5 text-amber-600" />,
+  'duplicate-inline': <Copy className="w-3.5 h-3.5 text-amber-600" />,
   unused: <CircleSlash className="w-3.5 h-3.5 text-amber-600" />,
   'undefined-quoted': <Quote className="w-3.5 h-3.5 text-amber-600" />,
 };
@@ -41,6 +42,7 @@ export default function StructurePanel({ active, busy, onRequest }: {
   const [data, setData] = useState<Loaded | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [atCursor, setAtCursor] = useState<FoundAt | null>(null);
   const [cursorOutdated, setCursorOutdated] = useState(false);
   const [list, setList] = useState<'issues' | 'terms'>('issues');
@@ -103,6 +105,21 @@ export default function StructurePanel({ active, busy, onRequest }: {
 
   // Remembers the paragraph's text, so a stale map can't point the assistant at the wrong paragraph
   const requestFix = (r: StructureRequest) => onRequest({ ...r, expectedText: data?.paragraphs[r.paragraph]?.text });
+
+  /** Deletes redundant inline definitions with Track Changes (no AI), then reads the document again */
+  const removeInline = async (issues: StructureIssue[]) => {
+    if (!data) return;
+    const items = issues.filter(i => i.removal).map(i => ({ paragraph: i.at.paragraph, expectedText: data.paragraphs[i.at.paragraph]?.text ?? '', text: i.removal! }));
+    setError(null);
+    setNotice(null);
+    try {
+      const { deleted, skipped } = await deleteTextsInParagraphs(items);
+      setNotice(`✅ ${deleted} zárójeles definíciót töröltem korrektúrával.` + (skipped ? ` ${skipped} bekezdés azóta megváltozott, azokat kihagytam.` : ''));
+      await rebuild();
+    } catch {
+      setError('Nem sikerült törölni. Esetleg írásvédett a dokumentum?');
+    }
+  };
 
   const jump = async (paragraph: number) => {
     setError(null);
@@ -199,6 +216,17 @@ export default function StructurePanel({ active, busy, onRequest }: {
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-2">
+        {notice && <p className="text-xs text-green-700">{notice}</p>}
+        {graph && list === 'issues' && graph.issues.filter(i => i.removal).length > 1 && (
+          <button
+            onClick={() => removeInline(graph.issues.filter(i => i.removal))}
+            disabled={busy}
+            className="w-full flex items-center justify-center py-1.5 text-xs font-medium border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 disabled:opacity-50 rounded-lg"
+          >
+            <Eraser className="w-3.5 h-3.5 mr-1" />
+            Mind a {graph.issues.filter(i => i.removal).length} felesleges zárójeles definíció törlése (korrektúrával)
+          </button>
+        )}
         {graph && list === 'issues' && (graph.issues.length === 0 ? (
           <p className="text-xs text-green-700">✅ Nem találtam hibát a definíciókban és a hivatkozásokban.</p>
         ) : graph.issues.map((issue, i) => (
@@ -209,6 +237,16 @@ export default function StructurePanel({ active, busy, onRequest }: {
             </span>
             <span className="ml-2 flex flex-col items-end space-y-1">
               <JumpButton onClick={() => jump(issue.at.paragraph)} />
+              {issue.removal && (
+                <button
+                  onClick={() => removeInline([issue])}
+                  disabled={busy}
+                  title={`Törli korrektúrával: „${issue.removal.trim()}”`}
+                  className="flex items-center shrink-0 text-[11px] font-medium text-emerald-700 hover:text-emerald-900 disabled:opacity-50"
+                >
+                  <Eraser className="w-3 h-3 mr-0.5" />Törlés
+                </button>
+              )}
               {(() => {
                 const request = requestForIssue(issue, graph);
                 return request && (
