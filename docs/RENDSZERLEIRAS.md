@@ -116,6 +116,30 @@ Szerver (Node.js + Express)
 - Az AI változásonként kockázati értékelést és javaslatot ad.
 - Ezek megjegyzésként beszúrhatók a megváltozott bekezdésekhez.
 
+### 3.4 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
+
+- **Részleges elfogadás mindenhol:**
+  - Szerkesztésnél a javaslat minden változása kattintható. A kihagyott változásnál az eredeti szöveg marad, és csak a kiválasztottak kerülnek be.
+  - Egész dokumentumos szerkesztésnél bekezdésenként pipa van.
+  - Átvizsgálásnál észrevételenként dönthetsz (Elfogadom / Elvetem / Visszaállítom).
+  - Az Összevetésnél változásonként: „Beszúrom ezt”. Minden megjegyzés csak egyszer kerülhet be.
+- **Nem vész el, amit eldöntöttél:**
+  - Egy félig eldöntött átvizsgálás nem zárul le kérdés nélkül (módváltás, Szerkezet-javaslat, Főmenü).
+  - Ha közben mást jelölsz ki, a program megkérdezi: új kérés legyen az új kijelölésre, vagy a javaslat finomítása?
+  - A „Másik változat” és az „Ellenőrző átvizsgálás” megkapja, mit fogadtál el és mit vetettél el.
+- **Minden látszik:**
+  - „Mutasd” a javaslatokon (a kijelölés, a beszúrás helye, egész dokumentumnál bekezdésenként), és elfogadás után a Word odaugrik.
+  - A „Mutasd” egy már beszúrt javításnál az új szöveget keresi.
+  - A Szerkezet fül az asszisztens módosításai után magától frissül.
+- **Minden korrektúrával kerül be**, a generált szöveg is.
+- **Visszavonom:**
+  - Elutasítja a javaslat korrektúráit, és törli a megjegyzéseit. Csak azokat, amelyeket ő szúrt be; a korábbi saját korrektúráidhoz nem nyúl.
+  - Az utolsó 10 beszúrásnál érhető el, és WordApi 1.6 kell hozzá (Microsoft 365).
+- **Kérdez, mielőtt nagyot lépne:**
+  - Kijelölés nélkül egy hosszabb dokumentum teljes átírása előtt megerősítést kér, és a beszélgetésben „egész dokumentum” jelölés látszik.
+  - A diktálás letöltés vagy átírás közben megszakítható.
+- **Szerkezet:** ha a fogalommeghatározások között és a szövegben zárójelben is definiálva van egy fogalom, jelzi, és egy kattintással (egyenként vagy egyszerre) korrektúrával törölhető a felesleges zárójeles definíció.
+
 ## 4. Adatvédelem – maszkolás
 
 - **Alapból bekapcsolva** (Beállítások → Adatvédelem).
@@ -136,6 +160,7 @@ Szerver (Node.js + Express)
   | születési adatok | `[SZÜLETÉS_n]` |
   | a felhasználó saját listája | `[EGYÉB_n]` |
 
+- Amit tévesen rejtene el (pl. egy hatóság nevét), azt a Részletek panelen a „Ne rejtsd” gombbal vagy a Beállításokban a „Soha ne rejtsd el” listán lehet kivenni.
 - Ugyanaz az érték mindenhol ugyanazt a helyettesítőt kapja: a kijelölésben, a háttérszövegben és a finomítás minden körében is.
 - Az AI utasítást kap, hogy a helyettesítőket változatlanul hagyja. A választ a gépen cseréljük vissza, már menet közben is (a félig megérkezett helyettesítőt addig elrejtjük).
 - A „Részletek” panel táblázatban mutatja, mit rejtett el. Ha valami kimaradt, a felhasználó felveheti a „mindig elrejtendő kifejezések” közé.
