@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accessKeyProblem, parseTrustProxy } from './config';
+import { accessKeyProblem, parseDictationPolicy, parseTrustProxy } from './config';
 import { mapGeminiFinish } from './ai/gemini';
 
 test('access key: missing, placeholder and short keys are refused, whitespace is ignored', () => {
@@ -29,4 +29,12 @@ test('Gemini finish reasons: only STOP counts as a complete answer', () => {
   assert.deepEqual(mapGeminiFinish('RECITATION', undefined), { reason: 'safety', detail: 'RECITATION' });
   assert.deepEqual(mapGeminiFinish('STOP', 'PROHIBITED_CONTENT'), { reason: 'safety', detail: 'PROHIBITED_CONTENT' });
   assert.deepEqual(mapGeminiFinish('FINISH_REASON_UNSPECIFIED', undefined), { reason: 'other', detail: 'FINISH_REASON_UNSPECIFIED' });
+});
+
+test('dictation policy: the user may accept the risk unless the operator forbids it', () => {
+  assert.equal(parseDictationPolicy(undefined), 'user-risk');
+  assert.equal(parseDictationPolicy(''), 'user-risk');
+  assert.equal(parseDictationPolicy('eu-only'), 'eu-only');
+  assert.equal(parseDictationPolicy(' EU-ONLY '), 'eu-only');
+  assert.equal(parseDictationPolicy('whatever'), 'user-risk');
 });

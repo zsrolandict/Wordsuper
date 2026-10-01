@@ -5,6 +5,14 @@ const PLACEHOLDER_ACCESS_KEYS = new Set(["MY_APP_ACCESS_KEY"]);
 export const MIN_ACCESS_KEY_LENGTH = 16;
 
 /** Why APP_ACCESS_KEY can't be used, or null when it's fine */
+/**
+ * eu-only: cloud dictation only when the server processes data in the EU.
+ * user-risk (default): it is also allowed anywhere else when the user explicitly accepts the risk in the settings.
+ */
+export type DictationPolicy = "eu-only" | "user-risk";
+export const parseDictationPolicy = (value: string | undefined): DictationPolicy =>
+  value?.trim().toLowerCase() === "eu-only" ? "eu-only" : "user-risk";
+
 export function accessKeyProblem(key: string | undefined): string | null {
   const value = key?.trim() ?? "";
   if (!value) return "APP_ACCESS_KEY is not set.";

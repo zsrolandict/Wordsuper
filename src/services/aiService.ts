@@ -166,7 +166,7 @@ export async function checkAccessKey(accessKey: string): Promise<{ ok: boolean; 
 
 /** Hungarian explanation of a failed request, for the chat */
 /** Sends a dictated recording to the server and returns the transcript */
-export async function transcribeAudio(recording: Blob, accessKey: string, userId: string, signal?: AbortSignal): Promise<string> {
+export async function transcribeAudio(recording: Blob, accessKey: string, userId: string, riskAccepted: boolean, signal?: AbortSignal): Promise<string> {
   const bytes = new Uint8Array(await recording.arrayBuffer());
   let binary = '';
   // In chunks: String.fromCharCode with a huge argument list overflows the stack
@@ -174,7 +174,7 @@ export async function transcribeAudio(recording: Blob, accessKey: string, userId
   const response = await fetch('/api/transcribe', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders(accessKey, userId) },
-    body: JSON.stringify({ audio: btoa(binary), mimeType: recording.type }),
+    body: JSON.stringify({ audio: btoa(binary), mimeType: recording.type, riskAccepted }),
     signal,
   });
   if (!response.ok) throw await errorFromResponse(response);
@@ -190,7 +190,9 @@ export function describeRequestError(error: unknown): string {
       case 'ACCESS_KEY_NOT_CONFIGURED':
         return 'A szerveren nincs rendesen beállítva a hozzáférési kulcs (APP_ACCESS_KEY hiányzik, túl rövid vagy még a mintaérték), ezért a szerver minden kérést elutasít. Az üzemeltetőnek kell beállítania.';
       case 'DICTATION_NOT_ALLOWED':
-        return 'A felhős diktálás ezen a szerveren nem engedélyezett, mert a hang nem EU-ban (Vertex AI, europe-… régió) kerülne feldolgozásra. Használd a helyi diktálást (Beállítások → Diktálás), ott a hang el sem hagyja a gépet.';
+        return 'Ezen a szerveren az üzemeltető csak EU-ban (Vertex AI, europe-… régió) feldolgozott felhős diktálást engedélyez, és ez a szerver nem EU-ban dolgoz fel. Használd a helyi diktálást (Beállítások → Diktálás), ott a hang el sem hagyja a gépet.';
+      case 'DICTATION_RISK_NOT_ACCEPTED':
+        return 'A felhős diktálás itt nem EU-ban dolgozik fel. Ha vállalod a kockázatot, a Beállítások → Diktálás részen jelöld be az „Elfogadom” négyzetet.';
       case 'RATE_LIMITED':
         return 'Túl sok kérés érkezett egy percen belül. Várj egy kicsit, és próbáld újra.';
       case 'INCOMPLETE':
@@ -204,4 +206,23 @@ export function describeRequestError(error: unknown): string {
   }
   const detail = error instanceof Error ? error.message : '';
   return `Nem sikerült választ kapni az AI-tól, a dokumentumot nem módosítottam. Kérlek próbáld újra.${detail ? `\n(${detail})` : ''}`;
+}
+
+export interface ServerInfo {
+  version: string;
+  date: string;
+  model: string | null;
+  location: string | null;
+  euResident: boolean;
+  dictationPolicy: 'eu-only' | 'user-risk';
+}
+
+/** What the server runs (version, model, where it processes data); null when it can't be reached */
+export async function fetchServerInfo(accessKey: string): Promise<ServerInfo | null> {
+  try {
+    const response = await fetch('/api/info', { headers: { [ACCESS_KEY_HEADER]: accessKey } });
+    return response.ok ? await response.json() : null;
+  } catch {
+    return null;
+  }
 }

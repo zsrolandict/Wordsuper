@@ -72,7 +72,9 @@ Szerver (Node.js + Express)
 - **Alapértelmezés: helyi felismerés.** Whisper modell fut a munkaablak háttérszálán (Transformers.js, WebGPU vagy WebAssembly); a hangfelvétel nem hagyja el a gépet.
   - Első használatkor egyszer letölti a modellt (base kb. 80 MB, small kb. 250 MB).
   - Az ONNX-futtatót a saját szerverünk adja, nem CDN.
-- **Felhős átírás:** csak a Beállításokban választható. A szerver csak akkor fogadja, ha Vertex AI-t használ EU-régióban (`europe-*` vagy `eu`); a Gemini API kulcsos módban elutasítja.
+- **Felhős átírás:** csak a Beállításokban választható.
+  - Vertex AI EU-régióban (`europe-*` vagy `eu`) szabadon megy.
+  - Máshol (Gemini API) a felhasználónak ki kell jelölnie az „Elfogadom, saját felelősségemre” négyzetet; az auditnapló külön jelöli. Az üzemeltető letilthatja (`DICTATION_POLICY=eu-only`).
 - Döntés: felvétel utáni (kötegelt) átírás, élő felirat nincs. Hangos módváltás sincs.
 - A szöveget elküldés előtt még át lehet javítani.
 - Egy felvétel legfeljebb kb. 2 perc. Felvétel közben futó óra és leállítás gomb látszik.
@@ -200,7 +202,10 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 
 ## 7. Kész az indításhoz
 
-- **Egykattintásos helyi indító Windowsra:** `INDITAS.bat`. Első indításkor telepíti a függőségeket, létrehozza a `.env`-et, és telepíti a HTTPS-tanúsítványt. Minden indításkor elindítja a szervert a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel.
+- **Egykattintásos helyi indító Windowsra:** `INDITAS.bat`.
+  - Első indításkor telepíti a függőségeket, létrehozza a `.env`-et, és telepíti a HTTPS-tanúsítványt.
+  - Minden indításkor lehúzza a legfrissebb változatot (ha van git), leállítja a régi szervert, törli a Word gyorsítótárát, újat indít a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel.
+  - A Beállítások alján látszik a felület és a szerver verziója (git commit); eltérésnél figyelmeztet.
 - **Arculat:** ICT Europa Legal logó a fejlécben (a végleges logófájl még hiányzik).
 - **Következő fázis (II.):** Microsoft-fiókos belépés (ellenőrzött felhasználó az auditnaplóban), költségkövetés ügyfélcímkénként.
 

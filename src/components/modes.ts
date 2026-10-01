@@ -43,6 +43,13 @@ export const PLACEHOLDERS: Record<Mode, string> = {
   compare: 'Mire figyeljek a változásokban?',
 };
 
+/**
+ * A quick button whose label is a single word ("ENG") says nothing to the AI: it needs its own instruction.
+ * A label of several words ("Fordítsd angolra") is an instruction in itself.
+ */
+export const presetNeedsInstruction = (label: string, instruction?: string) =>
+  !instruction?.trim() && label.trim().split(/\s+/).filter(Boolean).length < 2;
+
 export interface PresetMatch {
   label: string;
   mode: Mode;

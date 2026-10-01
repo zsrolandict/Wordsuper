@@ -11,12 +11,29 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem --- Fuggosegek (csak az elso inditaskor) ---
-if not exist node_modules (
-  echo Fuggosegek telepitese ^(elso inditas, par perc^)...
+rem --- Legfrissebb valtozat: ha van git es ez egy git mappa, lehuzza (a .env es a kulcsok nem erintettek) ---
+set "OLDHEAD="
+set "NEWHEAD="
+set "NEED_INSTALL="
+where git >nul 2>nul
+if not errorlevel 1 if exist .git (
+  for /f %%h in ('git rev-parse HEAD 2^>nul') do set "OLDHEAD=%%h"
+  echo Frissites keresese...
+  git pull --ff-only
+  if errorlevel 1 echo Nem sikerult frissiteni ^(nincs internet, vagy helyi modositas van^). A mostani valtozattal megyek tovabb.
+  for /f %%h in ('git rev-parse HEAD 2^>nul') do set "NEWHEAD=%%h"
+)
+if not "%OLDHEAD%"=="%NEWHEAD%" (
+  git diff --name-only %OLDHEAD% %NEWHEAD% -- package.json package-lock.json | findstr "package" >nul
+  if not errorlevel 1 set "NEED_INSTALL=1"
+)
+if not exist node_modules set "NEED_INSTALL=1"
+if defined NEED_INSTALL (
+  echo Fuggosegek telepitese ^(par perc^)...
   call npm ci
   if errorlevel 1 goto hiba
 )
+if exist .git for /f %%v in ('git log -1 --format^=%%h 2^>nul') do echo Verzio: %%v
 
 rem --- Kulcsok: .env ---
 if not exist .env (
@@ -47,19 +64,20 @@ echo Helyi HTTPS tanusitvany ellenorzese...
 call npx --yes office-addin-dev-certs install --days 365
 if errorlevel 1 goto hiba
 
+rem --- A regi szerver leallitasa: mindig a friss kod fusson, ne a memoriaban maradt regi ---
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":3444" ^| findstr "LISTENING"') do taskkill /F /PID %%p >nul 2>nul
+
+rem --- A Word gyorsitotara: kulonben a regi oldalt mutathatja az uj helyett ---
+powershell -NoProfile -Command "Remove-Item -Path ($env:LOCALAPPDATA + '\Microsoft\Office\16.0\Wef\*') -Recurse -Force -ErrorAction SilentlyContinue"
+
 rem --- Szerver ---
-netstat -ano | findstr ":3444" | findstr "LISTENING" >nul
+echo Szerver inditasa: https://localhost:3444
+start "Word Writer szerver" cmd /k "npm run word:server"
+echo Varok, amig a szerver elindul...
+powershell -NoProfile -Command "$i=0; while ($i -lt 90) { try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 3444)).Close(); exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
 if errorlevel 1 (
-  echo Szerver inditasa: https://localhost:3444
-  start "Word Writer szerver" cmd /k "npm run word:server"
-  echo Varok, amig a szerver elindul...
-  powershell -NoProfile -Command "$i=0; while ($i -lt 90) { try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 3444)).Close(); exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
-  if errorlevel 1 (
-    echo A szerver nem indult el 90 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
-    goto hiba
-  )
-) else (
-  echo A szerver mar fut, nem inditok ujat.
+  echo A szerver nem indult el 90 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
+  goto hiba
 )
 
 rem --- Word megnyitasa a bovitmennyel ---
@@ -68,6 +86,7 @@ call npm run word:sideload
 if errorlevel 1 goto hiba
 echo.
 echo Kesz. A Word Kezdolap szalagjan kattints a "Word Writer" gombra.
+echo A bovitmeny Beallitasai alatt latszik a verzio: ha a felulet es a szerver verzioja megegyezik, minden friss.
 echo A szerver ablakot hagyd nyitva, amig hasznalod. Eltavolitas: npm run word:remove
 pause
 exit /b 0

@@ -9,7 +9,8 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { accessKeyProblem, parseTrustProxy } from "./server/config";
+import { accessKeyProblem, parseDictationPolicy, parseTrustProxy } from "./server/config";
+import { readVersion } from "./server/version";
 import { providerFromEnv } from "./server/ai";
 
 // Compare digests so neither the length nor the content of the key leaks through timing
@@ -77,9 +78,25 @@ async function startServer() {
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));
 
+  const version = readVersion();
+  const dictationPolicy = parseDictationPolicy(process.env.DICTATION_POLICY);
+  console.log(`Version: ${version.commit} (${version.date || "no date"}); dictation policy: ${dictationPolicy}`);
+
   // Lets the settings panel verify the access key without spending AI credits
   app.get("/api/auth-check", (req, res) => {
     res.json({ ok: true });
+  });
+
+  // What is running: shown in the settings, so a stale server or page is visible
+  app.get("/api/info", (req, res) => {
+    res.json({
+      version: version.commit,
+      date: version.date,
+      model: "provider" in ai ? ai.provider.model : null,
+      location: "provider" in ai ? ai.provider.location : null,
+      euResident: "provider" in ai ? ai.provider.euResident : false,
+      dictationPolicy,
+    });
   });
 
   app.post("/api/edit-stream", async (req, res) => {
@@ -175,12 +192,16 @@ async function startServer() {
       durationMs: Date.now() - startedAt,
       ...extra,
     });
-    // A recording can't be masked: it may only go to the cloud when it stays in the EU (Vertex AI, europe-* region)
-    if (!ai.provider.euResident) {
+    // A recording can't be masked. Outside the EU (Vertex AI, europe-* region) it is only sent when the user accepted
+    // the risk in the settings, unless the operator forbids that (DICTATION_POLICY=eu-only)
+    const riskAccepted = req.body?.riskAccepted === true;
+    if (!ai.provider.euResident && !(dictationPolicy === "user-risk" && riskAccepted)) {
       logDictation("rejected", { detail: "DICTATION_NOT_ALLOWED" });
       return res.status(403).json({
-        error: "Cloud dictation is only allowed with Vertex AI in an EU region (AI_PROVIDER=vertex, GOOGLE_CLOUD_LOCATION=europe-…).",
-        code: "DICTATION_NOT_ALLOWED",
+        error: dictationPolicy === "eu-only"
+          ? "Cloud dictation is only allowed with Vertex AI in an EU region on this server (DICTATION_POLICY=eu-only)."
+          : "Cloud dictation outside the EU needs the user to accept the risk in the settings.",
+        code: dictationPolicy === "eu-only" ? "DICTATION_NOT_ALLOWED" : "DICTATION_RISK_NOT_ACCEPTED",
       });
     }
     const parsed = parseTranscribeRequest(req.body);
@@ -194,7 +215,7 @@ async function startServer() {
     });
     try {
       const { text, usage } = await ai.provider.transcribe({ ...parsed.value, signal: abortController.signal });
-      logDictation("ok", { tokens: usage });
+      logDictation("ok", { tokens: usage, detail: ai.provider.euResident ? undefined : "non-EU, risk accepted by the user" });
       res.json({ text });
     } catch (error) {
       if (abortController.signal.aborted) {

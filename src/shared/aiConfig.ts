@@ -85,8 +85,10 @@ export type ApiErrorCode =
   | 'SERVER_ERROR'
   /** The model stopped early (length limit, safety filter…), so the answer is incomplete */
   | 'INCOMPLETE'
-  /** Cloud dictation is refused unless the server processes data in the EU */
-  | 'DICTATION_NOT_ALLOWED';
+  /** The operator forbids cloud dictation outside the EU (DICTATION_POLICY=eu-only) */
+  | 'DICTATION_NOT_ALLOWED'
+  /** Cloud dictation outside the EU needs the user's explicit acceptance in the settings */
+  | 'DICTATION_RISK_NOT_ACCEPTED';
 
 export const contextLimitFor = (mode: Mode) =>
   mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;

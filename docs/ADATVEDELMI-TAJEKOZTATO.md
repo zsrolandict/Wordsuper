@@ -10,7 +10,7 @@
 | Látja az AI a neveket, cégeket, azonosítókat? | **Alapból nem.** Küldés előtt a gépen helyettesítőkre cseréljük őket (`[CÉG_1]`, `[SZEMÉLY_2]`…), a választ a gépen cseréljük vissza. |
 | Használja a Google a tanításhoz? | Vertex AI-n és a fizetős Gemini API-n **nem**. Az **ingyenes** Gemini API-n **igen**, és emberi ellenőrök is olvashatják: ügyféladathoz tilos. |
 | Mi marad meg a szerveren? | Csak auditnapló, **tartalom nélkül** (ki, mikor, mit, mekkora méretben, melyik modellel, hány tokenből). |
-| A diktálás hangja? | Alapból **a gépen marad**: a beszédfelismerő a munkaablakban fut. Felhős diktálás csak Vertex AI EU mellett engedélyezhető. |
+| A diktálás hangja? | Alapból **a gépen marad**: a beszédfelismerő a munkaablakban fut. Felhős diktálás Vertex AI EU mellett szabad; máshol csak a felhasználó kifejezett, saját felelősségű elfogadásával (az üzemeltető letilthatja). |
 | Kerül-e bármi a dokumentumba jóváhagyás nélkül? | Nem. Minden javaslat előnézettel jön, és korrektúrával (Track Changes) vagy megjegyzésként kerül be. |
 
 ## 2. Az adat útja
@@ -52,7 +52,9 @@ A munkaablak **„Részletek”** paneljén minden válasznál látszik:
 - **Alapértelmezés: helyi felismerés.** Whisper modell fut a munkaablakban (WebAssembly vagy WebGPU); a hangfelvétel **nem hagyja el a gépet**.
   - A modellt az első használatkor egyszer le kell tölteni (huggingface.co, kb. 80–250 MB), utána a gép tárolja.
   - A felismert szöveg a küldéskor ugyanúgy maszkolódik, mint a begépelt.
-- **Felhős diktálás:** csak a Beállításokban bekapcsolva, és csak ha a szerver Vertex AI-t használ EU-régióban. Más beállításnál a szerver elutasítja.
+- **Felhős diktálás:** csak a Beállításokban bekapcsolva.
+  - Vertex AI EU-régióban (`europe-*` vagy `eu`) szabadon használható: a hang nem hagyja el az EU-t.
+  - Máshol (pl. Gemini API) a felhasználónak előbb ki kell jelölnie az „Elfogadom, saját felelősségemre” négyzetet. Ezt a használatot az auditnapló külön jelöli. Az üzemeltető ezt le is tilthatja (`DICTATION_POLICY=eu-only`).
   - A hang nem maszkolható, ezért ezt csak akkor ajánljuk, ha a helyi felismerés nem fut.
 
 ## 5. Auditnapló

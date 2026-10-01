@@ -29,7 +29,7 @@ export interface Settings {
    * local: Whisper runs on this machine, the recording never leaves it (default).
    * cloud: the server's AI transcribes it; only allowed when the server processes data in the EU.
    */
-  dictation: { engine: 'local' | 'cloud'; localModel: LocalModel };
+  dictation: { engine: 'local' | 'cloud'; localModel: LocalModel; /** Cloud dictation outside the EU, at the user's own risk */ riskAccepted: boolean };
   /** How hard the AI thinks: auto lets the model decide */
   depth: Depth;
 }
@@ -43,7 +43,7 @@ export const DEFAULT_SETTINGS: Settings = {
   masking: { enabled: true, extraTerms: '', neverHide: '' },
   sound: true,
   // base misunderstands Hungarian too often to be the default
-  dictation: { engine: 'local', localModel: 'small' },
+  dictation: { engine: 'local', localModel: 'small', riskAccepted: false },
   depth: 'auto',
 };
 
@@ -76,6 +76,7 @@ function sanitize(raw: unknown): Settings {
     dictation: {
       engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
       localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'small',
+      riskAccepted: value.dictation?.riskAccepted === true,
     },
   };
 }

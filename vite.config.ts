@@ -3,6 +3,7 @@ import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
 import {defineConfig, Plugin} from 'vite';
+import {readVersion} from './server/version';
 
 // LINT.IfChange(aistudio_media_plugin)
 function aistudioMediaPlugin(): Plugin {
@@ -67,6 +68,8 @@ function aistudioMediaPlugin(): Plugin {
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), aistudioMediaPlugin()],
+    // The version of the page itself (git commit), shown in the settings next to the server's
+    define: { __APP_VERSION__: JSON.stringify(readVersion().commit) },
     // The local dictation worker (Whisper) uses ES module imports
     worker: { format: 'es' as const },
     // Pre-bundled at startup: otherwise the dev server reloads the page (and the conversation) on first dictation

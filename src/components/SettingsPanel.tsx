@@ -5,8 +5,8 @@ import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
-import { checkAccessKey, describeRequestError, type RateLimitInfo } from '../services/aiService';
-import { MODE_LABELS, modeLabel } from './modes';
+import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
+import { MODE_LABELS, modeLabel, presetNeedsInstruction } from './modes';
 
 const newId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -43,6 +43,13 @@ export default function SettingsPanel({
   const [presetMode, setPresetMode] = useState<Mode>(currentMode);
   const [presetLabel, setPresetLabel] = useState('');
   const [presetInstruction, setPresetInstruction] = useState('');
+  // What the server runs: its version, where it processes data (for dictation and the version line below)
+  const [serverInfo, setServerInfo] = useState<ServerInfo | null | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    fetchServerInfo(settings.accessKey).then(info => { if (!cancelled) setServerInfo(info); });
+    return () => { cancelled = true; };
+  }, [settings.accessKey]);
 
   const style = settings.styleProfile;
   const setStyle = (changes: Partial<typeof style>) =>
@@ -70,8 +77,8 @@ export default function SettingsPanel({
 
   const addPreset = () => {
     const label = presetLabel.trim();
-    if (!label) return;
     const instruction = presetInstruction.trim();
+    if (!label || presetNeedsInstruction(label, instruction)) return;
     onChange(s => ({ ...s, customPresets: [...s.customPresets, { id: newId(), mode: presetMode, label, ...(instruction ? { instruction } : {}) }] }));
     setPresetLabel('');
     setPresetInstruction('');
@@ -183,12 +190,34 @@ export default function SettingsPanel({
                 </span>
               ) : (
                 <span>
-                  Felhőben (Vertex AI, EU)
-                  <span className="block text-xs text-neutral-500">Pontosabb lehet, de a hang a szerver AI-szolgáltatójához kerül, és hangot nem lehet maszkolni. A szerver csak akkor fogadja, ha EU-régióban dolgoz fel.</span>
+                  Felhőben (a szerver AI-ja)
+                  <span className="block text-xs text-neutral-500">Pontosabb lehet, de a hang a szerver AI-szolgáltatójához kerül, és hangot nem lehet maszkolni.</span>
                 </span>
               )}
             </label>
           ))}
+          {settings.dictation.engine === 'cloud' && (
+            serverInfo?.euResident ? (
+              <p className="text-xs text-green-700">✅ Ez a szerver EU-ban dolgoz fel ({serverInfo.location}), a hang nem hagyja el az EU-t.</p>
+            ) : serverInfo?.dictationPolicy === 'eu-only' ? (
+              <p className="text-xs text-red-700">⛔ Az üzemeltető csak EU-ban feldolgozott felhős diktálást engedélyez, ez a szerver ({serverInfo.location ?? 'ismeretlen'}) nem az. Használd a helyi diktálást.</p>
+            ) : (
+              <div className="text-xs bg-amber-50 border border-amber-200 rounded-lg p-2 space-y-1.5">
+                <p className="text-amber-900">
+                  ⚠️ Ez a szerver ({serverInfo?.location ?? 'ismeretlen hely'}) nem garantálja, hogy a hang az EU-ban marad. A hangfelvételt nem lehet maszkolni, ezért a benne elhangzó nevek, összegek kijutnak a Google-höz. Ingyenes Gemini-kulcsnál a Google termékfejlesztésre is használhatja.
+                </p>
+                <label className="flex items-start space-x-2 cursor-pointer text-amber-950">
+                  <input
+                    type="checkbox"
+                    checked={settings.dictation.riskAccepted}
+                    onChange={e => onChange(s => ({ ...s, dictation: { ...s.dictation, riskAccepted: e.target.checked } }))}
+                    className="mt-0.5"
+                  />
+                  <span>Tudomásul veszem, és saját felelősségemre használom a felhős diktálást. (A használat bekerül a szerver auditnaplójába.)</span>
+                </label>
+              </div>
+            )
+          )}
           {settings.dictation.engine === 'local' && (
             <label className="block text-xs font-medium text-neutral-700">
               Helyi modell
@@ -292,6 +321,21 @@ export default function SettingsPanel({
                       <span className="text-xs min-w-0">
                         <span className="font-medium">{preset.label}</span>
                         {preset.instruction && <span className="block text-[11px] text-neutral-500 truncate">{preset.instruction}</span>}
+                        {presetNeedsInstruction(preset.label, preset.instruction) && (
+                          <span className="block mt-1">
+                            <span className="block text-[11px] text-amber-700">Nincs utasítása: az AI csak ennyit kap: „{preset.label}”. Mit tegyen?</span>
+                            <input
+                              onBlur={e => {
+                                const value = e.target.value.trim();
+                                if (value) onChange(s => ({ ...s, customPresets: s.customPresets.map(p => (p.id === preset.id ? { ...p, instruction: value } : p)) }));
+                              }}
+                              maxLength={MAX_INSTRUCTION_CHARS}
+                              placeholder="Pl. Fordítsd le angolra, jogi szaknyelven."
+                              aria-label={`${preset.label} utasítása`}
+                              className="mt-0.5 w-full p-1.5 border border-amber-300 rounded-md text-[11px] bg-white"
+                            />
+                          </span>
+                        )}
                       </span>
                       <button
                         onClick={() => onChange(s => ({ ...s, customPresets: s.customPresets.filter(p => p.id !== preset.id) }))}
@@ -338,9 +382,14 @@ export default function SettingsPanel({
                 className={`${inputClass} mt-0.5 text-xs bg-white resize-none`}
               />
             </label>
+            {presetNeedsInstruction(presetLabel, presetInstruction) && presetLabel.trim() && (
+              <p className="text-[11px] text-amber-700">
+                A felirat egyetlen szó, ezért az AI nem tudhatja, mit jelent („{presetLabel.trim()}”). Írd le fent, mit kérjen tőle, pl. „Fordítsd le angolra, jogi szaknyelven.”
+              </p>
+            )}
             <button
               onClick={addPreset}
-              disabled={!presetLabel.trim()}
+              disabled={!presetLabel.trim() || presetNeedsInstruction(presetLabel, presetInstruction)}
               className="w-full flex items-center justify-center py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
               aria-label="Gyorsgomb hozzáadása"
             >
@@ -349,7 +398,17 @@ export default function SettingsPanel({
           </div>
         </Card>
 
-        <p className="text-[11px] text-center text-neutral-400 pb-2">A beállításokat ezen a gépen jegyzem meg.</p>
+        <div className="text-[11px] text-center text-neutral-400 pb-2 space-y-0.5">
+          <p>A beállításokat ezen a gépen jegyzem meg.</p>
+          <p>
+            Verzió: felület {__APP_VERSION__}
+            {serverInfo ? ` · szerver ${serverInfo.version}${serverInfo.date ? ` (${serverInfo.date})` : ''}` : serverInfo === null ? ' · a szerver nem érhető el' : ''}
+          </p>
+          {serverInfo && serverInfo.version !== __APP_VERSION__ && __APP_VERSION__ !== 'ismeretlen' && serverInfo.version !== 'ismeretlen' && (
+            <p className="text-amber-700">A felület és a szerver verziója eltér: zárd be a bővítményt, és indítsd újra az INDITAS.bat-ot.</p>
+          )}
+          {serverInfo?.model && <p>{serverInfo.model} · {serverInfo.location}</p>}
+        </div>
       </div>
     </div>
   );

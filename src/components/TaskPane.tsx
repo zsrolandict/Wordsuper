@@ -1137,6 +1137,7 @@ export default function TaskPane() {
               userId={settings.userId}
               engine={settings.dictation.engine}
               localModel={settings.dictation.localModel}
+              riskAccepted={settings.dictation.riskAccepted}
               disabled={isBusy}
               onText={text => setInput(current => (current.trim() ? `${current.trimEnd()} ${text}` : text))}
               onError={message => addMessage({ role: 'system', content: message })}
