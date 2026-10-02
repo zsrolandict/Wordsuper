@@ -17,6 +17,8 @@ export interface FindingView extends ReviewFinding {
   notFound?: boolean;
   /** Set after inserting: the fix could not be applied, the quote was not found word for word */
   fixFailed?: boolean;
+  /** Set after inserting: the fix was not written, it would have deleted a footnote, a field… */
+  fixProtected?: boolean;
   /** Decided one by one: inserted, or thrown away */
   done?: 'applied' | 'dismissed';
   /** "Mutasd" found nothing */
@@ -169,7 +171,7 @@ function FindingsList({ findings, editable, busy, actions }: { findings: Finding
   return (
     <ul className="space-y-2">
       {findings.map((finding, i) => {
-        const missed = finding.notFound || finding.fixFailed;
+        const missed = finding.notFound || finding.fixFailed || finding.fixProtected;
         return (
           <li key={i} className={`border rounded-lg p-2 ${finding.done === 'dismissed' ? 'opacity-50 border-neutral-200' : missed ? 'border-amber-300 bg-amber-50' : finding.done === 'applied' ? 'border-green-200 bg-green-50' : 'border-neutral-200 bg-neutral-50'}`}>
             {finding.done && (
@@ -244,6 +246,12 @@ function FindingsList({ findings, editable, busy, actions }: { findings: Finding
               <span className="flex items-center text-xs text-amber-700 mt-1">
                 <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
                 Nem találtam meg szó szerint a dokumentumban, ezért a megjegyzés nem került be.
+              </span>
+            )}
+            {finding.fixProtected && (
+              <span className="flex items-center text-xs text-amber-700 mt-1">
+                <SearchX className="w-3.5 h-3.5 mr-1 shrink-0" />
+                A javítást nem írtam be: lábjegyzetet, mezőt (pl. kereszthivatkozást) vagy képet törölne. Ezt a részt írd át kézzel.
               </span>
             )}
             {finding.fixFailed && (

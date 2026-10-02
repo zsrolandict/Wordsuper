@@ -339,12 +339,71 @@ export interface EditOutcome {
    * words: only the changed words were replaced, everything else kept its formatting.
    * replace: the whole selection was replaced (paragraphs changed, or the selection starts mid-paragraph).
    * unchanged: the proposal equals the original.
+   * blocked: nothing was written, because the change would have deleted footnotes, fields… (see protectedBy)
    */
-  strategy: 'words' | 'replace' | 'unchanged';
+  strategy: 'words' | 'replace' | 'unchanged' | 'blocked';
   changedPlaces: number;
   /** The range had tracked changes not yet accepted, so it was replaced as a whole */
   pendingChanges?: boolean;
   write?: WriteMode;
+  /** blocked: what would have been deleted, and the words of the change that touched it ("" for the whole range) */
+  protectedBy?: { elements: string[]; words: string };
+}
+
+const isSupported = (version: string) =>
+  typeof Office !== 'undefined' && !!Office.context?.requirements?.isSetSupported('WordApi', version);
+
+/**
+ * What replacing or deleting these ranges would destroy without a trace in the text: footnotes, endnotes, fields
+ * (cross-references, page numbers), content controls, pictures. One entry per kind, in the user's words.
+ */
+async function protectedElements(context: Word.RequestContext, ranges: Word.Range[]): Promise<string[]> {
+  return [...new Set((await protectedElementsEach(context, ranges)).flat())];
+}
+
+/** protectedElements for each range separately, in one round trip */
+async function protectedElementsEach(context: Word.RequestContext, ranges: Word.Range[]): Promise<string[][]> {
+  if (!ranges.length) return [];
+  const perRange = ranges.map(range => {
+    const list: [string, { items: unknown[] }][] = [];
+    const controls = range.contentControls;
+    controls.load('items/id');
+    list.push(['tartalomvezérlő (űrlapmező)', controls]);
+    if (isSupported('1.2')) {
+      const pictures = range.inlinePictures;
+      pictures.load('items/width');
+      list.push(['kép', pictures]);
+    }
+    if (isSupported('1.4')) {
+      const fields = range.fields;
+      fields.load('items/code');
+      list.push(['mező (pl. kereszthivatkozás, oldalszám)', fields]);
+    }
+    if (isSupported('1.5')) {
+      const footnotes = range.footnotes;
+      footnotes.load('items/type');
+      list.push(['lábjegyzet', footnotes]);
+      const endnotes = range.endnotes;
+      endnotes.load('items/type');
+      list.push(['végjegyzet', endnotes]);
+    }
+    return list;
+  });
+  try {
+    await context.sync();
+  } catch {
+    // This Word can't tell: nothing is known to be in the way
+    return ranges.map(() => []);
+  }
+  return perRange.map(list => list.filter(([, collection]) => collection.items.length > 0).map(([name]) => name));
+}
+
+/** Why a change was not written: what it would have deleted, and how to get around it */
+export function protectedMessage(protectedBy: NonNullable<EditOutcome['protectedBy']>): string {
+  const what = protectedBy.elements.join(', ');
+  return protectedBy.words
+    ? `Nem írtam be: a javaslat a(z) „${protectedBy.words}” részt is átírná, és ezzel törölné a benne lévő elemet (${what}). Kattints erre a változásra a javaslatban, hogy kimaradjon, vagy ezt a részt írd át kézzel.`
+    : `Nem írtam be: ezt csak a teljes kijelölés cseréjével lehetne, ami törölné a benne lévő elemet (${what}). Jelölj ki kisebb részt ezek nélkül, vagy fogadd el előbb a kijelölés korrektúráit.`;
 }
 
 /**
@@ -360,6 +419,8 @@ async function editRange(context: Word.RequestContext, range: Word.Range, newTex
 
   // Pending tracked changes inside: word ranges would include deleted words, so the whole range is replaced
   if (!sameWords(range.text, reviewed.value || '')) {
+    const elements = await protectedElements(context, [range]);
+    if (elements.length) return { strategy: 'blocked', changedPlaces: 0, protectedBy: { elements, words: '' } };
     range.insertText(newText, 'Replace');
     await context.sync();
     return { strategy: 'replace', changedPlaces: 1, pendingChanges: true };
@@ -393,6 +454,14 @@ async function editRange(context: Word.RequestContext, range: Word.Range, newTex
 
   if (plan) {
     if (plan.length === 0) return { strategy: 'unchanged', changedPlaces: 0 };
+    // A changed word may carry a footnote mark or a field: replacing the word would delete it
+    const touched = plan.flatMap(edit => edit.hunks.filter(hunk => hunk.oldEnd > hunk.oldStart).map(hunk => {
+      const words = wordCollections[edit.paragraphIndex].items;
+      return { range: words[hunk.oldStart].expandTo(words[hunk.oldEnd - 1]), words: words.slice(hunk.oldStart, hunk.oldEnd).map(w => w.text).join(' ') };
+    }));
+    const found = await protectedElementsEach(context, touched.map(t => t.range));
+    const hit = found.findIndex(elements => elements.length > 0);
+    if (hit !== -1) return { strategy: 'blocked', changedPlaces: 0, protectedBy: { elements: found[hit], words: stripControlChars(touched[hit].words).trim() } };
     // Last to first, so earlier word ranges are not shifted by later edits
     for (const edit of [...plan].reverse()) {
       const words = wordCollections[edit.paragraphIndex].items;
@@ -402,6 +471,8 @@ async function editRange(context: Word.RequestContext, range: Word.Range, newTex
     return { strategy: 'words', changedPlaces: plan.reduce((sum, edit) => sum + edit.hunks.length, 0) };
   }
 
+  const elements = await protectedElements(context, [range]);
+  if (elements.length) return { strategy: 'blocked', changedPlaces: 0, protectedBy: { elements, words: '' } };
   range.insertText(newText, 'Replace');
   await context.sync();
   return { strategy: 'replace', changedPlaces: 1 };
@@ -433,6 +504,7 @@ export async function applyEdit(range: Word.Range, newText: string, explanation 
   return Word.run(range, async (context) => {
     await assertUnchanged(context, range, expectedText);
     const { value, write } = await withTrackChanges(context, () => editRange(context, range, newText));
+    if (value.strategy === 'blocked') throw new UserFacingError(protectedMessage(value.protectedBy!));
     const outcome = { ...value, write };
     if (explanation && outcome.strategy !== 'unchanged') range.insertComment(explanation);
     // Show where it happened: the user may have scrolled away while the AI was working
@@ -482,11 +554,39 @@ export async function applyDocumentEdit(
       collection.load('items/text');
       return [op.paragraph, collection] as const;
     }));
+    await context.sync();
+
+    // How each edited paragraph is changed: word by word (its hunks), or rewritten whole (null)
+    const wordHunks = new Map(edits.map(op => {
+      const collection = words.get(op.paragraph)!;
+      // Word ranges can be trusted only without pending tracked changes in the paragraph
+      const byWords = sameWords(expectedParagraphs[op.paragraph], reviewed[op.paragraph]) && consistentWords([collection], [expectedParagraphs[op.paragraph]]);
+      return [op.paragraph, byWords ? planParagraphEdits([comparableWords(collection)], op.newText)?.[0]?.hunks ?? [] : null] as const;
+    }));
+    // Nothing is written if a deleted or rewritten part holds a footnote, a field, a picture…
+    const doomed = ops.flatMap(op => {
+      if (op.type === 'insert') return [];
+      const paragraph = items[op.paragraph];
+      const hunks = op.type === 'edit' ? wordHunks.get(op.paragraph) : null;
+      if (!hunks) return [{ range: paragraph.getRange('Whole'), words: '' }];
+      const list = words.get(op.paragraph)!.items;
+      return hunks.filter(hunk => hunk.oldEnd > hunk.oldStart).map(hunk => ({
+        range: list[hunk.oldStart].expandTo(list[hunk.oldEnd - 1]),
+        words: list.slice(hunk.oldStart, hunk.oldEnd).map(w => w.text).join(' '),
+      }));
+    });
+    const found = await protectedElementsEach(context, doomed.map(d => d.range));
+    const hit = found.findIndex(elements => elements.length > 0);
+    if (hit !== -1) {
+      const words = stripControlChars(doomed[hit].words).trim();
+      throw new UserFacingError(words
+        ? protectedMessage({ elements: found[hit], words })
+        : `Nem írtam be: a javaslat egy olyan bekezdést törölne vagy írna át egészében, amelyben ${found[hit].join(', ')} van, és ez elveszne. Vedd ki ezt a bekezdést a javaslatból (pipa), vagy ezt a részt írd át kézzel.`);
+    }
 
     // The explanation goes on the first place that changes
     let firstChanged: Word.Paragraph | null = null;
     const { write } = await withTrackChanges(context, async () => {
-      await context.sync();
       // Last to first, so the positions of earlier paragraphs and words stay put
       for (const op of [...ops].reverse()) {
         const paragraph = items[op.type === 'insert' ? Math.max(op.after, 0) : op.paragraph];
@@ -514,11 +614,9 @@ export async function applyDocumentEdit(
         } else if (op.type === 'delete') {
           paragraph.delete();
         } else {
-          const collection = words.get(op.paragraph)!;
-          // Word ranges can be trusted only without pending tracked changes in the paragraph
-          if (sameWords(expectedParagraphs[op.paragraph], reviewed[op.paragraph]) && consistentWords([collection], [expectedParagraphs[op.paragraph]])) {
-            const hunks = planParagraphEdits([comparableWords(collection)], op.newText)?.[0]?.hunks ?? [];
-            for (const hunk of [...hunks].reverse()) applyHunk(collection.items, hunk);
+          const hunks = wordHunks.get(op.paragraph);
+          if (hunks) {
+            for (const hunk of [...hunks].reverse()) applyHunk(words.get(op.paragraph)!.items, hunk);
           } else {
             // Word split this paragraph differently: rewrite just this one
             paragraph.insertText(op.newText, 'Replace');
@@ -595,6 +693,8 @@ export interface ReviewInsertOutcome {
   notFound: ReviewFinding[];
   /** A fix was asked for, but the whole quote was not found word for word, so it could not be replaced */
   fixFailed: ReviewFinding[];
+  /** A fix was not written because it would have deleted a footnote, a field… */
+  fixProtected: ReviewFinding[];
   /** How the fixes went in; unset when only comments were inserted */
   write?: WriteMode;
 }
@@ -616,8 +716,8 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
     });
     await context.sync();
 
-    const outcome: ReviewInsertOutcome = { comments: 0, fixes: 0, notFound: [], fixFailed: [] };
-    const toFix: { range: Word.Range; text: string }[] = [];
+    const outcome: ReviewInsertOutcome = { comments: 0, fixes: 0, notFound: [], fixFailed: [], fixProtected: [] };
+    const toFix: { range: Word.Range; text: string; finding: ReviewFinding }[] = [];
     // Where the (last) change landed, to show it when asked
     let landed: Word.Range | null = null;
     items.forEach((item, i) => {
@@ -639,7 +739,7 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
         }
       }
       if (fix && fixRange) {
-        toFix.push({ range: fixRange, text: fix.replacement });
+        toFix.push({ range: fixRange, text: fix.replacement, finding: item.finding });
         landed = fixRange;
         remember(context, options.undo, fixRange);
       }
@@ -648,9 +748,10 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
 
     if (toFix.length) {
       ({ write: outcome.write } = await withTrackChanges(context, async () => {
-        for (const { range, text } of toFix) {
+        for (const { range, text, finding } of toFix) {
           const result = await editRange(context, range, text);
-          if (result.strategy !== 'unchanged') outcome.fixes++;
+          if (result.strategy === 'blocked') outcome.fixProtected.push(finding);
+          else if (result.strategy !== 'unchanged') outcome.fixes++;
         }
       }));
     }

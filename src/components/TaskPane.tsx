@@ -259,9 +259,15 @@ export default function TaskPane() {
   const [newVersion, setNewVersion] = useState(false);
   useEffect(() => {
     let stopped = false;
-    const check = () => fetchServerInfo(settings.accessKey).then(info => {
-      if (!stopped && info && isOtherVersion(info.version)) setNewVersion(true);
-    });
+    let lastCheck = 0;
+    // On focus too, but at most once a minute: the pane gets focus with every click
+    const check = () => {
+      if (Date.now() - lastCheck < 60_000) return;
+      lastCheck = Date.now();
+      fetchServerInfo(settings.accessKey).then(info => {
+        if (!stopped && info && isOtherVersion(info.version)) setNewVersion(true);
+      });
+    };
     check();
     const timer = setInterval(check, 5 * 60_000);
     window.addEventListener('focus', check);
@@ -740,12 +746,13 @@ export default function TaskPane() {
           done: chosen.includes(f) ? 'applied' as const : 'dismissed' as const,
           notFound: outcome.notFound.includes(f),
           fixFailed: outcome.fixFailed.includes(f),
+          fixProtected: outcome.fixProtected.includes(f),
         }));
         const done = [
           outcome.comments && `${outcome.comments} megjegyzést beszúrtam`,
           outcome.fixes && `${outcome.fixes} javítást beírtam ${how(write)}`,
         ].filter(Boolean);
-        const missed = outcome.notFound.length + outcome.fixFailed.length;
+        const missed = outcome.notFound.length + outcome.fixFailed.length + outcome.fixProtected.length;
         status = `✅ ${done.length ? done.join(', ') : 'Nem került be semmi'}.` +
           (missed ? ' Amit nem találtam meg szó szerint a dokumentumban, azt fent megjelöltem.' : '') + structureNote;
       }
@@ -860,7 +867,7 @@ export default function TaskPane() {
       const undo = canUndo() ? newUndoRecord() : undefined;
       const outcome = await applyReviewFindings([{ finding, comment: finding.selected, fix: finding.fix }], { select: true, undo });
       const note = newIssuesNote(before, await structureIssues());
-      const updated: FindingView = { ...finding, done: 'applied', notFound: outcome.notFound.length > 0, fixFailed: outcome.fixFailed.length > 0 };
+      const updated: FindingView = { ...finding, done: 'applied', notFound: outcome.notFound.length > 0, fixFailed: outcome.fixFailed.length > 0, fixProtected: outcome.fixProtected.length > 0 };
       const next = findings.map((f, i) => (i === index ? updated : f));
       const done = [outcome.comments && 'megjegyzés', outcome.fixes && `javítás ${how(outcome.write)}`].filter(Boolean).join(' és ');
       const tracked = !outcome.write || outcome.write.tracked;
@@ -904,7 +911,7 @@ export default function TaskPane() {
           ...m.proposal,
           // A review still open: the taken-back findings can be decided again
           state: stillPending ? m.proposal.state : 'rejected',
-          findings: m.proposal.findings?.map(f => (f.done === 'applied' ? { ...f, done: stillPending ? undefined : 'dismissed', notFound: false, fixFailed: false } : f)),
+          findings: m.proposal.findings?.map(f => (f.done === 'applied' ? { ...f, done: stillPending ? undefined : 'dismissed', notFound: false, fixFailed: false, fixProtected: false } : f)),
         },
         status: {
           text: changes || comments
