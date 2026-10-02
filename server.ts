@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { accessKeyProblem, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from "./server/config";
+import { accessKeyProblem, contentSecurityPolicy, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from "./server/config";
 import { readVersion } from "./server/version";
 import { providerFromEnv } from "./server/ai";
 
@@ -39,6 +39,17 @@ async function startServer() {
   const PORT = 3000;
 
   app.disable("x-powered-by");
+
+  // Where the task pane may send data (see contentSecurityPolicy)
+  const csp = contentSecurityPolicy(process.env.CSP);
+  if (csp) {
+    app.use((req, res, next) => {
+      res.setHeader("Content-Security-Policy", csp);
+      next();
+    });
+  } else {
+    console.warn("CSP=off: the task pane may connect anywhere.");
+  }
 
   const trustProxy = parseTrustProxy(process.env.TRUST_PROXY, !!process.env.K_SERVICE);
   if (trustProxy.warning) console.warn(trustProxy.warning);

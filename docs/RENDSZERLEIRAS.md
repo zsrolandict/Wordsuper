@@ -200,6 +200,13 @@ Mindkét esetben:
   - A felismerés szabályalapú, nem tökéletes: egy ritka utónevű név kulcsszó, személyes adat vagy szerepkör nélkül a szöveg közepén átjuthat; ilyenkor a „mindig elrejtendő kifejezések” listája segít.
   - A kontextusból kikövetkeztethető információt (pl. egyedi ügyleti részletek) nem rejti el.
 
+### 4.1 Hová küldhet adatot a munkaablak (Content Security Policy)
+
+- A szerver minden oldalhoz tartalombiztonsági szabályt küld: a munkaablak csak a saját szerverünkhöz, a Microsoft Office.js kiszolgálójához és (a helyi diktáló modell egyszeri letöltéséhez) a Hugging Face-hez kapcsolódhat. Így egy esetleg kompromittált programcsomag sem tudná máshová küldeni a dokumentum szövegét: a böngésző blokkolja (kipróbálva: más címre küldés, rejtett kép).
+- Képet, betűtípust is csak a saját szerverről tölthet; beágyazott objektum nem futhat.
+- Vészkapcsoló: ha egy Word-változatban emiatt üres vagy hibás lenne a munkaablak, a `.env`-ben `CSP="off"` kikapcsolja (a szerver indításkor figyelmeztet).
+- Nem véd az ellen, ha valaki a böngészőablakot egy másik oldalra navigálná; ilyen kód nincs a programban.
+
 ## 5. Korlátok (és miért)
 
 | Mi | Érték | Megjegyzés |

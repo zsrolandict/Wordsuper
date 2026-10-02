@@ -50,3 +50,26 @@ export function parseTrustProxy(raw: string | undefined, onCloudRun: boolean): {
   }
   return { value };
 }
+
+/**
+ * Content Security Policy of the task pane. Its main job is connect-src: the page may only talk to this server,
+ * Microsoft's Office.js host and (for the local dictation model's one-time download) Hugging Face, so even a
+ * compromised dependency could not send the document anywhere else. Scripts stay permissive ('unsafe-eval' for
+ * Office.js, WebAssembly for local dictation, inline for the dev server's React refresh). CSP=off switches it off.
+ */
+export function contentSecurityPolicy(setting: string | undefined): string | null {
+  if (setting?.trim().toLowerCase() === "off") return null;
+  return [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: https://appsforoffice.microsoft.com",
+    "worker-src 'self' blob:",
+    "connect-src 'self' ws://localhost:* wss://localhost:* https://appsforoffice.microsoft.com https://huggingface.co https://*.huggingface.co https://*.hf.co",
+    "img-src 'self' data: blob:",
+    "style-src 'self' 'unsafe-inline'",
+    "font-src 'self' data:",
+    "media-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+  ].join("; ");
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accessKeyProblem, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from './config';
+import { accessKeyProblem, contentSecurityPolicy, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from './config';
 import { mapGeminiFinish } from './ai/gemini';
 
 test('access key: missing, placeholder and short keys are refused, whitespace is ignored', () => {
@@ -44,4 +44,13 @@ test('masking is required unless the operator makes it optional', () => {
   assert.equal(parseMaskingPolicy(''), 'required');
   assert.equal(parseMaskingPolicy('nonsense'), 'required');
   assert.equal(parseMaskingPolicy(' Optional '), 'optional');
+});
+
+test('the task pane may only connect to this server, Office.js and the dictation model host', () => {
+  const policy = contentSecurityPolicy(undefined)!;
+  const connect = policy.split('; ').find(d => d.startsWith('connect-src'))!;
+  assert.match(connect, /'self'/);
+  assert.doesNotMatch(connect, /(^| )(https?:|ws:|wss:|\*)( |$)/, 'no scheme-wide or wildcard source');
+  assert.match(policy, /object-src 'none'/);
+  assert.equal(contentSecurityPolicy(' OFF '), null);
 });
