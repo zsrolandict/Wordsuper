@@ -4,7 +4,7 @@
 
 ## 1. Mi ez és kinek szól
 
-A Word Writer egy **Microsoft Word bővítmény** (Office Add-in). Jogi és üzleti tanácsadóknak, ügyvédeknek készült, akik szerződéseken és hosszú dokumentumokon dolgoznak. A Word jobb oldalán egy munkaablakban fut. Minden változtatást **korrektúrával** (Track Changes) tesz a dokumentumba, a véleményét **Word-megjegyzésként**. Mielőtt bármi bekerül, a felhasználó látja a javaslatot, és ő dönt.
+A Word Writer egy **Microsoft Word bővítmény** (Office Add-in). Jogi és üzleti tanácsadóknak, ügyvédeknek készült, akik szerződéseken és hosszú dokumentumokon dolgoznak. A Word jobb oldalán egy munkaablakban fut. Minden változtatást alapból **korrektúrával** (Track Changes) tesz a dokumentumba, a véleményét **Word-megjegyzésként**. Mielőtt bármi bekerül, a felhasználó látja a javaslatot, és ő dönt.
 
 Alapelvek:
 - **Az ember dönt.** Előnézet, szó szintű különbség, elfogadás, másik változat vagy elvetés, finomítás párbeszédben.
@@ -93,6 +93,12 @@ Szerver (Node.js + Express)
 - **Alapos:** magas gondolkodási szint, és ha be van állítva, erősebb modell (`AI_MODEL_DEEP`).
 - Mély kutatás (Deep Research) szándékosan nincs: az a nyílt weben keres, és a Google 30 napig tárolja hozzá az adatokat.
 
+**Képviselt fél:** a munkaablak tetején („Képviselt fél: Vevő”) megadható, kit képviselünk a dokumentumban.
+- A program a dokumentum feleit felajánlja (pl. „(székhely: …; a továbbiakban: Eladó)” alapján), de bármi beírható.
+- Az AI ennek a félnek a szemszögéből vizsgál, szerkeszt és értékel (Asszisztens és Összevetés), de nem tesz egyoldalúbbá vagy agresszívabbá semmit, mint amit az utasítás kér.
+- Dokumentumonként, ezen a gépen jegyezzük meg; a fájlba nem írjuk bele, így a másik félhez sem jut el. Név (pl. cégnév) esetén a maszkolás erre is vonatkozik.
+- A Részletek panelen látszik, kinek a szemszögéből dolgozott az AI.
+
 **Finomítás:** amíg egy javaslat döntésre vár, az új utasítás azt módosítja („legyen rövidebb”). Az AI az első és a legutóbbi köröket látja, legfeljebb 5-öt.
 
 ### 3.2 Szerkezet fül (AI nélkül, azonnal)
@@ -114,9 +120,16 @@ Szerver (Node.js + Express)
 
 ### 3.3 Összevetés fül
 
-- A felhasználó feltölti a korábbi változatot (.docx). A rendszer bekezdés szinten összeveti a megnyitott dokumentummal, és jelöli, mi módosult, mi új és mi törölt.
-- Az AI változásonként kockázati értékelést és javaslatot ad.
-- Ezek megjegyzésként beszúrhatók a megváltozott bekezdésekhez.
+Két forrásból dolgozik:
+- **A dokumentum korrektúrái:** ha a másik fél korrektúrával küldte vissza a szerződést, a rendszer bekezdésenként összeveti a korrektúrák előtti és utáni szöveget.
+  - Változásonként látszik a szerző; szerzőnként ki lehet hagyni (pl. a saját kollégánk korábbi módosításait), és ezek az AI-hoz sem kerülnek.
+  - Változásonként **Elfogadom a korrektúrát / Elutasítom** gomb, ami a Wordben dönt. Utána a lista újraolvasódik, a többi változás AI-értékelése megmarad. (Szerző és elfogadás: WordApi 1.6, Microsoft 365; régebbi Wordben az elemzés és a megjegyzések működnek.)
+- **Korábbi változat (.docx):** ha korrektúra nélkül módosítottak, a felhasználó feltölti azt, amit ő küldött ki, és a rendszer ahhoz veti össze a megnyitott dokumentumot.
+
+Mindkét esetben:
+- jelöli, mi módosult, mi új és mi törölt;
+- az AI változásonként kockázati értékelést és javaslatot ad, a képviselt fél szemszögéből;
+- ezek megjegyzésként beszúrhatók a megváltozott bekezdésekhez.
 
 ### 3.4 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
 
@@ -133,10 +146,14 @@ Szerver (Node.js + Express)
   - „Mutasd” a javaslatokon (a kijelölés, a beszúrás helye, egész dokumentumnál bekezdésenként), és elfogadás után a Word odaugrik.
   - A „Mutasd” egy már beszúrt javításnál az új szöveget keresi.
   - A Szerkezet fül az asszisztens módosításai után magától frissül.
-- **Minden korrektúrával kerül be**, a generált szöveg is.
+- **Alapból minden korrektúrával kerül be**, a generált szöveg is.
+  - A Beállításokban bekapcsolható a **korrektúra nélküli beírás** (saját első tervezethez). Ekkor a Word saját „Változások követése” beállítása dönt, és a munkaablakban végig látszik egy figyelmeztető sáv „Kikapcsolom” gombbal.
+  - Biztonsági szabály: ha a dokumentumban el nem fogadott korrektúra van (tárgyalt szöveg), a program a beállítás ellenére korrektúrával ír, és ezt meg is mondja. Így semmi nem kerülhet be észrevétlenül egy a másik félnek szánt szövegbe.
+  - Korrektúra nélküli beírásnál nincs „Visszavonom” gomb (nincs mit elutasítani); a Word Ctrl+Z-je működik.
 - **Visszavonom:**
   - Elutasítja a javaslat korrektúráit, és törli a megjegyzéseit. Csak azokat, amelyeket ő szúrt be; a korábbi saját korrektúráidhoz nem nyúl.
   - Az utolsó 10 beszúrásnál érhető el, és WordApi 1.6 kell hozzá (Microsoft 365).
+- **Újratöltés:** a Beállítások alján „Bővítmény újratöltése” gomb (ha a bővítmény nem válaszol). Ha a szerveren újabb verzió fut, mint amivel a munkaablak betöltődött, egy sáv felajánlja az újratöltést. Ha van folyamatban lévő beszélgetés, előtte rákérdez.
 - **Kérdez, mielőtt nagyot lépne:**
   - Kijelölés nélkül egy hosszabb dokumentum teljes átírása előtt megerősítést kér, és a beszélgetésben „egész dokumentum” jelölés látszik.
   - A diktálás letöltés vagy átírás közben megszakítható.

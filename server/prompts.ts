@@ -2,6 +2,7 @@ import {
   ADDRESSING_VALUES,
   MAX_HISTORY_RESULT_CHARS,
   MAX_INSTRUCTION_CHARS,
+  MAX_PARTY_CHARS,
   MAX_REVIEW_FINDINGS,
   MAX_SELECTION_CHARS,
   MAX_STYLE_NOTES_CHARS,
@@ -70,7 +71,9 @@ export function parseRequest(body: unknown): ParseResult {
     notes: asString(rawStyle.notes).trim().substring(0, MAX_STYLE_NOTES_CHARS),
   };
 
-  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
+  const party = asString(raw.party).replace(/\s+/g, " ").trim().substring(0, MAX_PARTY_CHARS);
+
+  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, ...(party ? { party } : {}), masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
 }
 
 // Standard JSON Schema, so any provider that supports structured output can use it
@@ -141,6 +144,17 @@ function styleInstructions(style: StyleProfile | undefined): string {
   return lines.length ? `\n\nUSER STYLE PREFERENCES (follow them unless the instruction explicitly says otherwise):\n${lines.join("\n")}` : "";
 }
 
+/** Whose side the AI is on; neutral when no party is set */
+function partyInstructions(party: string | undefined, mode: AIRequestBody["mode"]): string {
+  if (!party) return "";
+  const judge = mode === "review" || mode === "compare"
+    ? "- Judge risks and priorities from this party's point of view: what disadvantages, exposes or burdens it comes first; say plainly when a change or clause works against it."
+    : "- Draft and comment from this party's point of view: protect its interests and avoid wording that weakens its position.";
+  return `\n\nTHE USER REPRESENTS THIS PARTY: ${party}
+${judge}
+- Stay fair and enforceable: do not make the text aggressive or one-sided beyond what the instruction asks, and never misstate the other side's rights or obligations.`;
+}
+
 function historyBlock(history: HistoryTurn[] | undefined): string {
   if (!history?.length) return "";
   const rounds = history
@@ -165,7 +179,7 @@ export function buildPrompt(request: AIRequestBody): BuiltPrompt {
   // Long documents arrive as excerpts (beginning, headings, surroundings of the selection) marked with === headers
   const contextBlock = (purpose: string) =>
     documentContext ? `DOCUMENT CONTEXT (${purpose}; long documents are sent as excerpts marked with === headers):\n${documentContext}\n\n` : "";
-  const style = styleInstructions(styleProfile) + (request.masked ? MASKING_NOTE : "");
+  const style = styleInstructions(styleProfile) + partyInstructions(request.party, mode) + (request.masked ? MASKING_NOTE : "");
   const whole = request.wholeDocument === true;
 
   // Structural rules live in the system instruction (helps against prompt injection from document text)

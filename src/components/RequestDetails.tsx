@@ -26,6 +26,8 @@ export interface RequestDetailsData {
   wholeDocument?: boolean;
   /** How hard the model was asked to think */
   depth?: 'auto' | 'fast' | 'deep';
+  /** The represented party the AI worked for; empty: neutral */
+  party?: string;
   /** What was hidden from the AI; null: masking was off */
   masking?: MaskingInfo | null;
 }
@@ -159,7 +161,7 @@ export default function RequestDetails({ details, isLoading, onNeverHide }: {
   onNeverHide?: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth } = details;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth, party } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -182,6 +184,7 @@ export default function RequestDetails({ details, isLoading, onNeverHide }: {
               </p>
             )}
             {styleSummary && <p className="mt-1">Stílusprofil: {styleSummary}.</p>}
+            <p className="mt-1">Képviselt fél: {party ? <strong>{party}</strong> : 'nincs megadva, semleges szemszögből'}.</p>
           </Section>
 
           {mode === 'generate' ? (

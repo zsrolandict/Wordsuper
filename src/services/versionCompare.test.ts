@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
-import { compareVersions, formatChangesForAI, parseCompareResult, similarity } from './versionCompare';
+import { carryOver, compareVersions, formatChangesForAI, parseCompareResult, similarity } from './versionCompare';
 import { paragraphsFromDocumentXml, readDocxParagraphs } from './docxText';
 
 /** Minimal zip writer for tests (CRCs are not checked by the reader) */
@@ -82,6 +82,28 @@ test('compareVersions finds modified, added and removed paragraphs in order', ()
     [3, 'removed', 4],
   ]);
   assert.equal(changes[0].oldText, before[1]);
+  // Where each was in the earlier version
+  assert.deepEqual(changes.map(c => c.oldParagraph), [1, undefined, 2]);
+});
+
+test('tracked changes: original and current text of the same Word paragraphs', () => {
+  // A paragraph deleted with Track Changes is still a Word paragraph, empty when read with the changes accepted
+  const original = ['Cím', 'A díj 100 000 Ft.', 'Kötbér nincs.', '', 'Zárás.'];
+  const current = ['Cím', 'A díj 120 000 Ft.', '', 'Új titoktartási pont.', 'Zárás.'];
+  const changes = compareVersions(original, current);
+  // The removed paragraph still knows its Word paragraph (2), so its tracked deletion can be found there
+  assert.deepEqual(changes.map(c => [c.type, c.paragraph, c.oldParagraph]), [
+    ['modified', 1, 1],
+    ['added', 3, undefined],
+    ['removed', 4, 2],
+  ]);
+});
+
+test('a fresh comparison keeps what was decided about the changes still there', () => {
+  const before = compareVersions(['a b c', 'd e f', 'g h i'], ['a b X', 'd e Y', 'g h i']);
+  const after = compareVersions(['a b c', 'd e f', 'g h i'], ['a b c', 'd e Y', 'g h i']);
+  const kept = carryOver(before, after, new Map([[1, 'első'], [2, 'második']]));
+  assert.deepEqual([...kept], [[1, 'második']]);
 });
 
 test('compareVersions: removal at the end anchors to the last paragraph; identical versions have no changes', () => {

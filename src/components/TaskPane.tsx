@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
-import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
+import { AIRequestError, describeRequestError, fetchServerInfo, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
   applyDocumentEdit,
@@ -24,7 +24,9 @@ import {
   showRange,
   jumpToParagraph,
   takeSnapshot,
+  setSkipTrackedChanges,
   type DocumentSnapshot,
+  type WriteMode,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
 import { applyChosenHunks, composeDocument, planDocumentEdits } from '../services/documentEdit';
@@ -38,11 +40,13 @@ import { useDocumentStats } from '../services/useDocumentStats';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import Proposal, { type FindingView, type ProposalState } from './Proposal';
 import LimitsBar from './LimitsBar';
-import SettingsPanel from './SettingsPanel';
+import SettingsPanel, { isOtherVersion } from './SettingsPanel';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
 import DictationButton from './DictationButton';
 import Logo from './Logo';
+import PartyBar from './PartyBar';
+import { loadParty, saveParty } from '../services/parties';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, looksLikeReview, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 
 interface Message {
@@ -144,6 +148,21 @@ const DEPTH_LABELS: Record<Depth, { label: string; title: string }> = {
   deep: { label: '🧠 Alapos', title: 'Mélyebb gondolkodás (lassabb, drágább): bonyolult átírásokhoz, átvizsgáláshoz' },
 };
 
+/** "korrektúrával" or not, as the change really went in */
+const how = (write?: WriteMode) => (write && !write.tracked ? 'korrektúra nélkül' : 'korrektúrával');
+
+/** Said when the "without Track Changes" setting had to give way, and when there is no Visszavonom */
+function writeNote(writes: (WriteMode | undefined)[]): string {
+  if (writes.some(w => w?.forced)) {
+    return ' A dokumentumban el nem fogadott korrektúrák vannak (pl. a másik fél módosításai), ezért a beállításod ellenére korrektúrával írtam be.';
+  }
+  if (writes.some(w => w && !w.tracked)) return ' Visszavonás: Ctrl+Z a Wordben.';
+  return '';
+}
+
+/** The open document's path: the represented party is remembered for it ('' for a new, unsaved document) */
+const documentUrl = () => (typeof Office !== 'undefined' ? Office.context?.document?.url ?? '' : '');
+
 const newMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 export default function TaskPane() {
@@ -155,6 +174,12 @@ export default function TaskPane() {
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [tab, setTab] = useState<Tab>('assistant');
   const [settings, updateSettings] = useSettings();
+  // Whose side we are on in this document; remembered on this machine, never written into the file
+  const [party, setPartyState] = useState(() => loadParty(documentUrl()));
+  const setParty = (value: string) => {
+    setPartyState(value);
+    saveParty(documentUrl(), value);
+  };
   const [rateLimit, setRateLimit] = useState<RateLimitInfo | null>(null);
   const [pending, setPendingState] = useState<PendingProposal | null>(null);
   const [dismissedReviewHint, setDismissedReviewHint] = useState<string | null>(null);
@@ -169,6 +194,8 @@ export default function TaskPane() {
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const stats = useDocumentStats(documentVersion);
+  // Every writer in the Word layer follows the "without Track Changes" setting
+  setSkipTrackedChanges(settings.skipTrackedChanges);
   // Egyszerre csak egy művelet futhat (küldés, beszúrás, elvetés, Főmenü). A ref szinkron zár, így két gyors
   // kattintásból sem indul két művelet; az isBusy pedig letiltja a gombokat.
   const busyRef = useRef(false);
@@ -196,6 +223,35 @@ export default function TaskPane() {
     // Instant, not smooth: a smooth scroll fires scroll events on its way and would stop following
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, lastMessage?.content, lastMessage?.isLoading]);
+
+  // A newer version on the server (after an update): offer a reload instead of running old code
+  const [newVersion, setNewVersion] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    const check = () => fetchServerInfo(settings.accessKey).then(info => {
+      if (!stopped && info && isOtherVersion(info.version)) setNewVersion(true);
+    });
+    check();
+    const timer = setInterval(check, 5 * 60_000);
+    window.addEventListener('focus', check);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+      window.removeEventListener('focus', check);
+    };
+  }, []);
+
+  /** Loads the add-in again: the conversation is lost, the document is not touched */
+  const reloadPane = (confirmed = false) => {
+    if (!confirmed && (messagesRef.current.length > 1 || pendingRef.current)) {
+      setConfirmation({
+        text: 'Újratöltéskor a beszélgetés, a döntésre váró javaslat és a Visszavonom gombok elvesznek. A dokumentum nem változik.',
+        choices: [{ label: 'Újratöltés', primary: true, run: () => reloadPane(true) }],
+      });
+      return;
+    }
+    window.location.reload();
+  };
 
   const setPending = (next: PendingProposal | null) => {
     pendingRef.current = next;
@@ -410,6 +466,7 @@ export default function TaskPane() {
         styleProfile: settings.styleProfile,
         wholeDocument: !!snapshot.wholeDocument,
         depth: settings.depth,
+        ...(party ? { party } : {}),
       };
       // Names and identifiers are replaced by placeholders before the request leaves the machine
       const masker = refining
@@ -437,6 +494,7 @@ export default function TaskPane() {
           startedAt,
           wholeDocument: !!snapshot.wholeDocument,
           depth: settings.depth,
+          party,
           masking: masker ? { summary: masker.summary(), entries: masker.entries() } : null,
         },
       }]);
@@ -591,6 +649,7 @@ export default function TaskPane() {
       let status: string;
       let structureNote = '';
       let updatedFindings = findingViews;
+      let write: WriteMode | undefined;
       const range = current.snapshot.range;
 
       const editBefore = current.mode === 'edit' || current.mode === 'generate' ? await structureIssues() : null;
@@ -600,26 +659,28 @@ export default function TaskPane() {
         const whole = current.snapshot.wholeDocument;
         const text = excluded.size ? composeDocument(whole.reviewed, planDocumentEdits(whole.reviewed, current.result), excluded) : current.result;
         const outcome = await applyDocumentEdit(whole, text, explanation, undo);
+        write = outcome.write;
         const parts = [
           outcome.changed && `${outcome.changed} bekezdést módosítottam`,
           outcome.inserted && `${outcome.inserted} új bekezdést szúrtam be`,
           outcome.deleted && `${outcome.deleted} bekezdést töröltem`,
         ].filter(Boolean);
         status = parts.length
-          ? `✅ Az egész dokumentumon: ${parts.join(', ')}, korrektúrával. A többi bekezdéshez nem nyúltam.`
+          ? `✅ Az egész dokumentumon: ${parts.join(', ')}, ${how(write)}. A többi bekezdéshez nem nyúltam.`
           : '✅ A javaslat megegyezik a dokumentummal, nem kellett semmit módosítani.';
       } else if (current.mode === 'edit') {
         const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation, undo);
+        write = outcome.strategy === 'unchanged' ? undefined : outcome.write;
         status = outcome.pendingChanges
-          ? '✅ A kijelölést kicseréltem, korrektúrával. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).'
+          ? `✅ A kijelölést kicseréltem, ${how(write)}. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).`
           : outcome.strategy === 'words'
-          ? `✅ ${outcome.changedPlaces} helyen módosítottam, korrektúrával. A változatlan szöveg formázása érintetlen maradt.`
+          ? `✅ ${outcome.changedPlaces} helyen módosítottam, ${how(write)}. A változatlan szöveg formázása érintetlen maradt.`
           : outcome.strategy === 'unchanged'
           ? '✅ A javaslat megegyezik az eredetivel, nem kellett semmit módosítani.'
-          : '✅ A kijelölést kicseréltem, korrektúrával. Mivel a bekezdések száma megváltozott (vagy a kijelölés bekezdés közepén kezdődik), itt a formázás egyszerűsödhetett.';
+          : `✅ A kijelölést kicseréltem, ${how(write)}. Mivel a bekezdések száma megváltozott (vagy a kijelölés bekezdés közepén kezdődik), itt a formázás egyszerűsödhetett.`;
       } else if (current.mode === 'generate') {
-        await insertGenerated(range!, current.result, undo);
-        status = '✅ A szöveget beszúrtam a dokumentumba!';
+        write = await insertGenerated(range!, current.result, undo);
+        status = `✅ A szöveget beszúrtam a dokumentumba, ${how(write)}.`;
       } else if (current.mode === 'comment') {
         await insertCommentAt(range!, current.result, undo);
         status = current.snapshot.wholeDocument
@@ -629,6 +690,7 @@ export default function TaskPane() {
         const chosen = (findingViews ?? []).filter(f => !f.done && (f.selected || f.fix));
         const before = await structureIssues();
         const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })), { undo });
+        write = outcome.write;
         structureNote = newIssuesNote(before, await structureIssues());
         updatedFindings = findingViews?.map(f => (f.done ? f : {
           ...f,
@@ -638,7 +700,7 @@ export default function TaskPane() {
         }));
         const done = [
           outcome.comments && `${outcome.comments} megjegyzést beszúrtam`,
-          outcome.fixes && `${outcome.fixes} javítást beírtam korrektúrával`,
+          outcome.fixes && `${outcome.fixes} javítást beírtam ${how(write)}`,
         ].filter(Boolean);
         const missed = outcome.notFound.length + outcome.fixFailed.length;
         status = `✅ ${done.length ? done.join(', ') : 'Nem került be semmi'}.` +
@@ -647,13 +709,17 @@ export default function TaskPane() {
 
       if (explanation) status += ' Az indoklást megjegyzésként mellé tettem.';
       if (editBefore) status += newIssuesNote(editBefore, await structureIssues());
-      status += markupHint();
+      status += writeNote([write]);
+      if (!write || write.tracked) status += markupHint();
+      // Without Track Changes there is nothing to reject: "Visszavonom" would only take back the comments
+      const keepUndo = undo && undo.ranges.length && (!write || write.tracked);
+      if (undo && !keepUndo) releaseUndo([undo]);
       setPending(null);
       updateMessage(messageId, m => ({
         ...m,
         proposal: m.proposal && { ...m.proposal, state: 'applied', findings: updatedFindings },
         status: { text: status, tone: 'success' },
-        undo: undo?.ranges.length ? [...(m.undo ?? []), undo] : m.undo,
+        undo: keepUndo ? [...(m.undo ?? []), undo] : m.undo,
       }));
       setDocumentVersion(v => v + 1);
     } catch (writeError) {
@@ -746,12 +812,15 @@ export default function TaskPane() {
       const note = newIssuesNote(before, await structureIssues());
       const updated: FindingView = { ...finding, done: 'applied', notFound: outcome.notFound.length > 0, fixFailed: outcome.fixFailed.length > 0 };
       const next = findings.map((f, i) => (i === index ? updated : f));
-      const done = [outcome.comments && 'megjegyzés', outcome.fixes && 'javítás korrektúrával'].filter(Boolean).join(' és ');
+      const done = [outcome.comments && 'megjegyzés', outcome.fixes && `javítás ${how(outcome.write)}`].filter(Boolean).join(' és ');
+      const tracked = !outcome.write || outcome.write.tracked;
+      const keepUndo = undo && undo.ranges.length && tracked;
+      if (undo && !keepUndo) releaseUndo([undo]);
       updateMessage(messageId, m => ({
         ...m,
         proposal: m.proposal && { ...m.proposal, findings: next },
-        status: { text: done ? `✅ Beszúrva: ${done}.${note}${markupHint()}` : '⚠️ Ezt nem tudtam beszúrni, lásd fent.', tone: done && !note ? 'success' : 'neutral' },
-        undo: undo?.ranges.length ? [...(m.undo ?? []), undo] : m.undo,
+        status: { text: done ? `✅ Beszúrva: ${done}.${note}${writeNote([outcome.write])}${tracked ? markupHint() : ''}` : '⚠️ Ezt nem tudtam beszúrni, lásd fent.', tone: done && !note ? 'success' : 'neutral' },
+        undo: keepUndo ? [...(m.undo ?? []), undo] : m.undo,
       }));
       setDocumentVersion(v => v + 1);
       finishIfAllDecided(messageId, next);
@@ -825,7 +894,7 @@ export default function TaskPane() {
       {/* Settings open as a layer above, so the panels below keep their state */}
       {view === 'settings' && (
         <div className="fixed inset-0 z-30">
-          <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} onRateLimit={setRateLimit} />
+          <SettingsPanel settings={settings} onChange={updateSettings} onClose={() => setView('chat')} currentMode={mode} onRateLimit={setRateLimit} onReload={() => reloadPane()} />
         </div>
       )}
 
@@ -897,12 +966,22 @@ export default function TaskPane() {
         ))}
       </div>
 
+      {newVersion && (
+        <div className="flex items-center justify-between bg-amber-50 border-b border-amber-200 px-3 py-1.5 text-[11px] text-amber-900 shrink-0">
+          <span>Új verzió fut a szerveren. Töltsd újra a bővítményt, hogy azt használd.</span>
+          <button onClick={() => reloadPane()} className="ml-2 font-semibold underline shrink-0">Újratöltés</button>
+        </div>
+      )}
+
+      {tab !== 'structure' && <PartyBar party={party} onChange={setParty} />}
+
       <div className={tab === 'structure' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <StructurePanel active={tab === 'structure'} busy={isBusy} documentVersion={documentVersion} onRequest={runStructureRequest} />
       </div>
       <div className={tab === 'compare' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <ComparePanel
           settings={settings}
+          party={party}
           onRateLimit={setRateLimit}
           onOpenSettings={() => setView('settings')}
           onNeverHide={value => updateSettings(s => ({ ...s, masking: { ...s.masking, neverHide: [s.masking.neverHide.trim(), value].filter(Boolean).join('\n') } }))}
@@ -1037,6 +1116,13 @@ export default function TaskPane() {
         )}
 
         <LimitsBar mode={mode} stats={stats} rateLimit={rateLimit} />
+
+        {settings.skipTrackedChanges && (
+          <div className="mb-2 flex items-center justify-between text-[11px] text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+            <span>✎ Korrektúra nélküli beírás bekapcsolva (ahol nincs el nem fogadott korrektúra).</span>
+            <button onClick={() => updateSettings(s => ({ ...s, skipTrackedChanges: false }))} className="underline ml-2 shrink-0">Kikapcsolom</button>
+          </div>
+        )}
 
         {/* Mode Toggle */}
         <div className="grid grid-cols-4 gap-1 mb-3 bg-neutral-100 p-1 rounded-lg w-full">

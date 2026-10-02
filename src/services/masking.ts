@@ -170,6 +170,8 @@ export function maskRequest(request: AIRequestBody, masker: Masker): AIRequestBo
     documentContext: masker.mask(request.documentContext),
     history: request.history?.map(turn => ({ instruction: masker.mask(turn.instruction), result: masker.mask(turn.result) })),
     styleProfile: request.styleProfile && { ...request.styleProfile, notes: masker.mask(request.styleProfile.notes) },
+    // A party given by name ("ABC Kft.") gets the same placeholder as in the text
+    party: request.party && masker.mask(request.party),
     masked: true,
     // Only the count; the server's audit log never sees the values
     get maskedValues() { return masker.count; },

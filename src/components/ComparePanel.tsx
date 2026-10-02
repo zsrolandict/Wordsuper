@@ -1,10 +1,10 @@
 import React, { useRef, useState } from 'react';
-import { FileUp, Loader2, Sparkles, Square, MessageSquarePlus, AlertTriangle, KeyRound } from 'lucide-react';
+import { FileUp, Loader2, Sparkles, Square, MessageSquarePlus, AlertTriangle, KeyRound, FileDiff, Check, X } from 'lucide-react';
 import { MAX_COMPARE_CHARS, MAX_INSTRUCTION_CHARS } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import { readDocxParagraphs } from '../services/docxText';
-import { compareVersions, formatChangesForAI, parseCompareResult, type ChangeAssessment, type VersionChange } from '../services/versionCompare';
-import { UserFacingError, insertCommentsAtParagraphs, jumpToParagraph, readParagraphs } from '../services/wordDocument';
+import { carryOver, compareVersions, formatChangesForAI, parseCompareResult, type ChangeAssessment, type VersionChange } from '../services/versionCompare';
+import { UserFacingError, canResolveRevisions, insertCommentsAtParagraphs, jumpToParagraph, readParagraphs, readRevisions, resolveRevisions } from '../services/wordDocument';
 import { SEVERITY_LABELS } from '../services/review';
 import { describeStyle, type Settings } from '../services/settings';
 import { formatNumber } from '../services/format';
@@ -15,11 +15,31 @@ import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import { DEFAULT_PRESETS, PLACEHOLDERS } from './modes';
 
 interface Comparison {
+  /** file: an uploaded earlier version; tracked: the document's own pending tracked changes */
+  source: 'file' | 'tracked';
   fileName: string;
   changes: VersionChange[];
-  /** Texts of the current document's paragraphs when the comparison was made */
+  /** Texts of the current document's paragraphs when the comparison was made, as Word reports them */
   currentTexts: string[];
+  /** Tracked changes: who made them, per Word paragraph; null when unknown */
+  authors: Map<number, string[]> | null;
 }
+
+/**
+ * The Word paragraphs a change is about. For tracked changes both versions are the same Word paragraphs, so a
+ * removed paragraph is still there (struck through) at its old index.
+ */
+function paragraphsOf(comparison: Comparison, change: VersionChange): number[] {
+  if (comparison.source === 'file') return [change.paragraph];
+  const indices = change.type === 'removed' ? [change.oldParagraph] : change.type === 'added' ? [change.paragraph] : [change.paragraph, change.oldParagraph];
+  return [...new Set(indices.filter((i): i is number => i !== undefined))];
+}
+
+/** Where a change's comment goes and where "Ugrás" jumps */
+const anchorOf = (comparison: Comparison, change: VersionChange) => paragraphsOf(comparison, change)[0] ?? change.paragraph;
+
+const authorsOf = (comparison: Comparison, change: VersionChange) =>
+  comparison.authors ? [...new Set(paragraphsOf(comparison, change).flatMap(i => comparison.authors!.get(i) ?? []))] : [];
 
 interface Analysis {
   running: boolean;
@@ -51,11 +71,14 @@ function commentFor(change: VersionChange, assessment: ChangeAssessment): string
  */
 export default function ComparePanel({
   settings,
+  party,
   onRateLimit,
   onOpenSettings,
   onNeverHide,
 }: {
   settings: Settings;
+  /** The represented party: the changes are judged from its point of view */
+  party: string;
   /** A masked value the user wants the AI to see from now on */
   onNeverHide?: (value: string) => void;
   onRateLimit: (info: RateLimitInfo) => void;
@@ -71,8 +94,16 @@ export default function ComparePanel({
   const [inserted, setInserted] = useState<Map<number, 'inserted' | 'skipped'>>(new Map());
   const [inserting, setInserting] = useState(false);
   const [insertStatus, setInsertStatus] = useState<string | null>(null);
+  /** Tracked changes of these authors are left out of the list and of the analysis */
+  const [hiddenAuthors, setHiddenAuthors] = useState<Set<string>>(new Set());
+  const [resolving, setResolving] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  // Changes left out because all their authors are hidden (e.g. our own earlier edits)
+  const visibleChanges = (comparison?.changes ?? []).filter(c => {
+    const authors = comparison ? authorsOf(comparison, c) : [];
+    return !authors.length || authors.some(a => !hiddenAuthors.has(a));
+  });
 
   const loadEarlierVersion = async (file: File) => {
     setLoading(true);
@@ -83,7 +114,7 @@ export default function ComparePanel({
     try {
       const earlier = await readDocxParagraphs(await file.arrayBuffer());
       const current = (await readParagraphs()).map(p => p.text);
-      setComparison({ fileName: file.name, changes: compareVersions(earlier, current), currentTexts: current });
+      setComparison({ source: 'file', fileName: file.name, changes: compareVersions(earlier, current), currentTexts: current, authors: null });
     } catch (e) {
       console.error(e);
       setComparison(null);
@@ -94,10 +125,67 @@ export default function ComparePanel({
     }
   };
 
+  /**
+   * Reads the document's pending tracked changes. A fresh read of the same document (after accepting or rejecting
+   * one) keeps the analysis and the decisions of the changes still there.
+   */
+  const loadTrackedChanges = async (keep: Comparison | null = null) => {
+    setLoading(true);
+    setError(null);
+    if (!keep) {
+      setAnalysis(null);
+      setInserted(new Map());
+      setInsertStatus(null);
+      setHiddenAuthors(new Set());
+    }
+    try {
+      const revisions = await readRevisions();
+      const next: Comparison = {
+        source: 'tracked',
+        fileName: 'A dokumentum korrektúrái',
+        changes: compareVersions(revisions.original, revisions.current),
+        currentTexts: revisions.raw,
+        authors: revisions.authors,
+      };
+      if (keep) {
+        setAnalysis(a => a && (a.assessments ? { ...a, assessments: carryOver(keep.changes, next.changes, a.assessments) } : a));
+        setSelected(s => new Set(carryOver(keep.changes, next.changes, new Map([...s].map(id => [id, true]))).keys()));
+        setInserted(m => carryOver(keep.changes, next.changes, m));
+      }
+      setComparison(next);
+    } catch (e) {
+      console.error(e);
+      if (!keep) setComparison(null);
+      setError('Nem sikerült beolvasni a dokumentum korrektúráit.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /** Accepts or rejects a change's tracked changes in Word, then reads the list again */
+  const resolve = async (change: VersionChange, action: 'accept' | 'reject') => {
+    if (!comparison || comparison.source !== 'tracked') return;
+    setResolving(true);
+    setInsertStatus(null);
+    try {
+      const items = paragraphsOf(comparison, change).map(paragraph => ({ paragraph, expectedText: comparison.currentTexts[paragraph] ?? '' }));
+      const { resolved, skipped } = await resolveRevisions(items, action);
+      await loadTrackedChanges(comparison);
+      setInsertStatus(skipped
+        ? 'Ez a bekezdés azóta megváltozott, ezért nem nyúltam hozzá. Frissítettem a listát, próbáld újra.'
+        : `✅ ${action === 'accept' ? 'Elfogadtam' : 'Elutasítottam'}: ${resolved} korrektúra (#${change.id}).`);
+    } catch (e) {
+      console.error(e);
+      setInsertStatus('Nem sikerült. Esetleg írásvédett a dokumentum? A Wordben a Véleményezés lapon is megteheted.');
+    } finally {
+      setResolving(false);
+    }
+  };
+
   const analyze = async (text: string) => {
     const userInstruction = text.trim();
     if (!comparison || !userInstruction || analysis?.running) return;
-    const { text: changeList, included } = formatChangesForAI(comparison.changes, MAX_COMPARE_CHARS);
+    const { text: changeList, included } = formatChangesForAI(visibleChanges, MAX_COMPARE_CHARS);
     const startedAt = Date.now();
     const details: RequestDetailsData = {
       mode: 'compare',
@@ -107,19 +195,20 @@ export default function ComparePanel({
         documentChars: comparison.currentTexts.join('\n').length,
         sentChars: changeList.length,
         limit: MAX_COMPARE_CHARS,
-        strategy: included < comparison.changes.length ? 'truncated' : 'full',
+        strategy: included < visibleChanges.length ? 'truncated' : 'full',
         includedItems: included,
-        totalItems: comparison.changes.length,
+        totalItems: visibleChanges.length,
       },
       historyRounds: 0,
       totalRounds: 0,
       styleSummary: describeStyle(settings.styleProfile),
       thoughts: '',
       startedAt,
+      party,
     };
     if (settings.sound) primeSound();
     const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
-    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth };
+    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth, ...(party ? { party } : {}) };
     const sentRequest = masker ? maskRequest(request, masker) : request;
     const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
     details.masking = masker ? { summary: masker.summary(), entries: masker.entries() } : null;
@@ -147,7 +236,7 @@ export default function ComparePanel({
         },
         { accessKey: settings.accessKey, userId: settings.userId, signal: controller.signal }
       );
-      const parsed = parseCompareResult(result, new Set(comparison.changes.map(c => c.id)));
+      const parsed = parseCompareResult(result, new Set(visibleChanges.map(c => c.id)));
       if (!parsed) throw new Error('Az elemzés eredményét nem tudtam értelmezni.');
       // Parsed with the placeholders in it, then each text is unmasked
       const assessments = new Map([...parsed.assessments].map(([id, a]) => [id, { ...a, summary: unmask(a.summary), recommendation: unmask(a.recommendation) }]));
@@ -171,14 +260,15 @@ export default function ComparePanel({
   const insertComments = async (only?: number[]) => {
     if (!comparison || !analysis?.assessments) return;
     const wanted = only ? new Set(only) : selected;
-    const chosen = comparison.changes.filter(c => wanted.has(c.id) && analysis.assessments!.has(c.id) && !inserted.has(c.id));
+    // Changes hidden by the author filter are left out too
+    const chosen = visibleChanges.filter(c => wanted.has(c.id) && analysis.assessments!.has(c.id) && !inserted.has(c.id));
     if (!chosen.length) return;
     setInserting(true);
     setInsertStatus(null);
     try {
       const outcome = await insertCommentsAtParagraphs(chosen.map(c => ({
-        paragraph: c.paragraph,
-        expectedText: comparison.currentTexts[c.paragraph] ?? '',
+        paragraph: anchorOf(comparison, c),
+        expectedText: comparison.currentTexts[anchorOf(comparison, c)] ?? '',
         comment: commentFor(c, analysis.assessments!.get(c.id)!),
       })));
       setInserted(previous => {
@@ -187,7 +277,7 @@ export default function ComparePanel({
         return next;
       });
       // One by one: show where it went
-      if (only?.length === 1 && outcome.inserted === 1) await jumpToParagraph(chosen[0].paragraph, false).catch(() => {});
+      if (only?.length === 1 && outcome.inserted === 1) await jumpToParagraph(anchorOf(comparison, chosen[0]), false).catch(() => {});
       setInsertStatus(`✅ ${outcome.inserted} megjegyzést beszúrtam.` +
         (outcome.skipped.length ? ` ${outcome.skipped.length} bekezdés azóta megváltozott, ezeket kihagytam – futtasd újra az összevetést.` : ''));
     } catch (e) {
@@ -210,14 +300,17 @@ export default function ComparePanel({
     return <p className="p-4 text-sm text-neutral-500">Az Összevetés nézet csak Wordben működik.</p>;
   }
 
-  const changes = comparison?.changes ?? [];
+  const changes = visibleChanges;
   const counts = { modified: 0, added: 0, removed: 0 };
   changes.forEach(c => counts[c.type]++);
   const fullListChars = comparison ? formatChangesForAI(changes, Number.MAX_SAFE_INTEGER).text.length : 0;
   const fitting = comparison ? formatChangesForAI(changes, MAX_COMPARE_CHARS).included : 0;
-  const busy = loading || inserting || !!analysis?.running;
+  const busy = loading || inserting || resolving || !!analysis?.running;
+  const tracked = comparison?.source === 'tracked';
+  const allAuthors = comparison?.authors ? [...new Set([...comparison.authors.values()].flat())].sort((a, b) => a.localeCompare(b, 'hu')) : [];
+  const hiddenCount = (comparison?.changes.length ?? 0) - changes.length;
   // The batch button only covers ticked changes whose comment is not in the document yet
-  const toInsert = [...selected].filter(id => analysis?.assessments?.has(id) && !inserted.has(id)).length;
+  const toInsert = changes.filter(c => selected.has(c.id) && analysis?.assessments?.has(c.id) && !inserted.has(c.id)).length;
   // A saved quick button sends its instruction; the button shows its label
   const presets = [
     ...DEFAULT_PRESETS.compare.map(label => ({ label, instruction: label })),
@@ -228,23 +321,62 @@ export default function ComparePanel({
     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-sm">
       <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2">
         <p className="text-xs text-neutral-600">
-          Töltsd fel a <strong>korábbi</strong> változatot (pl. amit a partnernek küldtél). A megnyitott dokumentumot hasonlítom hozzá, így látszik, mit módosítottak.
+          Mit módosított a másik fél? Ha <strong>korrektúrával</strong> küldte vissza, a dokumentum korrektúráit vizsgálom.
+          Ha korrektúra nélkül, töltsd fel a <strong>korábbi</strong> változatot (amit neki küldtél), és ahhoz hasonlítom.
         </p>
         <input ref={fileInput} type="file" accept=".docx" className="hidden" onChange={e => e.target.files?.[0] && loadEarlierVersion(e.target.files[0])} />
         <button
-          onClick={() => fileInput.current?.click()}
+          onClick={() => loadTrackedChanges()}
           disabled={busy}
           className="w-full flex items-center justify-center py-2 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
         >
-          {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileUp className="w-4 h-4 mr-1" />}
-          {comparison ? 'Másik korábbi változat…' : 'Korábbi változat feltöltése (.docx)'}
+          {loading ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <FileDiff className="w-4 h-4 mr-1" />}
+          {tracked ? 'Korrektúrák újraolvasása' : 'A dokumentum korrektúráinak átvizsgálása'}
+        </button>
+        <button
+          onClick={() => fileInput.current?.click()}
+          disabled={busy}
+          className="w-full flex items-center justify-center py-2 text-xs font-medium border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-50 rounded-lg"
+        >
+          <FileUp className="w-4 h-4 mr-1" />
+          {comparison?.source === 'file' ? 'Másik korábbi változat…' : 'Korábbi változat feltöltése (.docx)'}
         </button>
         {comparison && (
           <p className="text-xs text-neutral-700">
-            <strong>{comparison.fileName}</strong> → megnyitott dokumentum: {changes.length === 0
-              ? 'nincs tartalmi eltérés.'
+            {tracked ? <><strong>El nem fogadott korrektúrák</strong>: </> : <><strong>{comparison.fileName}</strong> → megnyitott dokumentum: </>}
+            {changes.length === 0
+              ? (tracked
+                ? (hiddenCount ? 'a kiválasztott szerzőktől nincs.' : 'nincs (szövegváltozás). Ha a másik fél korrektúra nélkül módosított, töltsd fel a korábbi változatot.')
+                : 'nincs tartalmi eltérés.')
               : `${formatNumber(changes.length)} változás (${counts.modified} módosult, ${counts.added} új, ${counts.removed} törölt bekezdés).`}
+            {hiddenCount > 0 && ` ${formatNumber(hiddenCount)} elrejtve a szerzője miatt.`}
           </p>
+        )}
+        {tracked && allAuthors.length > 0 && (
+          <div className="text-xs">
+            <p className="text-neutral-500">Szerzők{allAuthors.length > 1 ? ' (akiét nem kéred, vedd ki)' : ''}:</p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-0.5">
+              {allAuthors.map(author => (
+                <label key={author} className="flex items-center space-x-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!hiddenAuthors.has(author)}
+                    disabled={busy}
+                    onChange={() => setHiddenAuthors(h => {
+                      const next = new Set(h);
+                      if (next.has(author)) next.delete(author);
+                      else next.add(author);
+                      return next;
+                    })}
+                  />
+                  <span>{author}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+        {tracked && !canResolveRevisions() && changes.length > 0 && (
+          <p className="text-[11px] text-neutral-500">Ebben a Word-változatban a korrektúrák szerzőjét nem látom, és innen elfogadni sem tudom őket (Microsoft 365 kell hozzá). Az elemzés és a megjegyzések működnek.</p>
         )}
         {comparison && fitting < changes.length && (
           <p className="flex items-start text-xs text-amber-700">
@@ -253,6 +385,7 @@ export default function ComparePanel({
           </p>
         )}
         {error && <p className="text-xs text-red-700">{error}</p>}
+        {insertStatus && !(analysis && changes.length > 0) && <p className="text-xs font-medium text-green-700">{insertStatus}</p>}
       </div>
 
       {comparison && changes.length > 0 && (
@@ -326,13 +459,36 @@ export default function ComparePanel({
                 <span className={`px-1.5 py-0.5 rounded font-semibold text-[10px] ${TYPE_LABELS[change.type].className}`}>{TYPE_LABELS[change.type].label}</span>
                 {assessment && <span className={`px-1.5 py-0.5 rounded font-semibold text-[10px] ${SEVERITY_STYLES[assessment.risk]}`}>{SEVERITY_LABELS[assessment.risk]} kockázat</span>}
               </span>
-              <button onClick={() => jump(change.paragraph)} className="text-[11px] font-medium text-blue-700 hover:text-blue-900">Ugrás →</button>
+              <button onClick={() => comparison && jump(anchorOf(comparison, change))} className="text-[11px] font-medium text-blue-700 hover:text-blue-900">Ugrás →</button>
             </div>
+            {tracked && comparison && authorsOf(comparison, change).length > 0 && (
+              <p className="text-[11px] text-neutral-500">✎ {authorsOf(comparison, change).join(', ')}</p>
+            )}
             <div className="text-sm text-neutral-800">
               {change.type === 'modified' ? <DiffView original={change.oldText} proposal={change.newText} />
                 : change.type === 'added' ? <ins className="no-underline bg-green-50 text-green-800 whitespace-pre-wrap">{change.newText}</ins>
                 : <del className="bg-red-50 text-red-700 whitespace-pre-wrap">{change.oldText}</del>}
             </div>
+            {tracked && canResolveRevisions() && (
+              <div className="flex space-x-1.5">
+                <button
+                  onClick={() => resolve(change, 'accept')}
+                  disabled={busy}
+                  title="Elfogadja ennek a bekezdésnek a korrektúráit a Wordben"
+                  className="flex items-center px-2 py-1 text-[11px] font-medium rounded-md border border-green-600 text-green-800 hover:bg-green-50 disabled:opacity-50"
+                >
+                  <Check className="w-3 h-3 mr-1" />Elfogadom a korrektúrát
+                </button>
+                <button
+                  onClick={() => resolve(change, 'reject')}
+                  disabled={busy}
+                  title="Elutasítja ennek a bekezdésnek a korrektúráit a Wordben (visszaáll az eredeti szöveg)"
+                  className="flex items-center px-2 py-1 text-[11px] font-medium rounded-md border border-red-500 text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  <X className="w-3 h-3 mr-1" />Elutasítom
+                </button>
+              </div>
+            )}
             {assessment && (
               <div className="pt-1 border-t border-neutral-100">
                 <label className={`flex items-start space-x-2 ${inserted.has(change.id) ? '' : 'cursor-pointer'}`}>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2 } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2, RotateCw } from 'lucide-react';
 import { playSound } from '../services/sound';
 import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
@@ -7,6 +7,10 @@ import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, t
 import type { Settings } from '../services/settings';
 import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
 import { MODE_LABELS, modeLabel, presetNeedsInstruction } from './modes';
+
+/** The server runs another version than this page was loaded with (e.g. after an update): a reload brings it */
+export const isOtherVersion = (serverVersion: string) =>
+  serverVersion !== __APP_VERSION__ && __APP_VERSION__ !== 'ismeretlen' && serverVersion !== 'ismeretlen';
 
 const newId = () =>
   typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -30,6 +34,7 @@ export default function SettingsPanel({
   onClose,
   currentMode,
   onRateLimit,
+  onReload,
 }: {
   settings: Settings;
   onChange: (updater: (current: Settings) => Settings) => void;
@@ -37,6 +42,8 @@ export default function SettingsPanel({
   currentMode: Mode;
   /** The key check counts towards the rate limit too, so the limits bar is told about it */
   onRateLimit: (info: RateLimitInfo) => void;
+  /** Loads the add-in again (asks first if a conversation would be lost) */
+  onReload: () => void;
 }) {
   const [showKey, setShowKey] = useState(false);
   const [keyStatus, setKeyStatus] = useState<KeyStatus>({ state: 'idle' });
@@ -149,6 +156,22 @@ export default function SettingsPanel({
             <span>
               Előnézet beszúrás előtt <span className="text-neutral-400">(ajánlott)</span>
               <span className="block text-xs text-neutral-500">Előbb megmutatom a javaslatot, és te döntöd el, hogy bekerül-e a dokumentumba. Kikapcsolva azonnal beszúrom.</span>
+            </span>
+          </label>
+          <label className="flex items-start space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.skipTrackedChanges}
+              onChange={e => onChange(s => ({ ...s, skipTrackedChanges: e.target.checked }))}
+              className="mt-0.5"
+            />
+            <span>
+              Beírás korrektúra nélkül <span className="text-neutral-400">(saját tervezethez)</span>
+              <span className="block text-xs text-neutral-500">
+                Alapból minden változtatás korrektúrával kerül be. Bekapcsolva a Word saját „Változások követése” beállítása dönt.
+                Ha a dokumentumban el nem fogadott korrektúra van (pl. a másik fél módosításai), biztonsági okból mégis korrektúrával írok, hogy semmi ne kerülhessen be észrevétlenül.
+                Korrektúra nélkül a „Visszavonom” gomb nem érhető el; a Word Ctrl+Z-je működik.
+              </span>
             </span>
           </label>
         </Card>
@@ -404,10 +427,17 @@ export default function SettingsPanel({
             Verzió: felület {__APP_VERSION__}
             {serverInfo ? ` · szerver ${serverInfo.version}${serverInfo.date ? ` (${serverInfo.date})` : ''}` : serverInfo === null ? ' · a szerver nem érhető el' : ''}
           </p>
-          {serverInfo && serverInfo.version !== __APP_VERSION__ && __APP_VERSION__ !== 'ismeretlen' && serverInfo.version !== 'ismeretlen' && (
-            <p className="text-amber-700">A felület és a szerver verziója eltér: zárd be a bővítményt, és indítsd újra az INDITAS.bat-ot.</p>
+          {serverInfo && isOtherVersion(serverInfo.version) && (
+            <p className="text-amber-700">A felület és a szerver verziója eltér: töltsd újra a bővítményt. Ha utána is eltér, zárd be a Wordöt, és indítsd újra az INDITAS.bat-ot.</p>
           )}
           {serverInfo?.model && <p>{serverInfo.model} · {serverInfo.location}</p>}
+          <button
+            onClick={onReload}
+            title="Ha a bővítmény nem válaszol, vagy új verzió érhető el"
+            className="mt-1 inline-flex items-center px-2.5 py-1 text-[11px] font-medium text-neutral-600 border border-neutral-300 rounded-lg hover:bg-neutral-100"
+          >
+            <RotateCw className="w-3 h-3 mr-1" />Bővítmény újratöltése
+          </button>
         </div>
       </div>
     </div>

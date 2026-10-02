@@ -118,8 +118,8 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
     setError(null);
     setNotice(null);
     try {
-      const { deleted, skipped } = await deleteTextsInParagraphs(items);
-      setNotice(`✅ ${deleted} zárójeles definíciót töröltem korrektúrával.` + (skipped ? ` ${skipped} bekezdés azóta megváltozott, azokat kihagytam.` : ''));
+      const { deleted, skipped, write } = await deleteTextsInParagraphs(items);
+      setNotice(`✅ ${deleted} zárójeles definíciót töröltem ${write.tracked ? 'korrektúrával' : 'korrektúra nélkül'}.` + (skipped ? ` ${skipped} bekezdés azóta megváltozott, azokat kihagytam.` : ''));
       await rebuild();
     } catch {
       setError('Nem sikerült törölni. Esetleg írásvédett a dokumentum?');

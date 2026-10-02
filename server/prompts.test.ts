@@ -107,3 +107,18 @@ test('plain-text modes may ask back; the thinking depth is validated', () => {
   assert.ok('value' in deep && deep.value.depth === 'deep');
   assert.ok('value' in odd && odd.value.depth === undefined);
 });
+
+test('the represented party is one short line and sets the point of view', () => {
+  const parsed = parseRequest({ ...valid, party: '  Vevő\n\n(zálogkötelezett) ' + 'x'.repeat(200) });
+  assert.ok('value' in parsed);
+  assert.equal(parsed.value.party!.length, 100);
+  assert.match(parsed.value.party!, /^Vevő \(zálogkötelezett\) x/);
+  const neutral = parseRequest(valid);
+  assert.ok('value' in neutral && neutral.value.party === undefined);
+
+  const review = buildPrompt({ mode: 'review', instruction: 'x', originalText: '', documentContext: 'doc', party: 'Vevő' }).systemInstruction;
+  assert.match(review, /REPRESENTS THIS PARTY: Vevő/);
+  assert.match(review, /Judge risks/);
+  assert.match(buildPrompt({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', party: 'Vevő' }).systemInstruction, /protect its interests/);
+  assert.doesNotMatch(buildPrompt({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '' }).systemInstruction, /REPRESENTS/);
+});

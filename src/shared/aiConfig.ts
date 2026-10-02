@@ -21,6 +21,8 @@ export const MAX_INSTRUCTION_CHARS = 2000;
 export const MAX_HISTORY_TURNS = 5;
 export const MAX_HISTORY_RESULT_CHARS = MAX_CONTEXT_CHARS;
 export const MAX_STYLE_NOTES_CHARS = 500;
+/** The represented party ("Vevő"), one short line */
+export const MAX_PARTY_CHARS = 100;
 export const MAX_REVIEW_FINDINGS = 15;
 export const RATE_LIMIT_PER_MINUTE = 20;
 
@@ -66,6 +68,8 @@ export interface AIRequestBody {
   /** How many values the client replaced by placeholders; only its count goes into the audit log */
   maskedValues?: number;
   depth?: Depth;
+  /** The party the user represents ("Vevő"): the AI works from its point of view; empty: neutral */
+  party?: string;
 }
 
 export interface ReviewFinding {

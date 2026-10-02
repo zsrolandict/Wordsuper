@@ -13,6 +13,8 @@ export interface VersionChange {
    * paragraph that now stands where it was (so a comment can be attached there).
    */
   paragraph: number;
+  /** Paragraph index in the earlier version (modified and removed paragraphs) */
+  oldParagraph?: number;
 }
 
 const normalize = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -95,10 +97,10 @@ export function compareVersions(oldParagraphs: string[], newParagraphs: string[]
       const pairedWith = pairs.get(j);
       const upTo = pairedWith ?? -1;
       for (; nextOld < upTo; nextOld++) {
-        if (!pairedOld.has(nextOld)) changes.push({ type: 'removed', oldText: oldParagraphs[olds[nextOld]], newText: '', paragraph: n });
+        if (!pairedOld.has(nextOld)) changes.push({ type: 'removed', oldText: oldParagraphs[olds[nextOld]], newText: '', paragraph: n, oldParagraph: olds[nextOld] });
       }
       if (pairedWith !== undefined) {
-        changes.push({ type: 'modified', oldText: oldParagraphs[olds[pairedWith]], newText: newParagraphs[n], paragraph: n });
+        changes.push({ type: 'modified', oldText: oldParagraphs[olds[pairedWith]], newText: newParagraphs[n], paragraph: n, oldParagraph: olds[pairedWith] });
         nextOld = pairedWith + 1;
       } else {
         changes.push({ type: 'added', oldText: '', newText: newParagraphs[n], paragraph: n });
@@ -106,7 +108,7 @@ export function compareVersions(oldParagraphs: string[], newParagraphs: string[]
     });
     for (; nextOld < olds.length; nextOld++) {
       if (!pairedOld.has(nextOld)) {
-        changes.push({ type: 'removed', oldText: oldParagraphs[olds[nextOld]], newText: '', paragraph: anchor(newStart + news.length) });
+        changes.push({ type: 'removed', oldText: oldParagraphs[olds[nextOld]], newText: '', paragraph: anchor(newStart + news.length), oldParagraph: olds[nextOld] });
       }
     }
 
@@ -170,4 +172,22 @@ export function parseCompareResult(text: string, validIds: Set<number>): Compare
     });
   }
   return { overview: typeof raw.overview === 'string' ? raw.overview.trim() : '', assessments };
+}
+
+/** Identifies a change by its content, so what was decided about it survives a fresh comparison */
+export const changeKey = (change: VersionChange) => `${change.type}\u0000${change.oldText}\u0000${change.newText}`;
+
+/**
+ * Carries values kept per change id (assessments, decisions) over to a fresh comparison of the same documents:
+ * changes that are still there keep them under their new ids, the rest are dropped.
+ */
+export function carryOver<T>(before: VersionChange[], after: VersionChange[], values: Map<number, T>): Map<number, T> {
+  const byKey = new Map<string, T>();
+  for (const change of before) if (values.has(change.id)) byKey.set(changeKey(change), values.get(change.id)!);
+  const result = new Map<number, T>();
+  for (const change of after) {
+    const key = changeKey(change);
+    if (byKey.has(key)) result.set(change.id, byKey.get(key)!);
+  }
+  return result;
 }

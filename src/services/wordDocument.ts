@@ -267,18 +267,46 @@ async function untrack(context: Word.RequestContext, range: Word.Range) {
   }
 }
 
-/** Runs changes with Track Changes on, then restores the user's own setting */
-async function withTrackChanges<T>(context: Word.RequestContext, run: () => Promise<T>): Promise<T> {
+/**
+ * The user's choice to write without Track Changes (Settings, off by default). Set by the task pane; module-wide,
+ * because every writer (assistant, structure view) must follow it.
+ */
+let skipTracking = false;
+export function setSkipTrackedChanges(skip: boolean) {
+  skipTracking = skip;
+}
+
+/** How a change went into the document */
+export interface WriteMode {
+  /** With Track Changes (ours, or the user's own Word setting) */
+  tracked: boolean;
+  /** Tracked despite the "without Track Changes" setting, because the document has pending tracked changes */
+  forced: boolean;
+}
+
+/**
+ * Runs changes with Track Changes on, then restores the user's own setting. With the "without Track Changes"
+ * setting, Word's own setting decides instead, except in a document with pending tracked changes (typically one
+ * being negotiated): there a silent change could slip past the other side, so it is tracked anyway.
+ */
+async function withTrackChanges<T>(context: Word.RequestContext, run: () => Promise<T>): Promise<{ value: T; write: WriteMode }> {
   const doc = context.document;
   doc.load('changeTrackingMode');
+  const original = skipTracking ? doc.body.getReviewedText('Original') : null;
+  const current = skipTracking ? doc.body.getReviewedText('Current') : null;
   await context.sync();
   const previous = doc.changeTrackingMode;
-  doc.changeTrackingMode = 'TrackAll';
+  const forced = !!original && !!current && original.value !== current.value;
+  const track = !skipTracking || forced;
+  if (track) doc.changeTrackingMode = 'TrackAll';
   try {
-    return await run();
+    const value = await run();
+    return { value, write: { tracked: track || previous !== 'Off', forced } };
   } finally {
-    doc.changeTrackingMode = previous;
-    await context.sync();
+    if (track) {
+      doc.changeTrackingMode = previous;
+      await context.sync();
+    }
   }
 }
 
@@ -316,6 +344,7 @@ export interface EditOutcome {
   changedPlaces: number;
   /** The range had tracked changes not yet accepted, so it was replaced as a whole */
   pendingChanges?: boolean;
+  write?: WriteMode;
 }
 
 /**
@@ -389,7 +418,8 @@ const consistentWords = (collections: Word.RangeCollection[], texts: string[]) =
 /** Applies an edit of the tracked selection with Track Changes; the explanation, if any, goes on it as a comment */
 export async function applyEdit(range: Word.Range, newText: string, explanation = '', undo?: UndoRecord): Promise<EditOutcome> {
   return Word.run(range, async (context) => {
-    const outcome = await withTrackChanges(context, () => editRange(context, range, newText));
+    const { value, write } = await withTrackChanges(context, () => editRange(context, range, newText));
+    const outcome = { ...value, write };
     if (explanation && outcome.strategy !== 'unchanged') range.insertComment(explanation);
     // Show where it happened: the user may have scrolled away while the AI was working
     range.select();
@@ -405,6 +435,7 @@ export interface DocumentEditOutcome {
   changed: number;
   inserted: number;
   deleted: number;
+  write?: WriteMode;
 }
 
 /**
@@ -440,7 +471,7 @@ export async function applyDocumentEdit(
 
     // The explanation goes on the first place that changes
     let firstChanged: Word.Paragraph | null = null;
-    await withTrackChanges(context, async () => {
+    const { write } = await withTrackChanges(context, async () => {
       await context.sync();
       // Last to first, so the positions of earlier paragraphs and words stay put
       for (const op of [...ops].reverse()) {
@@ -488,7 +519,7 @@ export async function applyDocumentEdit(
       place.select();
       await context.sync();
     }
-    return summary;
+    return { ...summary, write };
   });
 }
 
@@ -496,8 +527,8 @@ export async function applyDocumentEdit(
  * Inserts generated text at the tracked selection (replacing it, if there was one). At the start or the end of
  * a non-empty paragraph it becomes paragraphs of its own instead of gluing onto that paragraph's text.
  */
-export async function insertGenerated(range: Word.Range, text: string, undo?: UndoRecord) {
-  await Word.run(range, async (context) => {
+export async function insertGenerated(range: Word.Range, text: string, undo?: UndoRecord): Promise<WriteMode> {
+  return Word.run(range, async (context) => {
     range.load('text');
     const paragraph = range.paragraphs.getFirst();
     paragraph.load('text');
@@ -512,13 +543,14 @@ export async function insertGenerated(range: Word.Range, text: string, undo?: Un
       else if (offset >= paragraph.text.length) insert = `\n${text}`;
     }
     // Inserted with Track Changes, like every other change
-    await withTrackChanges(context, async () => {
+    const { write } = await withTrackChanges(context, async () => {
       const inserted = range.insertText(insert, 'Replace');
       inserted.select();
       remember(context, undo, inserted);
       await context.sync();
     });
     await untrack(context, range);
+    return write;
   });
 }
 
@@ -547,6 +579,8 @@ export interface ReviewInsertOutcome {
   notFound: ReviewFinding[];
   /** A fix was asked for, but the whole quote was not found word for word, so it could not be replaced */
   fixFailed: ReviewFinding[];
+  /** How the fixes went in; unset when only comments were inserted */
+  write?: WriteMode;
 }
 
 /** Finds each quote in the document, attaches its comment there and applies the chosen fixes as tracked changes */
@@ -597,12 +631,12 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
     await context.sync();
 
     if (toFix.length) {
-      await withTrackChanges(context, async () => {
+      ({ write: outcome.write } = await withTrackChanges(context, async () => {
         for (const { range, text } of toFix) {
           const result = await editRange(context, range, text);
           if (result.strategy !== 'unchanged') outcome.fixes++;
         }
-      });
+      }));
     }
     if (options.select && landed) {
       (landed as Word.Range).select();
@@ -757,7 +791,7 @@ export async function placeAtParagraph(index: number, where: 'select' | 'before'
  * Deletes exact texts from paragraphs with Track Changes (e.g. an inline definition that the definitions section
  * made redundant). A paragraph that changed since the structure map was built is left alone.
  */
-export async function deleteTextsInParagraphs(items: { paragraph: number; expectedText: string; text: string }[]): Promise<{ deleted: number; skipped: number }> {
+export async function deleteTextsInParagraphs(items: { paragraph: number; expectedText: string; text: string }[]): Promise<{ deleted: number; skipped: number; write: WriteMode }> {
   return Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load('items/text');
@@ -771,12 +805,78 @@ export async function deleteTextsInParagraphs(items: { paragraph: number; expect
     });
     await context.sync();
     const targets = searches.map(results => results?.items[0] ?? null);
-    await withTrackChanges(context, async () => {
+    const { write } = await withTrackChanges(context, async () => {
       targets.forEach(range => range?.delete());
       await context.sync();
     });
     const deleted = targets.filter(Boolean).length;
-    return { deleted, skipped: items.length - deleted };
+    return { deleted, skipped: items.length - deleted, write };
+  });
+}
+
+/** The pending tracked changes of the document, paragraph by paragraph */
+export interface DocumentRevisions {
+  /** Per Word paragraph: the text before the pending tracked changes */
+  original: string[];
+  /** Per Word paragraph: the text with them accepted (a deleted paragraph is empty) */
+  current: string[];
+  /** paragraph.text as Word reports it (deleted words included), to check later that a paragraph is the same */
+  raw: string[];
+  /** Who made the changes, per paragraph index; null when this Word can't tell (before WordApi 1.6) */
+  authors: Map<number, string[]> | null;
+}
+
+/** Accepting, rejecting and reading the authors of tracked changes needs WordApi 1.6 (e.g. Microsoft 365) */
+export const canResolveRevisions = canUndo;
+
+/** Reads the document before and after its pending tracked changes, e.g. what the other side changed */
+export async function readRevisions(): Promise<DocumentRevisions> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    const originals = paragraphs.items.map(p => p.getReviewedText('Original'));
+    const currents = paragraphs.items.map(p => p.getReviewedText('Current'));
+    await context.sync();
+    const clean = (result: OfficeExtension.ClientResult<string>) => readable(result.value || '').replace(/\r$/, '');
+    const original = originals.map(clean);
+    const current = currents.map(clean);
+
+    let authors: Map<number, string[]> | null = null;
+    if (canResolveRevisions()) {
+      const changed = original.map((text, i) => (text !== current[i] ? i : -1)).filter(i => i !== -1);
+      const collections = changed.map(i => {
+        const tracked = paragraphs.items[i].getRange('Whole').getTrackedChanges();
+        tracked.load('items/author');
+        return [i, tracked] as const;
+      });
+      await context.sync();
+      authors = new Map(collections.map(([i, tracked]) => [i, [...new Set(tracked.items.map(change => change.author).filter(Boolean))]]));
+    }
+    return { original, current, raw: paragraphs.items.map(p => p.text), authors };
+  });
+}
+
+/**
+ * Accepts or rejects the pending tracked changes in paragraphs. A paragraph whose text changed since it was read
+ * is left alone (its index may point elsewhere by now). Returns how many tracked changes were resolved.
+ */
+export async function resolveRevisions(items: { paragraph: number; expectedText: string }[], action: 'accept' | 'reject'): Promise<{ resolved: number; skipped: number }> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load('items/text');
+    await context.sync();
+    const valid = items.filter(item => paragraphs.items[item.paragraph]?.text === item.expectedText);
+    const collections = [...new Set(valid.map(item => item.paragraph))].map(index => {
+      const tracked = paragraphs.items[index].getRange('Whole').getTrackedChanges();
+      tracked.load('items');
+      return tracked;
+    });
+    await context.sync();
+    const resolved = collections.reduce((sum, tracked) => sum + tracked.items.length, 0);
+    collections.forEach(tracked => (action === 'accept' ? tracked.acceptAll() : tracked.rejectAll()));
+    await context.sync();
+    return { resolved, skipped: items.length - valid.length };
   });
 }
 

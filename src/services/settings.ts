@@ -32,6 +32,11 @@ export interface Settings {
   dictation: { engine: 'local' | 'cloud'; localModel: LocalModel; /** Cloud dictation outside the EU, at the user's own risk */ riskAccepted: boolean };
   /** How hard the AI thinks: auto lets the model decide */
   depth: Depth;
+  /**
+   * Write changes without Track Changes (e.g. into one's own first draft). Off by default: tracked changes are the
+   * rule. Even when on, a document with pending tracked changes is still written with Track Changes.
+   */
+  skipTrackedChanges: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -45,6 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // base misunderstands Hungarian too often to be the default
   dictation: { engine: 'local', localModel: 'small', riskAccepted: false },
   depth: 'auto',
+  skipTrackedChanges: false,
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -73,6 +79,7 @@ function sanitize(raw: unknown): Settings {
     },
     sound: value.sound !== false,
     depth: (DEPTH_VALUES as readonly unknown[]).includes(value.depth) ? value.depth as Depth : 'auto',
+    skipTrackedChanges: value.skipTrackedChanges === true,
     dictation: {
       engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
       localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'small',
