@@ -72,8 +72,17 @@ async function startServer() {
     message: { error: "Too many requests from this IP, please try again after a minute.", code: "RATE_LIMITED" }
   });
 
+  // The version check (/api/info) is cheap and runs on its own schedule: it must not use up the AI requests' budget
+  const infoLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    limit: 6 * RATE_LIMIT_PER_MINUTE,
+    standardHeaders: false,
+    legacyHeaders: false,
+    message: { error: "Too many requests from this IP, please try again after a minute.", code: "RATE_LIMITED" }
+  });
+
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
-  app.use("/api/", apiLimiter, requireAccessKey(accessKey, keyProblem));
+  app.use("/api/", (req, res, next) => (req.path === "/info" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKey, keyProblem));
   
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));
