@@ -415,9 +415,23 @@ const comparableWords = (collection: Word.RangeCollection) => wordTexts(collecti
 const consistentWords = (collections: Word.RangeCollection[], texts: string[]) =>
   collections.every((collection, i) => wordTexts(collection).join('\u0000') === tokenizeLikeWord(texts[i]).join('\u0000'));
 
+/**
+ * Refuses to write if the text of a tracked selection is no longer what the AI got: the user typed into it while
+ * waiting, and the answer would silently overwrite that.
+ */
+async function assertUnchanged(context: Word.RequestContext, range: Word.Range, expectedText: string | undefined) {
+  if (expectedText === undefined) return;
+  const current = range.getReviewedText('Current');
+  await context.sync();
+  if (!sameText(readable(current.value || ''), expectedText)) {
+    throw new UserFacingError('A kijelölt szöveg megváltozott, amióta a kérést elküldted (közben beleírtál?), ezért nem írtam bele: elveszne, amit közben írtál. Jelöld ki újra, és kérd újra a mostani szövegre.');
+  }
+}
+
 /** Applies an edit of the tracked selection with Track Changes; the explanation, if any, goes on it as a comment */
-export async function applyEdit(range: Word.Range, newText: string, explanation = '', undo?: UndoRecord): Promise<EditOutcome> {
+export async function applyEdit(range: Word.Range, newText: string, explanation = '', undo?: UndoRecord, expectedText?: string): Promise<EditOutcome> {
   return Word.run(range, async (context) => {
+    await assertUnchanged(context, range, expectedText);
     const { value, write } = await withTrackChanges(context, () => editRange(context, range, newText));
     const outcome = { ...value, write };
     if (explanation && outcome.strategy !== 'unchanged') range.insertComment(explanation);
@@ -527,8 +541,10 @@ export async function applyDocumentEdit(
  * Inserts generated text at the tracked selection (replacing it, if there was one). At the start or the end of
  * a non-empty paragraph it becomes paragraphs of its own instead of gluing onto that paragraph's text.
  */
-export async function insertGenerated(range: Word.Range, text: string, undo?: UndoRecord): Promise<WriteMode> {
+export async function insertGenerated(range: Word.Range, text: string, undo?: UndoRecord, expectedText?: string): Promise<WriteMode> {
   return Word.run(range, async (context) => {
+    // A selection is replaced by the generated text: never one the user has typed into since
+    await assertUnchanged(context, range, expectedText);
     range.load('text');
     const paragraph = range.paragraphs.getFirst();
     paragraph.load('text');

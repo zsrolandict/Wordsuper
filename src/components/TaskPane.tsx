@@ -684,7 +684,7 @@ export default function TaskPane() {
           ? `✅ Az egész dokumentumon: ${parts.join(', ')}, ${how(write)}. A többi bekezdéshez nem nyúltam.`
           : '✅ A javaslat megegyezik a dokumentummal, nem kellett semmit módosítani.';
       } else if (current.mode === 'edit') {
-        const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation, undo);
+        const outcome = await applyEdit(range!, applyChosenHunks(current.snapshot.selectionText, current.result, excluded), explanation, undo, current.snapshot.selectionText);
         write = outcome.strategy === 'unchanged' ? undefined : outcome.write;
         status = outcome.pendingChanges
           ? `✅ A kijelölést kicseréltem, ${how(write)}. Mivel benne még el nem fogadott korábbi korrektúra volt, a teljes kijelölést cseréltem (itt a formázás egyszerűsödhetett).`
@@ -694,7 +694,7 @@ export default function TaskPane() {
           ? '✅ A javaslat megegyezik az eredetivel, nem kellett semmit módosítani.'
           : `✅ A kijelölést kicseréltem, ${how(write)}. Mivel a bekezdések száma megváltozott (vagy a kijelölés bekezdés közepén kezdődik), itt a formázás egyszerűsödhetett.`;
       } else if (current.mode === 'generate') {
-        write = await insertGenerated(range!, current.result, undo);
+        write = await insertGenerated(range!, current.result, undo, current.snapshot.selectionText);
         status = `✅ A szöveget beszúrtam a dokumentumba, ${how(write)}.`;
       } else if (current.mode === 'comment') {
         await insertCommentAt(range!, current.result, undo);

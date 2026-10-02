@@ -138,6 +138,7 @@ Mindkét esetben:
   - Egész dokumentumos szerkesztésnél bekezdésenként pipa van.
   - Átvizsgálásnál észrevételenként dönthetsz (Elfogadom / Elvetem / Visszaállítom).
   - Az Összevetésnél változásonként: „Beszúrom ezt”. Minden megjegyzés csak egyszer kerülhet be.
+- **Nem vész el, amit közben írtál:** ha a válaszra várva a kijelölt részbe gépelsz, a program beírás előtt észreveszi, és nem írja felül (Szerkesztés és Generálás). Az egész dokumentumos szerkesztés ugyanígy ellenőrzi a teljes dokumentumot.
 - **Nem vész el, amit eldöntöttél:**
   - Egy félig eldöntött átvizsgálás nem zárul le kérdés nélkül (módváltás, Szerkezet-javaslat, Főmenü).
   - Ha közben mást jelölsz ki, a program megkérdezi: új kérés legyen az új kijelölésre, vagy a javaslat finomítása?
