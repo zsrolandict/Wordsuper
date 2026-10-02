@@ -847,21 +847,29 @@ export async function readRevisions(): Promise<DocumentRevisions> {
       const changed = original.map((text, i) => (text !== current[i] ? i : -1)).filter(i => i !== -1);
       const collections = changed.map(i => {
         const tracked = paragraphs.items[i].getRange('Whole').getTrackedChanges();
-        tracked.load('items/author');
+        tracked.load('items/author,items/type');
         return [i, tracked] as const;
       });
       await context.sync();
-      authors = new Map(collections.map(([i, tracked]) => [i, [...new Set(tracked.items.map(change => change.author).filter(Boolean))]]));
+      // Only text changes: a formatting change does not alter the text shown
+      authors = new Map(collections.map(([i, tracked]) => [i, [...new Set(tracked.items.filter(isTextChange).map(change => change.author).filter(Boolean))]]));
     }
     return { original, current, raw: paragraphs.items.map(p => p.text), authors };
   });
 }
 
+const isTextChange = (change: Word.TrackedChange) => change.type !== 'Formatted';
+
 /**
- * Accepts or rejects the pending tracked changes in paragraphs. A paragraph whose text changed since it was read
- * is left alone (its index may point elsewhere by now). Returns how many tracked changes were resolved.
+ * Accepts or rejects the pending text changes in paragraphs, one tracked change at a time: changes of hidden
+ * authors and formatting changes are left as they are. A paragraph whose text changed since it was read is left
+ * alone (its index may point elsewhere by now).
  */
-export async function resolveRevisions(items: { paragraph: number; expectedText: string }[], action: 'accept' | 'reject'): Promise<{ resolved: number; skipped: number }> {
+export async function resolveRevisions(
+  items: { paragraph: number; expectedText: string }[],
+  action: 'accept' | 'reject',
+  hiddenAuthors: ReadonlySet<string> = new Set()
+): Promise<{ resolved: number; skipped: number; leftAlone: number }> {
   return Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
     paragraphs.load('items/text');
@@ -869,14 +877,15 @@ export async function resolveRevisions(items: { paragraph: number; expectedText:
     const valid = items.filter(item => paragraphs.items[item.paragraph]?.text === item.expectedText);
     const collections = [...new Set(valid.map(item => item.paragraph))].map(index => {
       const tracked = paragraphs.items[index].getRange('Whole').getTrackedChanges();
-      tracked.load('items');
+      tracked.load('items/author,items/type');
       return tracked;
     });
     await context.sync();
-    const resolved = collections.reduce((sum, tracked) => sum + tracked.items.length, 0);
-    collections.forEach(tracked => (action === 'accept' ? tracked.acceptAll() : tracked.rejectAll()));
+    const all = collections.flatMap(tracked => tracked.items);
+    const chosen = all.filter(change => isTextChange(change) && !hiddenAuthors.has(change.author));
+    chosen.forEach(change => (action === 'accept' ? change.accept() : change.reject()));
     await context.sync();
-    return { resolved, skipped: items.length - valid.length };
+    return { resolved: chosen.length, skipped: items.length - valid.length, leftAlone: all.length - chosen.length };
   });
 }
 

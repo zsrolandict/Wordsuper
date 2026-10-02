@@ -123,7 +123,7 @@ Szerver (Node.js + Express)
 Két forrásból dolgozik:
 - **A dokumentum korrektúrái:** ha a másik fél korrektúrával küldte vissza a szerződést, a rendszer bekezdésenként összeveti a korrektúrák előtti és utáni szöveget.
   - Változásonként látszik a szerző; szerzőnként ki lehet hagyni (pl. a saját kollégánk korábbi módosításait), és ezek az AI-hoz sem kerülnek.
-  - Változásonként **Elfogadom a korrektúrát / Elutasítom** gomb, ami a Wordben dönt. Utána a lista újraolvasódik, a többi változás AI-értékelése megmarad. (Szerző és elfogadás: WordApi 1.6, Microsoft 365; régebbi Wordben az elemzés és a megjegyzések működnek.)
+  - Változásonként **Elfogadom a korrektúrát / Elutasítom** gomb, ami a Wordben dönt. Csak a látható szerzők szövegkorrektúráira hat: az elrejtett szerzőkéhez és a formázási korrektúrákhoz nem nyúl, és ezt meg is mondja. Utána a lista újraolvasódik, a többi változás AI-értékelése megmarad. (Szerző és elfogadás: WordApi 1.6, Microsoft 365; régebbi Wordben az elemzés és a megjegyzések működnek.)
 - **Korábbi változat (.docx):** ha korrektúra nélkül módosítottak, a felhasználó feltölti azt, amit ő küldött ki, és a rendszer ahhoz veti össze a megnyitott dokumentumot.
 
 Mindkét esetben:

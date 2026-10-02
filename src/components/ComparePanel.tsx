@@ -171,11 +171,13 @@ export default function ComparePanel({
     setInsertStatus(null);
     try {
       const items = paragraphsOf(comparison, change).map(paragraph => ({ paragraph, expectedText: comparison.currentTexts[paragraph] ?? '' }));
-      const { resolved, skipped } = await resolveRevisions(items, action);
+      // Only what the list shows: changes of hidden authors and formatting changes stay as they are
+      const { resolved, skipped, leftAlone } = await resolveRevisions(items, action, hiddenAuthors);
       await loadTrackedChanges(comparison);
       setInsertStatus(skipped
         ? 'Ez a bekezdés azóta megváltozott, ezért nem nyúltam hozzá. Frissítettem a listát, próbáld újra.'
-        : `✅ ${action === 'accept' ? 'Elfogadtam' : 'Elutasítottam'}: ${resolved} korrektúra (#${change.id}).`);
+        : `✅ ${action === 'accept' ? 'Elfogadtam' : 'Elutasítottam'}: ${resolved} korrektúra (#${change.id}).` +
+          (leftAlone ? ` A bekezdésben ${leftAlone} másik korrektúra (elrejtett szerzőé vagy formázás) változatlanul maradt.` : ''));
     } catch (e) {
       console.error(e);
       setInsertStatus('Nem sikerült. Esetleg írásvédett a dokumentum? A Wordben a Véleményezés lapon is megteheted.');
@@ -491,7 +493,7 @@ export default function ComparePanel({
                 <button
                   onClick={() => resolve(change, 'accept')}
                   disabled={busy}
-                  title="Elfogadja ennek a bekezdésnek a korrektúráit a Wordben"
+                  title="Elfogadja ebben a bekezdésben a látható szerzők szövegkorrektúráit a Wordben (az elrejtett szerzőkéhez és a formázáshoz nem nyúl)"
                   className="flex items-center px-2 py-1 text-[11px] font-medium rounded-md border border-green-600 text-green-800 hover:bg-green-50 disabled:opacity-50"
                 >
                   <Check className="w-3 h-3 mr-1" />Elfogadom a korrektúrát
@@ -499,7 +501,7 @@ export default function ComparePanel({
                 <button
                   onClick={() => resolve(change, 'reject')}
                   disabled={busy}
-                  title="Elutasítja ennek a bekezdésnek a korrektúráit a Wordben (visszaáll az eredeti szöveg)"
+                  title="Elutasítja ebben a bekezdésben a látható szerzők szövegkorrektúráit a Wordben (az elrejtett szerzőkéhez és a formázáshoz nem nyúl)"
                   className="flex items-center px-2 py-1 text-[11px] font-medium rounded-md border border-red-500 text-red-700 hover:bg-red-50 disabled:opacity-50"
                 >
                   <X className="w-3 h-3 mr-1" />Elutasítom
