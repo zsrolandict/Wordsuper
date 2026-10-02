@@ -94,7 +94,9 @@ export type ApiErrorCode =
   /** Cloud dictation outside the EU needs the user's explicit acceptance in the settings */
   | 'DICTATION_RISK_NOT_ACCEPTED'
   /** The operator requires masking (MASKING_POLICY=required) and the request was not masked */
-  | 'MASKING_REQUIRED';
+  | 'MASKING_REQUIRED'
+  /** The model (or the connection) went silent for too long, or did not finish in time */
+  | 'TIMEOUT';
 
 export const contextLimitFor = (mode: Mode) =>
   mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;

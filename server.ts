@@ -46,6 +46,11 @@ function requireAccessKey(keys: AccessKeys) {
 
 const sseEvent = (data: unknown) => `data: ${JSON.stringify(data)}\n\n`;
 
+/** Longest an answer may take; a whole-contract review with deep thinking takes a few minutes */
+const GENERATION_TIMEOUT_MS = 8 * 60 * 1000;
+/** An SSE comment line this often, so a silently thinking model is not taken for a dropped connection */
+const HEARTBEAT_MS = 20 * 1000;
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -178,7 +183,22 @@ async function startServer() {
 
     // Stop generating (and spending tokens) as soon as the task pane disconnects, e.g. the user pressed Stop
     const abortController = new AbortController();
+    // A model that hangs is stopped after a while; a heartbeat shows the task pane the connection is alive
+    // while the model thinks silently (the pane gives up after a longer silence, see streamAIResponse)
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      abortController.abort();
+    }, GENERATION_TIMEOUT_MS);
+    const heartbeat = setInterval(() => {
+      if (!res.writableEnded) res.write(": ping\n\n");
+    }, HEARTBEAT_MS);
+    const stopTimers = () => {
+      clearTimeout(timeout);
+      clearInterval(heartbeat);
+    };
     res.on("close", () => {
+      stopTimers();
       if (!res.writableEnded) abortController.abort();
     });
 
@@ -208,6 +228,12 @@ async function startServer() {
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (error) {
+      if (timedOut) {
+        logResult("error", { detail: "TIMEOUT" });
+        res.write(sseEvent({ error: `The model did not finish within ${GENERATION_TIMEOUT_MS / 60000} minutes.`, code: "TIMEOUT" }));
+        res.end();
+        return;
+      }
       // The client went away on purpose, there is nobody left to tell
       if (abortController.signal.aborted) {
         logResult("aborted");
@@ -217,6 +243,8 @@ async function startServer() {
       console.error("AI Generation Stream Error:", error);
       res.write(sseEvent({ error: "Failed to generate text.", code: "SERVER_ERROR" }));
       res.end();
+    } finally {
+      stopTimers();
     }
   });
 

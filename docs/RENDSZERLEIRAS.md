@@ -153,9 +153,11 @@ Mindkét esetben:
   - Biztonsági szabály: ha a dokumentumban el nem fogadott korrektúra van (tárgyalt szöveg), a program a beállítás ellenére korrektúrával ír, és ezt meg is mondja. Így semmi nem kerülhet be észrevétlenül egy a másik félnek szánt szövegbe.
   - Korrektúra nélküli beírásnál nincs „Visszavonom” gomb (nincs mit elutasítani); a Word Ctrl+Z-je működik.
 - **Visszavonom:**
-  - Elutasítja a javaslat korrektúráit, és törli a megjegyzéseit. Csak azokat, amelyeket ő szúrt be; a korábbi saját korrektúráidhoz nem nyúl.
+  - Elutasítja a javaslat korrektúráit, és törli a megjegyzéseit. Csak azokat, amelyeket ő szúrt be; a korábbi saját korrektúráidhoz és megjegyzéseidhez nem nyúl, akkor sem, ha ugyanabban a percben készültek (beírás előtt feljegyzi, mi volt már ott).
   - Az utolsó 10 beszúrásnál érhető el, és WordApi 1.6 kell hozzá (Microsoft 365).
 - **Újratöltés:** a Beállítások alján „Bővítmény újratöltése” gomb (ha a bővítmény nem válaszol). Ha a szerveren újabb verzió fut, mint amivel a munkaablak betöltődött, egy sáv felajánlja az újratöltést. Ha van folyamatban lévő beszélgetés, előtte rákérdez.
+- **Nem pörög a végtelenségig:** a szerver gondolkodás közben 20 másodpercenként életjelet küld; ha 90 másodpercig semmi nem jön, a munkaablak leállítja a várakozást és megmondja, hogy a dokumentumhoz nem nyúlt. A szerver egy válaszra legfeljebb 8 percet vár.
+- **Félbeszakadt beírás:** ha egy egész dokumentumos beírás a Wordben menet közben hibára fut, a program megmondja, hogy egy része bekerült, és nem ajánlja fel újra (duplán kerülne be). A Word „Változások követése” beállítása hiba esetén is visszaáll.
 - **Kérdez, mielőtt nagyot lépne:**
   - Kijelölés nélkül egy hosszabb dokumentum teljes átírása előtt megerősítést kér, és a beszélgetésben „egész dokumentum” jelölés látszik.
   - A diktálás letöltés vagy átírás közben megszakítható.

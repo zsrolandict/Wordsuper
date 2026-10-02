@@ -4,6 +4,7 @@ import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplan
 import { AIRequestError, describeRequestError, fetchServerInfo, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
+  PartialWriteError,
   applyDocumentEdit,
   applyEdit,
   applyReviewFindings,
@@ -774,6 +775,18 @@ export default function TaskPane() {
       setDocumentVersion(v => v + 1);
     } catch (writeError) {
       console.error("Write error in Word:", writeError);
+      // Part of it is in already: offering it again would insert it twice
+      if (writeError instanceof PartialWriteError) {
+        setPending(null);
+        updateMessage(messageId, m => ({
+          ...m,
+          proposal: m.proposal && { ...m.proposal, state: 'applied' },
+          status: { text: `⚠️ ${writeError.message}`, tone: 'neutral' },
+          undo: undo?.ranges.length ? [...(m.undo ?? []), undo] : m.undo,
+        }));
+        setDocumentVersion(v => v + 1);
+        return;
+      }
       // A javaslat megmarad, újra lehet próbálni vagy el lehet vetni
       updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'pending' } }));
       addMessage({

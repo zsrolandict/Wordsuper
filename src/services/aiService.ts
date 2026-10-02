@@ -70,7 +70,28 @@ async function errorFromResponse(response: Response): Promise<AIRequestError> {
 /**
  * Service to call the AI backend and stream the response
  */
+/**
+ * The server sends a heartbeat every 20 s while the model thinks, so this long a silence means the connection or
+ * the server is stuck: waiting is given up instead of spinning forever
+ */
+const IDLE_TIMEOUT_MS = 90 * 1000;
+
 export async function streamAIResponse(request: AIRequestBody, handlers: StreamHandlers, options: StreamOptions): Promise<string> {
+  // Aborted by the user (options.signal) or by the idle timer
+  const controller = new AbortController();
+  const onUserAbort = () => controller.abort();
+  if (options.signal?.aborted) controller.abort();
+  options.signal?.addEventListener('abort', onUserAbort);
+  let idle = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const stillAlive = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => {
+      idle = true;
+      controller.abort();
+    }, IDLE_TIMEOUT_MS);
+  };
+  stillAlive();
   try {
     const response = await fetch('/api/edit-stream', {
       method: 'POST',
@@ -79,7 +100,7 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
         ...authHeaders(options.accessKey, options.userId),
       },
       body: JSON.stringify(request),
-      signal: options.signal,
+      signal: controller.signal,
     });
 
     const rateLimit = readRateLimit(response.headers);
@@ -102,6 +123,8 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
 
     while (!done) {
       const { value, done: readerDone } = await reader.read();
+      // Anything, a heartbeat too, shows the connection is alive
+      stillAlive();
       done = readerDone;
       if (value) {
         buffer += decoder.decode(value, { stream: !done });
@@ -150,10 +173,16 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
 
     return fullText;
   } catch (error) {
+    if (idle && !options.signal?.aborted) {
+      throw new AIRequestError('No data from the server for too long.', 'TIMEOUT');
+    }
     if (!options.signal?.aborted) {
       console.error('Error calling AI streaming service:', error);
     }
     throw error;
+  } finally {
+    clearTimeout(idleTimer);
+    options.signal?.removeEventListener('abort', onUserAbort);
   }
 }
 
@@ -193,6 +222,8 @@ export function describeRequestError(error: unknown): string {
         return 'Ezen a szerveren az üzemeltető csak EU-ban (Vertex AI, europe-… régió) feldolgozott felhős diktálást engedélyez, és ez a szerver nem EU-ban dolgoz fel. Használd a helyi diktálást (Beállítások → Diktálás), ott a hang el sem hagyja a gépet.';
       case 'DICTATION_RISK_NOT_ACCEPTED':
         return 'A felhős diktálás itt nem EU-ban dolgozik fel. Ha vállalod a kockázatot, a Beállítások → Diktálás részen jelöld be az „Elfogadom” négyzetet.';
+      case 'TIMEOUT':
+        return 'A modell túl sokáig nem válaszolt (vagy megszakadt a kapcsolat), ezért leállítottam a várakozást. A dokumentumot nem módosítottam. Próbáld újra; nagy dokumentumnál segíthet a „Gyors” gondolkodás vagy egy kisebb kijelölés.';
       case 'MASKING_REQUIRED':
         return 'Az üzemeltető kötelezővé tette a maszkolást, ezért maszkolás nélkül nem küldhetek semmit az AI-nak. Kapcsold vissza: Beállítások → Adatvédelem → „Érzékeny adatok maszkolása”.';
       case 'RATE_LIMITED':

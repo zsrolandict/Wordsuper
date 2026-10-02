@@ -9,6 +9,9 @@ import { withAutoNumbers, type ParagraphInfo } from './structure';
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
 
+/** Part of the change is already in the document: it must not be offered again (it would be inserted twice) */
+export class PartialWriteError extends UserFacingError {}
+
 export interface DocumentSnapshot {
   /** The selection, tracked so it stays valid across Word.run calls until releaseRange */
   range: Word.Range | null;
@@ -180,9 +183,38 @@ export async function selectionMovedFrom(snapshot: DocumentSnapshot): Promise<bo
 export interface UndoRecord {
   ranges: Word.Range[];
   since: number;
+  /**
+   * Tracked changes and comments that were already in the touched places before the insertion: Word keeps their
+   * time to the minute only, so the user's own changes made in the same minute are told apart by these
+   */
+  before: Set<string>;
 }
 
-export const newUndoRecord = (): UndoRecord => ({ ranges: [], since: Date.now() });
+export const newUndoRecord = (): UndoRecord => ({ ranges: [], since: Date.now(), before: new Set() });
+
+const revisionSignature = (change: Word.TrackedChange) => `R|${change.type}|${change.author}|${change.text}|${new Date(change.date).getTime()}`;
+const commentSignature = (comment: Word.Comment) => `C|${comment.authorName}|${comment.content}|${new Date(comment.creationDate).getTime()}`;
+
+/** Notes the tracked changes and comments already in these places, before an insertion touches them (WordApi 1.6) */
+async function rememberExisting(context: Word.RequestContext, undo: UndoRecord | undefined, ranges: Word.Range[]) {
+  if (!undo || !ranges.length || !canUndo()) return;
+  try {
+    const found = ranges.map(range => {
+      const changes = range.getTrackedChanges();
+      changes.load('items/type,items/author,items/text,items/date');
+      const comments = range.getComments();
+      comments.load('items/authorName,items/content,items/creationDate');
+      return { changes, comments };
+    });
+    await context.sync();
+    found.forEach(({ changes, comments }) => {
+      changes.items.forEach(change => undo.before.add(revisionSignature(change)));
+      comments.items.forEach(comment => undo.before.add(commentSignature(comment)));
+    });
+  } catch {
+    // Not known: undo then works by time alone, as before
+  }
+}
 
 /** Taking back needs the tracked-changes API (WordApi 1.6, e.g. Microsoft 365) */
 export const canUndo = () =>
@@ -200,22 +232,23 @@ function remember(context: Word.RequestContext, undo: UndoRecord | undefined, ra
  * tracked changes of the user in the same sentence stay.
  */
 export async function undoChanges(records: UndoRecord[]): Promise<{ changes: number; comments: number }> {
-  const ranges = records.flatMap(r => r.ranges.map(range => ({ range, since: Math.floor(r.since / 60000) * 60000 })));
+  const ranges = records.flatMap(r => r.ranges.map(range => ({ range, since: Math.floor(r.since / 60000) * 60000, before: r.before ?? new Set<string>() })));
   if (!ranges.length) return { changes: 0, comments: 0 };
   return Word.run(ranges.map(r => r.range), async (context) => {
     let changes = 0;
     let comments = 0;
     // One range at a time: overlapping ranges would otherwise try to reject the same change twice
-    for (const { range, since } of ranges) {
+    for (const { range, since, before } of ranges) {
       try {
         const tracked = range.getTrackedChanges();
-        tracked.load('items/date');
+        tracked.load('items/date,items/type,items/author,items/text');
         const notes = range.getComments();
-        notes.load('items/creationDate');
+        notes.load('items/creationDate,items/authorName,items/content');
         await context.sync();
         const newer = (date: Date | string) => new Date(date).getTime() >= since;
-        tracked.items.filter(change => newer(change.date)).forEach(change => { change.reject(); changes++; });
-        notes.items.filter(comment => newer(comment.creationDate)).forEach(comment => { comment.delete(); comments++; });
+        // Only what the insertion made: not older, and not already there before it (the user's own, same minute)
+        tracked.items.filter(change => newer(change.date) && !before.has(revisionSignature(change))).forEach(change => { change.reject(); changes++; });
+        notes.items.filter(comment => newer(comment.creationDate) && !before.has(commentSignature(comment))).forEach(comment => { comment.delete(); comments++; });
         await context.sync();
       } catch {
         // Already taken back through an overlapping range, or the text is gone
@@ -304,8 +337,16 @@ async function withTrackChanges<T>(context: Word.RequestContext, run: () => Prom
     return { value, write: { tracked: track || previous !== 'Off', forced } };
   } finally {
     if (track) {
-      doc.changeTrackingMode = previous;
-      await context.sync();
+      try {
+        doc.changeTrackingMode = previous;
+        await context.sync();
+      } catch {
+        // The batch failed: put the user's own setting back in a fresh one, so Track Changes is not left on
+        await Word.run(async (fresh) => {
+          fresh.document.changeTrackingMode = previous;
+          await fresh.sync();
+        }).catch(() => {});
+      }
     }
   }
 }
@@ -503,6 +544,7 @@ async function assertUnchanged(context: Word.RequestContext, range: Word.Range, 
 export async function applyEdit(range: Word.Range, newText: string, explanation = '', undo?: UndoRecord, expectedText?: string): Promise<EditOutcome> {
   return Word.run(range, async (context) => {
     await assertUnchanged(context, range, expectedText);
+    await rememberExisting(context, undo, [range]);
     const { value, write } = await withTrackChanges(context, () => editRange(context, range, newText));
     if (value.strategy === 'blocked') throw new UserFacingError(protectedMessage(value.protectedBy!));
     const outcome = { ...value, write };
@@ -584,6 +626,8 @@ export async function applyDocumentEdit(
         : `Nem írtam be: a javaslat egy olyan bekezdést törölne vagy írna át egészében, amelyben ${found[hit].join(', ')} van, és ez elveszne. Vedd ki ezt a bekezdést a javaslatból (pipa), vagy ezt a részt írd át kézzel.`);
     }
 
+    await rememberExisting(context, undo, ops.filter(op => op.type !== 'insert').map(op => items[(op as { paragraph: number }).paragraph].getRange('Whole')));
+
     // The explanation goes on the first place that changes
     let firstChanged: Word.Paragraph | null = null;
     const { write } = await withTrackChanges(context, async () => {
@@ -623,7 +667,13 @@ export async function applyDocumentEdit(
           }
         }
       }
-      await context.sync();
+      try {
+        await context.sync();
+      } catch (error) {
+        // Word applies a batch up to the failing step: part of the changes is in, so it must not be retried
+        console.error(error);
+        throw new PartialWriteError('A beírás félbeszakadt: a változások egy része bekerült a dokumentumba, egy része nem (hiba a Wordben). Nézd át a dokumentumot; a már beírt korrektúrákat a Wordben (vagy a Visszavonom gombbal) elutasíthatod. Újra nem próbálom, mert duplán kerülne be.');
+      }
     });
     if (firstChanged) {
       const place = (firstChanged as Word.Paragraph).getRange('Whole');
@@ -643,6 +693,7 @@ export async function insertGenerated(range: Word.Range, text: string, undo?: Un
   return Word.run(range, async (context) => {
     // A selection is replaced by the generated text: never one the user has typed into since
     await assertUnchanged(context, range, expectedText);
+    await rememberExisting(context, undo, [range]);
     range.load('text');
     const paragraph = range.paragraphs.getFirst();
     paragraph.load('text');
@@ -720,14 +771,18 @@ export async function applyReviewFindings(items: ReviewItem[], options: { select
     const toFix: { range: Word.Range; text: string; finding: ReviewFinding }[] = [];
     // Where the (last) change landed, to show it when asked
     let landed: Word.Range | null = null;
-    items.forEach((item, i) => {
+    // Where each finding goes. The full quote is exact, so its first match is right. A shorter prefix is only
+    // trusted when it occurs exactly once: otherwise the comment could land on an unrelated, earlier sentence.
+    const places = items.map((item, i) => {
       const fix = fixSearches[i];
       const fixRange = fix && fix.results.items.length > 0 ? fix.results.items[0] : null;
+      const hit = item.comment ? fixRange ?? commentSearches[i].find((results, k) => (k === 0 ? results.items.length > 0 : results.items.length === 1))?.items[0] : undefined;
+      return { item, fix, fixRange, hit };
+    });
+    await rememberExisting(context, options.undo, places.flatMap(p => [p.hit, p.fixRange]).filter((r): r is Word.Range => !!r));
+    places.forEach(({ item, fix, fixRange, hit }) => {
       if (item.fix && !fixRange) outcome.fixFailed.push(item.finding);
       if (item.comment) {
-        // The full quote is exact, so its first match is right. A shorter prefix is only trusted when it occurs
-        // exactly once: otherwise the comment could land on an unrelated, earlier sentence.
-        const hit = fixRange ?? commentSearches[i].find((results, k) => (k === 0 ? results.items.length > 0 : results.items.length === 1))?.items[0];
         if (hit) {
           // Before the fix, so the comment is anchored on the original wording
           hit.insertComment(reviewCommentText(item.finding, !!fixRange));
