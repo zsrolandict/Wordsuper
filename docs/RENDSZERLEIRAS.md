@@ -166,25 +166,34 @@ Mindkét esetben:
 
   | Kategória | Helyettesítő |
   |---|---|
-  | cégnevek (Kft., Zrt., Bt., GmbH…) | `[CÉG_n]` |
-  | személynevek („képviseli:”, „ügyvezető”, „Eladó:” után) | `[SZEMÉLY_n]` |
+  | cégnevek: rövid forma bármilyen írásmóddal (Kft., KFT., kft., GmbH…), kiírt forma (Korlátolt Felelősségű Társaság, Zártkörűen Működő Részvénytársaság, szövetkezet, alapítvány, e.v.), idézőjeles név, „ABCKft.” elírás; később a forma nélküli többszavas név is („a Napfény Invest”) | `[CÉG_n]` |
+  | személynevek: kulcsszó után („képviseli:”, „Eladó:”), a felek blokkjában (név + születési adat, lakcím…), aláírósorban (név + szerepkör), ismert utónévvel magyar és nyugati sorrendben, „-né” alakban, titulussal (dr., ifj., özv.), toldalékkal („Kovács Annának”), csupa nagybetűvel; egy felismert név vezetékneve megszólítással vagy „-né” alakban („Kovács úr”, „Kovácsné”) | `[SZEMÉLY_n]` |
   | e-mail-címek | `[EMAIL_n]` |
   | telefonszámok | `[TELEFON_n]` |
-  | bankszámlaszámok (IBAN is) | `[SZÁMLA_n]` |
-  | adószámok, adóazonosító jelek | `[ADÓSZÁM_n]` |
+  | bankszámlaszámok: bármely ország IBAN-ja, 2×8 / 3×8 számjegy kötőjellel vagy szóközzel | `[SZÁMLA_n]` |
+  | adószámok (szóközzel is), közösségi adószám, adóazonosító jel | `[ADÓSZÁM_n]` |
   | cégjegyzékszámok | `[CÉGJEGYZÉK_n]` |
-  | címek | `[CÍM_n]` |
-  | helyrajzi számok | `[HRSZ_n]` |
-  | TAJ, személyi igazolvány | `[AZONOSÍTÓ_n]` |
-  | születési adatok | `[SZÜLETÉS_n]` |
+  | címek: irányítószámmal, vagy anélkül a nevük után (lakcím:, székhely:…) | `[CÍM_n]` |
+  | helyrajzi számok, a „hrsz.” előtt és után | `[HRSZ_n]` |
+  | TAJ, személyi igazolvány, személyi azonosító, útlevélszám | `[AZONOSÍTÓ_n]` |
+  | születési dátum („szül.:”, „születési hely, idő:”, angolul is) | `[SZÜLETÉS_n]` |
   | a felhasználó saját listája | `[EGYÉB_n]` |
+
+- **Szándékosan nem rejtjük el** az összegeket (vételár, kamat), a dátumokat és a jogszabályhelyeket: ezek nélkül az AI nem tudna számolni, határidőt és hivatkozást ellenőrizni.
+- A szövegből előbb kiszűrjük a láthatatlan karaktereket (nulla szélességű szóköz, feltételes elválasztó), hogy ne takarhassanak el egy nevet vagy számot.
 
 - Amit tévesen rejtene el (pl. egy hatóság nevét), azt a Részletek panelen a „Ne rejtsd” gombbal vagy a Beállításokban a „Soha ne rejtsd el” listán lehet kivenni.
 - Ugyanaz az érték mindenhol ugyanazt a helyettesítőt kapja: a kijelölésben, a háttérszövegben és a finomítás minden körében is.
 - Az AI utasítást kap, hogy a helyettesítőket változatlanul hagyja. A választ a gépen cseréljük vissza, már menet közben is (a félig megérkezett helyettesítőt addig elrejtjük).
+- **Ha az AI eltorzítja a helyettesítőt**, azt is felismerjük és visszacseréljük: kisbetűvel, ékezet nélkül, szóközzel, kapcsos vagy zárójel nélkül, angolra fordítva (`[személy_1]`, `[SZEMELY_1]`, `[CÉG 1]`, `SZEMÉLY_1`, `[PERSON_1]`, `[COMPANY_1]`).
+- **Kemény tiltás:** ha a visszacserélés után bármilyen írásmódú helyettesítő marad a válaszban (az AI kitalálta, vagy felismerhetetlenre torzította), az **nem kerülhet a dokumentumba**.
+  - A „Beszúrás/Elfogadom” gomb ilyenkor nem működik, egyértelmű figyelmeztetéssel; az automatikus beszúrás kimarad.
+  - Átvizsgálásnál és az Összevetés fülön csak az érintett észrevétel vagy megjegyzés áll meg, a többi beszúrható.
+  - A beírás előtti utolsó lépésben a program újra ellenőrzi, akkor is, ha a gomb valahogy elérhető volt.
+- Ha maga a dokumentum tartalmaz helyettesítőnek látszó szöveget (pl. egy sablonban `[CÉG_1]`), a saját helyettesítőink ezt a sorszámot átugorják, és a tiltás sem jelez rá.
 - A „Részletek” panel táblázatban mutatja, mit rejtett el. Ha valami kimaradt, a felhasználó felveheti a „mindig elrejtendő kifejezések” közé.
 - **Korlátok:**
-  - A felismerés szabályalapú, nem tökéletes (pl. kulcsszó nélküli személynév a szöveg közepén).
+  - A felismerés szabályalapú, nem tökéletes: egy ritka utónevű név kulcsszó, személyes adat vagy szerepkör nélkül a szöveg közepén átjuthat; ilyenkor a „mindig elrejtendő kifejezések” listája segít.
   - A kontextusból kikövetkeztethető információt (pl. egyedi ügyleti részletek) nem rejti el.
 
 ## 5. Korlátok (és miért)

@@ -207,3 +207,31 @@ test('amounts, legal references, dates and titles stay visible (the AI needs the
   const text = 'A vételár 85 000 000 Ft, azaz nyolcvanötmillió forint, amelyet 2026. október 1-ig a Ptk. 6:215. §-a és a 2013. évi V. törvény szerint kell megfizetni. Késedelmi kamat: 12 345 678 Ft. A szerződés címe: Adásvételi szerződés. Lásd az 1.2. pontot.';
   assert.equal(new Masker().mask(text), text);
 });
+
+test('company names in capitals, lower case, spelled out, in quotes, glued to the legal form', () => {
+  const cases: [string, string][] = [
+    ['az ABC KERESKEDELMI KFT. (székhely', 'az [CÉG_1] (székhely'],
+    ['az ABC kft. képviseletében', 'az [CÉG_1] képviseletében'],
+    ['a Napfény Ingatlanfejlesztő Korlátolt Felelősségű Társaság', 'a [CÉG_1]'],
+    ['a Duna Zártkörűen Működő Részvénytársaság', 'a [CÉG_1]'],
+    ['a Tisza Mezőgazdasági Szövetkezet', 'a [CÉG_1]'],
+    ['Kovács János e.v. számlázza', '[CÉG_1] számlázza'],
+    ['a „Napfény” Kft. mint Bérlő', 'a [CÉG_1] mint Bérlő'],
+    ['az ABCKft. képviseletében', 'az [CÉG_1] képviseletében'],
+    ['az Alfa Béta Gamma Delta Epszilon Zéta Éta Kft.-vel', 'az [CÉG_1]-vel'],
+  ];
+  for (const [text, expected] of cases) assert.equal(new Masker().mask(text), expected, text);
+});
+
+test('a company named later without its legal form is hidden too', () => {
+  const masker = new Masker();
+  const text = 'A Napfény Invest Kft. (Vevő) fizet. A Napfény Invest kötelezettsége, hogy …';
+  const masked = masker.mask(text);
+  assert.ok(!masked.includes('Napfény'), masked);
+  assert.equal(masker.unmask(masked), text);
+});
+
+test('legal forms without a name, units and ordinary words are not companies', () => {
+  const text = 'A Kft. ügyvezetője és a Részvénytársaság közgyűlése dönt; a termék 5 Kg, a Bt. tagjai. A Vevő se fizet.';
+  assert.equal(new Masker().mask(text), text);
+});

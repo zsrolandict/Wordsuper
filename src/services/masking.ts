@@ -29,7 +29,21 @@ export const ENTITY_LABELS: Record<EntityKind, string> = {
 };
 
 const U = 'A-ZÁÉÍÓÖŐÚÜŰ';
-const LEGAL_FORMS = 'Kft|Zrt|Nyrt|Bt|Kkt|Kht|Ltd|GmbH|Inc|LLC|Plc|AG|SE';
+/** "Kft" → "[Kk][Ff][Tt]": legal forms are written in capitals too ("KFT.") */
+const anyCase = (word: string) => [...word].map(c => (c.toLowerCase() === c.toUpperCase() ? c.replace(/[.]/g, '\\.') : `[${c.toLowerCase()}${c.toUpperCase()}]`)).join('');
+/**
+ * Legal forms: the abbreviations in any case (but the short English ones only as written: "se" or "ag" are words),
+ * and the spelled-out Hungarian forms.
+ */
+const LEGAL_FORMS = [
+  ...['Kft', 'Zrt', 'Nyrt', 'Bt', 'Kkt', 'Kht', 'Rt', 'Ltd', 'GmbH', 'Plc', 'e.v', 'ev'].map(anyCase),
+  'Inc', 'LLC', 'AG', 'SE', 'KG',
+  ...['Korlátolt Felelősségű Társaság', 'Zártkörűen Működő Részvénytársaság', 'Nyilvánosan Működő Részvénytársaság', 'Részvénytársaság',
+    'Betéti Társaság', 'Közkereseti Társaság', 'Szövetkezet', 'Egyesülés', 'Alapítvány', 'Egyesület', 'Közhasznú Társaság',
+    'egyéni vállalkozó'].map(form => form.split(' ').map(anyCase).join('[ \\u00a0]{1,2}')),
+].join('|');
+/** A word of a company name: capitalized or a number, possibly in quotes („Napfény”), with &, - or . inside */
+const COMPANY_WORD = `[„"“»]?[${U}0-9][\\p{L}0-9&.\\-]*[”"“«]?`;
 /** "eladó" → "[eE]ladó": a word at the start of a sentence or a line is capitalized too */
 const eitherCase = (words: readonly string[]) => words.map(word => `[${word[0].toLowerCase()}${word[0].toUpperCase()}]${word.slice(1)}`).join('|');
 const PERSON_KEYWORDS = eitherCase(['név', 'neve', 'nevű', 'képviseli', 'képviselő', 'képviseletében', 'ügyvezető', 'aláíró', 'meghatalmazott', 'tulajdonos', 'eladó', 'vevő', 'bérlő', 'bérbeadó', 'megbízó', 'megbízott']);
@@ -118,7 +132,13 @@ const RULES: Rule[] = [
   {
     kind: 'CÉG',
     // Words of a name are one or two spaces apart: a wider gap (a two-column signature block) ends the name
-    pattern: new RegExp(`(?<![\\p{L}\\d])(?!(?:A|Az|The)\\s)((?:[${U}0-9][\\p{L}0-9&.\\-]*[ \\u00a0]{1,2}){0,5}[${U}0-9][\\p{L}0-9&.\\-]*[ \\u00a0]{1,2}(?:${LEGAL_FORMS})(?![\\p{L}\\d])\\.?)`, 'gu'),
+    pattern: new RegExp(`(?<![\\p{L}\\d„"“»])(?!(?:A|Az|The)\\s)((?:${COMPANY_WORD}[ \\u00a0]{1,2}){0,7}${COMPANY_WORD}[ \\u00a0]{1,2}(?:${LEGAL_FORMS})(?![\\p{L}\\d])\\.?)`, 'gu'),
+    group: 1,
+  },
+  // The legal form glued to the name, a frequent typo: "ABCKft.", "NapfényZrt"
+  {
+    kind: 'CÉG',
+    pattern: new RegExp(`(?<![\\p{L}\\d])([${U}0-9][\\p{L}0-9&\\-]*[\\p{L}0-9](?:Kft|KFT|Zrt|ZRT|Nyrt|NYRT|Kkt|KKT)(?![\\p{L}\\d])\\.?)`, 'gu'),
     group: 1,
   },
   // People. Case-sensitive on purpose: only capitalized words count as a name ("… Anna ügyvezető" keeps "ügyvezető").
@@ -159,6 +179,12 @@ const RULES: Rule[] = [
     group: 1,
   },
 ];
+
+/** A company name without its legal form, when it is distinctive enough on its own: at least two words */
+function companyCore(name: string): string | null {
+  const core = name.replace(new RegExp(`[ \\u00a0]+(?:${LEGAL_FORMS})\\.?$`, 'u'), '').replace(/^[„"“»]|[”"“«]$/g, '').trim();
+  return core !== name && core.split(/\s+/).length >= 2 && core.length >= 6 ? core : null;
+}
 
 /** The surname of a masked name: the first word ("Kovács János"), or the last one after a given name ("Peter Kiss") */
 function surnameOf(name: string): string | null {
@@ -290,6 +316,11 @@ export class Masker {
     for (const [value, token] of [...this.forward]) {
       const surname = this.kinds.get(token) === 'SZEMÉLY' && !this.contextual.has(value) ? surnameOf(value) : null;
       if (surname) result = result.replace(surnameUse(surname), () => this.tokenFor(surname, 'SZEMÉLY', true));
+    }
+    // A company is often named later without its legal form ("a Napfény Invest"): a name of several words is hidden too
+    for (const [value, token] of [...this.forward]) {
+      const core = this.kinds.get(token) === 'CÉG' && !this.contextual.has(value) ? companyCore(value) : null;
+      if (core && result.includes(core)) result = result.split(core).join(this.tokenFor(core, 'CÉG', true));
     }
     // Values already found are hidden wherever they occur, also in capitals ("KOVÁCS JÁNOS" in a signature block)
     for (const [value, token] of [...this.forward].sort((a, b) => b[0].length - a[0].length)) {
