@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from './masking';
+import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from './masking';
 
 const party = 'Eladó: Kovács János (szül.: Budapest, 1980. 05. 12., anyja neve: Nagy Mária), lakcím: 1111 Budapest, Fő utca 12/A., adóazonosító jel: 8123456789, e-mail: kovacs.janos@example.hu, telefon: +36 30 123 4567.';
 const company = 'Vevő: az ABC Ingatlanfejlesztő Kft. (székhely: 2600 Vác, Széchenyi u. 3., cégjegyzékszám: Cg. 13-09-123456, adószám: 12345678-2-13, bankszámlaszám: 11700024-20012345-00000000), képviseli: dr. Szabó Anna ügyvezető.';
@@ -69,7 +69,7 @@ test('headers and all-caps words that merely start like a legal form are left al
 test('placeholders the AI invented are reported', () => {
   const masker = new Masker();
   masker.mask('Vevő: ABC Kft.');
-  assert.deepEqual(leftoverPlaceholders(masker.unmask('A [CÉG_1] és a [CÉG_2], valamint [CÉG_2] és [A_1].')), ['[CÉG_2]']);
+  assert.deepEqual(unresolvedPlaceholders(masker.unmask('A [CÉG_1] és a [CÉG_2], valamint [CÉG_2] és [A_1].')), ['[CÉG_2]']);
 });
 
 test('values the user wants the AI to see are never hidden', () => {
@@ -83,4 +83,56 @@ test('a party given by name gets the same placeholder as in the text', () => {
   assert.ok(!sent.party!.includes('ABC'));
   assert.ok(sent.documentContext.includes(sent.party!));
   assert.equal(maskRequest({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', party: 'Vevő' }, new Masker()).party, 'Vevő');
+});
+
+test('placeholders the AI mangled are still put back', () => {
+  const masker = new Masker();
+  masker.mask('Képviseli: Kovács János ügyvezető. Vevő: ABC Kft., adószám: 12345678-2-13.');
+  const cases: [string, string][] = [
+    ['[SZEMÉLY_1] aláírja', 'Kovács János aláírja'],
+    ['[személy_1] aláírja', 'Kovács János aláírja'],
+    ['[SZEMELY_1] aláírja', 'Kovács János aláírja'],
+    ['[Személy 1] aláírja', 'Kovács János aláírja'],
+    ['SZEMÉLY_1 aláírja', 'Kovács János aláírja'],
+    ['[PERSON_1] signs for [COMPANY_1]', 'Kovács János signs for ABC Kft.'],
+    ['{CÉG-1}, tax number: [TAX NUMBER 1]', 'ABC Kft., tax number: 12345678-2-13'],
+    ['[ceg_01]-vel', 'ABC Kft.-vel'],
+  ];
+  for (const [answer, expected] of cases) {
+    assert.equal(masker.unmask(answer), expected, answer);
+    assert.deepEqual(unresolvedPlaceholders(masker.unmask(answer)), [], answer);
+  }
+});
+
+test('any placeholder that cannot be resolved is caught, in any spelling', () => {
+  const masker = new Masker();
+  masker.mask('Képviseli: Kovács János ügyvezető.');
+  const answer = masker.unmask('[SZEMÉLY_1], [személy_2], [CEG 1], {PERSON_7}, COMPANY_3 és [cím_1].');
+  assert.deepEqual(unresolvedPlaceholders(answer), ['[személy_2]', '[CEG 1]', '{PERSON_7}', 'COMPANY_3', '[cím_1]']);
+});
+
+test('ordinary bracketed text and numbering are not placeholders', () => {
+  const text = 'Lásd [1], [5.2.], [Melléklet 1], [Lot 2], (Eladó 1), a 2. pont és a szerzodes_v2 fájl. Cég 1 évig.';
+  assert.deepEqual(unresolvedPlaceholders(text), []);
+});
+
+test('placeholder-like text of the document itself is never taken for ours', () => {
+  const masker = new Masker();
+  const sent = maskRequest({ mode: 'edit', instruction: 'Töltsd ki', originalText: 'Sablon: [CÉG_1] képviseli: Kovács János ügyvezető, az ABC Kft.', documentContext: '' }, masker);
+  // Our own tokens skip the number the document already uses
+  assert.ok(sent.originalText.startsWith('Sablon: [CÉG_1] képviseli: [SZEMÉLY_1]'));
+  assert.ok(sent.originalText.includes('[CÉG_2]'));
+  const answer = masker.unmask('[CÉG_1] és [CÉG_2]');
+  assert.equal(answer, '[CÉG_1] és ABC Kft.');
+  // The document's own text is not an unresolved placeholder; one the AI made up is
+  assert.deepEqual(unresolvedPlaceholders(answer, ['Sablon: [CÉG_1] képviseli: Kovács János ügyvezető, az ABC Kft.']), []);
+  assert.deepEqual(unresolvedPlaceholders('[CÉG_3]', ['Sablon: [CÉG_1]']), ['[CÉG_3]']);
+});
+
+test('while streaming, a half-arrived placeholder in any spelling is hidden', () => {
+  const masker = new Masker();
+  masker.mask('Vevő: ABC Kft.');
+  assert.equal(masker.unmask('A szerződő fél: [cég 1', true), 'A szerződő fél: ');
+  assert.equal(masker.unmask('A szerződő fél: [CÉG_', true), 'A szerződő fél: ');
+  assert.equal(masker.unmask('A szerződő fél: [cég 1]', true), 'A szerződő fél: ABC Kft.');
 });

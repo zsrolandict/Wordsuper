@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
-import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb, LocateFixed } from 'lucide-react';
+import { Check, RefreshCw, X, Loader2, SearchX, Lightbulb, LocateFixed, Ban } from 'lucide-react';
+import { unresolvedMessage } from '../services/masking';
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
@@ -20,6 +21,8 @@ export interface FindingView extends ReviewFinding {
   done?: 'applied' | 'dismissed';
   /** "Mutasd" found nothing */
   notShown?: boolean;
+  /** Placeholders the finding still has after unmasking: it can't be inserted */
+  blocked?: string[];
 }
 
 export interface FindingActions {
@@ -188,7 +191,13 @@ function FindingsList({ findings, editable, busy, actions }: { findings: Finding
                 <DiffView original={cleanQuote(finding.quote)} proposal={finding.suggestion} />
               </span>
             )}
-            {editable && !finding.done && (
+            {finding.blocked && !finding.done && (
+              <span className="flex items-start text-xs text-red-700 mt-1.5">
+                <Ban className="w-3.5 h-3.5 mr-1 mt-px shrink-0" />
+                Nem szúrható be: fel nem oldott helyettesítő maradt benne ({finding.blocked.join(', ')}), mögötte nincs valódi adat.
+              </span>
+            )}
+            {editable && !finding.done && !finding.blocked && (
               <span className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-neutral-700">
                 <label className="flex items-center cursor-pointer">
                   <input type="checkbox" checked={finding.selected} onChange={() => onToggle(i, 'selected')} className="mr-1" />
@@ -212,7 +221,7 @@ function FindingsList({ findings, editable, busy, actions }: { findings: Finding
                   <>
                     <button
                       onClick={() => onApplyOne(i)}
-                      disabled={busy || (!finding.selected && !(finding.fix && finding.suggestion))}
+                      disabled={busy || !!finding.blocked || (!finding.selected && !(finding.fix && finding.suggestion))}
                       className={`${smallButton} border-blue-600 bg-blue-600 text-white hover:bg-blue-700`}
                       title="Csak ezt az észrevételt szúrja be (a bejelöltek szerint), és odaugrik"
                     >
@@ -278,6 +287,7 @@ export default function Proposal({
   addExplanation,
   onToggleExplanation,
   wholeDocument = false,
+  blocked,
 }: {
   mode: Mode;
   originalText: string;
@@ -303,6 +313,8 @@ export default function Proposal({
   onToggleExplanation?: () => void;
   /** Edit without a selection: originalText is the whole document, one paragraph per line */
   wholeDocument?: boolean;
+  /** Unresolved placeholders in the answer: it can't be inserted */
+  blocked?: string[];
 }) {
   const [showChanges, setShowChanges] = useState(true);
   const isOpen = state === 'pending' || state === 'applying';
@@ -381,12 +393,19 @@ export default function Proposal({
         </>
       )}
 
+      {isOpen && !!blocked?.length && (
+        <p className="mt-2 flex items-start text-xs text-red-700 bg-red-50 border border-red-200 rounded-md p-2">
+          <Ban className="w-3.5 h-3.5 mr-1 mt-px shrink-0" />
+          {unresolvedMessage(blocked).replace(/^⛔ /, '')}
+        </p>
+      )}
+
       {isOpen && (
         <div className="mt-3">
           <div className="flex flex-wrap gap-2">
             <button
               onClick={onApply}
-              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0) || allLeftOut}
+              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0) || allLeftOut || !!blocked?.length}
               className="flex items-center px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors"
             >
               {state === 'applying' ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}

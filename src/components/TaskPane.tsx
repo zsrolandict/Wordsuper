@@ -32,7 +32,7 @@ import { parseFindings } from '../services/review';
 import { applyChosenHunks, composeDocument, planDocumentEdits } from '../services/documentEdit';
 import { alternativeReviewInstruction, newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, type StructureIssue } from '../services/structure';
-import { Masker, leftoverPlaceholders, maskRequest, parseExtraTerms } from '../services/masking';
+import { Masker, maskRequest, parseExtraTerms, unresolvedMessage, unresolvedPlaceholders } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { describeStyle, useSettings } from '../services/settings';
 import { formatNumber } from '../services/format';
@@ -67,6 +67,8 @@ interface Message {
     /** Edit: why the change was needed, and whether it goes into the document as a comment */
     explanation?: string;
     addExplanation?: boolean;
+    /** Placeholders the answer still has after unmasking: then it can't go into the document */
+    blocked?: string[];
   };
   /** The AI asked back instead of guessing: one-click answers, and which one was picked */
   clarification?: { options: string[]; mode: Mode; picked?: number };
@@ -90,6 +92,11 @@ interface PendingProposal {
   explanation: string;
   /** The same placeholders are kept for every refinement; null when masking is off */
   masker: Masker | null;
+  /**
+   * What was sent before masking (document, instruction): placeholder-like text found there is the document's own,
+   * anything else left in the answer is an unresolved placeholder
+   */
+  sources: string[];
 }
 
 const WELCOME_MESSAGE: Message = {
@@ -473,6 +480,7 @@ export default function TaskPane() {
         ? current!.masker
         : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
       const sentRequest = masker ? maskRequest(request, masker) : request;
+      const sources = [request.instruction, request.originalText, request.documentContext];
       const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
 
       const loadingId = newMessageId();
@@ -591,23 +599,26 @@ export default function TaskPane() {
         }));
       }
       unclaimedRange = null;
-      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result, explanation, masker });
-      const findingViews = findings?.map(f => ({ ...f, selected: true, fix: !!f.suggestion }));
+      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result, explanation, masker, sources });
+      // A placeholder left after unmasking (made up or mangled beyond recognition) has no real value behind it:
+      // such an answer, or such a finding, can't be written into the document
+      const blocked = requestMode === 'review' ? [] : unresolvedPlaceholders([result, explanation], sources);
+      const findingViews: FindingView[] | undefined = findings?.map(f => {
+        const held = unresolvedPlaceholders([f.quote, f.comment, f.suggestion], sources);
+        return held.length ? { ...f, selected: false, fix: false, blocked: held } : { ...f, selected: true, fix: !!f.suggestion };
+      });
+      const heldFindings = findingViews?.filter(f => f.blocked).length ?? 0;
       // Asking for a comment in the instruction ticks the box by default
       const addExplanation = !!explanation && /megjegyz|komment|indokl|magyaráz/i.test(instruction);
-      // A placeholder the AI made up has no real value behind it and must not slip into the document unnoticed
-      const leftovers = masker
-        ? leftoverPlaceholders([result, explanation, ...(findings ?? []).flatMap(f => [f.comment, f.suggestion])].join('\n'))
-        : [];
       finishLoadingMessage({
         content: requestMode === 'review' ? '' : result,
-        proposal: { state: 'pending', findings: findingViews, explanation, addExplanation },
-        status: leftovers.length
-          ? { text: `⚠️ A válaszban ismeretlen helyettesítő maradt (${leftovers.join(', ')}), ehhez nincs valódi adat. Beszúrás előtt ellenőrizd, vagy kérj másik változatot.`, tone: 'neutral' }
+        proposal: { state: 'pending', findings: findingViews, explanation, addExplanation, blocked: blocked.length ? blocked : undefined },
+        status: heldFindings
+          ? { text: `⛔ ${heldFindings} észrevételben fel nem oldott helyettesítő maradt, ezeket nem lehet beszúrni (lásd fent). A többi rendben van.`, tone: 'neutral' }
           : undefined,
       });
 
-      if (settings.autoApply && !leftovers.length) {
+      if (settings.autoApply && !blocked.length && !heldFindings) {
         await applyProposal(loadingId, findingViews, addExplanation);
       }
     } catch (error) {
@@ -652,6 +663,10 @@ export default function TaskPane() {
       let write: WriteMode | undefined;
       const range = current.snapshot.range;
 
+      // Last line of defence: nothing with an unresolved placeholder is written, whatever the buttons allowed
+      const held = current.mode === 'review' ? [] : unresolvedPlaceholders([current.result, explanation], current.sources);
+      if (held.length) throw new UserFacingError(unresolvedMessage(held));
+
       const editBefore = current.mode === 'edit' || current.mode === 'generate' ? await structureIssues() : null;
       // Changes the user left out keep the original text
       const excluded = new Set<number>(messagesRef.current.find(m => m.id === messageId)?.proposal?.excluded ?? []);
@@ -687,7 +702,7 @@ export default function TaskPane() {
           ? '✅ A véleményezést beszúrtam Megjegyzésként abba a bekezdésbe, ahol a kurzor állt.'
           : '✅ A véleményezést beszúrtam a margóra (Megjegyzésként).';
       } else {
-        const chosen = (findingViews ?? []).filter(f => !f.done && (f.selected || f.fix));
+        const chosen = (findingViews ?? []).filter(f => !f.done && (f.selected || f.fix) && !unresolvedPlaceholders([f.quote, f.comment, f.suggestion], current.sources).length);
         const before = await structureIssues();
         const outcome = await applyReviewFindings(chosen.map(f => ({ finding: f, comment: f.selected, fix: f.fix })), { undo });
         write = outcome.write;
@@ -803,7 +818,14 @@ export default function TaskPane() {
   const applyOneFinding = async (messageId: string, findings: FindingView[], index: number) => {
     const current = pendingRef.current;
     const finding = findings[index];
-    if (!current || current.messageId !== messageId || !finding || finding.done || !tryLock()) return;
+    if (!current || current.messageId !== messageId || !finding || finding.done) return;
+    // Never written with an unresolved placeholder, even if the button was reachable
+    const held = unresolvedPlaceholders([finding.quote, finding.comment, finding.suggestion], current.sources);
+    if (held.length) {
+      setFinding(messageId, index, { blocked: held, selected: false, fix: false });
+      return;
+    }
+    if (!tryLock()) return;
     setIsApplying(true);
     try {
       const before = await structureIssues();
@@ -1026,6 +1048,7 @@ export default function TaskPane() {
                       excluded: m.proposal.excluded?.includes(id) ? m.proposal.excluded.filter(x => x !== id) : [...(m.proposal.excluded ?? []), id],
                     },
                   }))}
+                  blocked={msg.proposal.blocked}
                   explanation={msg.proposal.explanation}
                   addExplanation={!!msg.proposal.addExplanation}
                   onToggleExplanation={() => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, addExplanation: !m.proposal.addExplanation } }))}

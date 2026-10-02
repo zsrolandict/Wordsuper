@@ -73,15 +73,52 @@ const RULES: Rule[] = [
   },
 ];
 
-const TOKEN = /\[([A-ZÁÉÍÓÖŐÚÜŰ]+)_(\d+)\]/g;
-/** A placeholder cut in half at the end of a streamed chunk, e.g. "[CÉG_" */
-const PARTIAL_TOKEN = /\[[A-ZÁÉÍÓÖŐÚÜŰ_]*\d*$/;
+/**
+ * How the AI writes a placeholder's kind when it does not copy it exactly: in lower case, without accents,
+ * translated to English. Keys are normalized (see normalizeKind). Words that also occur in ordinary bracketed text
+ * ("[Lot 1]", "[Term 2]") are left out on purpose.
+ */
+const KIND_ALIASES: Record<string, EntityKind> = {
+  CEG: 'CÉG', CEGNEV: 'CÉG', TARSASAG: 'CÉG', VALLALAT: 'CÉG', COMPANY: 'CÉG', COMPANYNAME: 'CÉG', ORGANIZATION: 'CÉG', ORGANISATION: 'CÉG', ORG: 'CÉG', FIRM: 'CÉG', CORPORATION: 'CÉG', ENTITY: 'CÉG',
+  SZEMELY: 'SZEMÉLY', SZEMELYNEV: 'SZEMÉLY', NEV: 'SZEMÉLY', PERSON: 'SZEMÉLY', PERSONNAME: 'SZEMÉLY', NAME: 'SZEMÉLY', INDIVIDUAL: 'SZEMÉLY',
+  EMAIL: 'EMAIL', EMAILCIM: 'EMAIL', EMAILADDRESS: 'EMAIL',
+  TELEFON: 'TELEFON', TELEFONSZAM: 'TELEFON', PHONE: 'TELEFON', PHONENUMBER: 'TELEFON', TELEPHONE: 'TELEFON',
+  SZAMLA: 'SZÁMLA', SZAMLASZAM: 'SZÁMLA', BANKSZAMLA: 'SZÁMLA', BANKSZAMLASZAM: 'SZÁMLA', ACCOUNT: 'SZÁMLA', ACCOUNTNUMBER: 'SZÁMLA', BANKACCOUNT: 'SZÁMLA', IBAN: 'SZÁMLA',
+  ADOSZAM: 'ADÓSZÁM', ADOAZONOSITO: 'ADÓSZÁM', ADOAZONOSITOJEL: 'ADÓSZÁM', TAXNUMBER: 'ADÓSZÁM', TAXID: 'ADÓSZÁM', VATNUMBER: 'ADÓSZÁM',
+  CEGJEGYZEK: 'CÉGJEGYZÉK', CEGJEGYZEKSZAM: 'CÉGJEGYZÉK', REGISTRATIONNUMBER: 'CÉGJEGYZÉK', COMPANYREGISTRATION: 'CÉGJEGYZÉK', COMPANYREGISTRATIONNUMBER: 'CÉGJEGYZÉK', REGISTRYNUMBER: 'CÉGJEGYZÉK',
+  CIM: 'CÍM', LAKCIM: 'CÍM', SZEKHELY: 'CÍM', ADDRESS: 'CÍM',
+  HRSZ: 'HRSZ', HELYRAJZISZAM: 'HRSZ', PARCEL: 'HRSZ', PARCELNUMBER: 'HRSZ', CADASTRALNUMBER: 'HRSZ', LANDREGISTRYNUMBER: 'HRSZ',
+  AZONOSITO: 'AZONOSÍTÓ', SZEMELYIAZONOSITO: 'AZONOSÍTÓ', ID: 'AZONOSÍTÓ', IDNUMBER: 'AZONOSÍTÓ', IDENTIFIER: 'AZONOSÍTÓ',
+  SZULETES: 'SZÜLETÉS', SZULETESIDATUM: 'SZÜLETÉS', SZULETESIIDO: 'SZÜLETÉS', BIRTH: 'SZÜLETÉS', BIRTHDATE: 'SZÜLETÉS', DATEOFBIRTH: 'SZÜLETÉS', DOB: 'SZÜLETÉS',
+  EGYEB: 'EGYÉB', SAJAT: 'EGYÉB', OTHER: 'EGYÉB', CUSTOM: 'EGYÉB',
+};
+
+/** "Személy", "SZEMELY", "bank account" → "SZEMELY", "BANKACCOUNT" */
+const normalizeKind = (kind: string) => kind.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z]/g, '');
+
+/**
+ * Anything that looks like a placeholder, however mangled: "[CÉG_1]", "[cég 1]", "[SZEMELY_1]", "{PERSON 2}",
+ * "[BANK ACCOUNT_1]", and without brackets with an underscore: "SZEMÉLY_1". Groups: kind and number, bracketed
+ * (1, 2) or bare (3, 4). Only kinds known in KIND_ALIASES count, so "[Melléklet 1]" or "[5.2.]" are ordinary text.
+ */
+const PLACEHOLDER_LIKE = /[[{]\s*(\p{L}[\p{L} _-]{0,40}?)[\s_-]*(\d{1,4})\.?\s*[\]}]|(?<![\p{L}\p{N}_])(\p{L}+(?:_\p{L}+)*)_(\d{1,4})(?![\p{L}\p{N}])/gu;
+/** A placeholder cut in half at the end of a streamed chunk, e.g. "[CÉG_" or "[cég 1" */
+const PARTIAL_TOKEN = /[[{][\p{L}\s_-]*\d*\.?\s*$/u;
+
+/** The canonical placeholder ("[SZEMÉLY_1]") a match stands for; null when it is not a placeholder at all */
+function canonicalToken(match: RegExpMatchArray | string[]): string | null {
+  const kind = KIND_ALIASES[normalizeKind(match[1] ?? match[3] ?? '')];
+  const number = match[2] ?? match[4];
+  return kind && number ? `[${kind}_${Number(number)}]` : null;
+}
 
 export class Masker {
   private forward = new Map<string, string>();
   private reverse = new Map<string, string>();
   private counters = new Map<EntityKind, number>();
   private kinds = new Map<string, EntityKind>();
+  /** Placeholder-like text already in the document ("[CÉG_1]" in a template): never used as our own token */
+  private reserved = new Set<string>();
   private extraTerms: string[];
   private neverHide: Set<string>;
 
@@ -97,7 +134,8 @@ export class Masker {
   private tokenFor(value: string, kind: EntityKind): string {
     const existing = this.forward.get(value);
     if (existing) return existing;
-    const n = (this.counters.get(kind) ?? 0) + 1;
+    let n = this.counters.get(kind) ?? 0;
+    do n++; while (this.reserved.has(`[${kind}_${n}]`));
     this.counters.set(kind, n);
     const token = `[${kind}_${n}]`;
     this.forward.set(value, token);
@@ -106,9 +144,23 @@ export class Masker {
     return token;
   }
 
+  /**
+   * Remembers placeholder-like text that is already in the texts to be sent, so our own tokens never take the same
+   * name: the AI's answer could not be told apart from it otherwise. Call it with every field before masking any.
+   */
+  reserve(texts: string[]) {
+    for (const text of texts) {
+      for (const match of text.matchAll(PLACEHOLDER_LIKE)) {
+        const token = canonicalToken(match);
+        if (token && !this.reverse.has(token)) this.reserved.add(token);
+      }
+    }
+  }
+
   /** Replaces sensitive values with placeholders */
   mask(text: string): string {
     if (!text) return text;
+    this.reserve([text]);
     // The add-in's own section headers ("=== AROUND THE SELECTION … ===") are left alone
     if (/^===.*===$/m.test(text)) {
       return text.split('\n').map(line => (/^===.*===$/.test(line) ? line : this.maskText(line))).join('\n');
@@ -137,10 +189,17 @@ export class Masker {
     return result;
   }
 
-  /** Puts the original values back; a half-arrived placeholder at the end is hidden until it completes */
+  /**
+   * Puts the original values back, also where the AI mangled a placeholder ("[cég 1]", "[PERSON_1]"); a
+   * half-arrived placeholder at the end is hidden until it completes. What cannot be resolved stays as it is:
+   * unresolvedPlaceholders finds it, so it never reaches the document.
+   */
   unmask(text: string, streaming = false): string {
     if (!text) return text;
-    const restored = text.replace(TOKEN, token => this.reverse.get(token) ?? token);
+    const restored = text.replace(PLACEHOLDER_LIKE, (...match) => {
+      const token = canonicalToken(match as unknown as string[]);
+      return (token && this.reverse.get(token)) ?? match[0];
+    });
     return streaming ? restored.replace(PARTIAL_TOKEN, '') : restored;
   }
 
@@ -163,6 +222,10 @@ export class Masker {
 
 /** Masks every text field of a request (the instruction and the user's style notes too) */
 export function maskRequest(request: AIRequestBody, masker: Masker): AIRequestBody {
+  masker.reserve([
+    request.instruction, request.originalText, request.documentContext, request.styleProfile?.notes ?? '', request.party ?? '',
+    ...(request.history ?? []).flatMap(turn => [turn.instruction, turn.result]),
+  ]);
   return {
     ...request,
     instruction: masker.mask(request.instruction),
@@ -178,10 +241,25 @@ export function maskRequest(request: AIRequestBody, masker: Masker): AIRequestBo
   };
 }
 
-const KNOWN_TOKEN = new RegExp(`\\[(?:${Object.keys(ENTITY_LABELS).join('|')})_\\d+\\]`, 'g');
+/**
+ * Placeholders still in an unmasked answer, in any spelling: the AI made them up or mangled them beyond
+ * recognition, so there is no real value behind them. Text that also stands in the sources (what was sent, before
+ * masking: the document, the instruction) is the document's own and does not count. Anything found here must never
+ * be written into the document.
+ */
+export function unresolvedPlaceholders(texts: string | string[], sources: string[] = []): string[] {
+  const found = new Set<string>();
+  for (const text of [texts].flat()) {
+    for (const match of text.matchAll(PLACEHOLDER_LIKE)) {
+      if (canonicalToken(match) && !sources.some(source => source.includes(match[0]))) found.add(match[0]);
+    }
+  }
+  return [...found];
+}
 
-/** Placeholders still in an unmasked answer: the AI made them up or mangled them, so they have no real value */
-export const leftoverPlaceholders = (text: string) => [...new Set(text.match(KNOWN_TOKEN) ?? [])];
+/** What the user is told when an answer is held back because of unresolved placeholders */
+export const unresolvedMessage = (placeholders: string[]) =>
+  `⛔ Ezt nem írom be a dokumentumba: a válaszban fel nem oldott helyettesítő maradt (${placeholders.join(', ')}). Mögötte nincs valódi adat, így hibás jelölés kerülne a szövegbe. Kérj másik változatot, vagy írd meg, mi álljon a helyén.`;
 
 /** Splits the user's own list (one per line or comma separated) */
 export const parseExtraTerms = (text: string) => text.split(/[\n,;]/).map(t => t.trim()).filter(Boolean);

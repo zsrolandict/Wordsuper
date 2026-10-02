@@ -8,7 +8,7 @@ import { UserFacingError, canResolveRevisions, insertCommentsAtParagraphs, jumpT
 import { SEVERITY_LABELS } from '../services/review';
 import { describeStyle, type Settings } from '../services/settings';
 import { formatNumber } from '../services/format';
-import { Masker, maskRequest, parseExtraTerms } from '../services/masking';
+import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { DiffView, SEVERITY_STYLES } from './Proposal';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
@@ -45,6 +45,8 @@ interface Analysis {
   running: boolean;
   overview?: string;
   assessments?: Map<number, ChangeAssessment>;
+  /** What was sent before masking (the change list, the instruction), to tell the document's own text from placeholders */
+  sources?: string[];
   error?: string;
   authProblem?: boolean;
   details: RequestDetailsData;
@@ -240,10 +242,15 @@ export default function ComparePanel({
       if (!parsed) throw new Error('Az elemzés eredményét nem tudtam értelmezni.');
       // Parsed with the placeholders in it, then each text is unmasked
       const assessments = new Map([...parsed.assessments].map(([id, a]) => [id, { ...a, summary: unmask(a.summary), recommendation: unmask(a.recommendation) }]));
-      setSelected(new Set(assessments.keys()));
+      const sources = [changeList, userInstruction];
+      // A comment with an unresolved placeholder is never ticked (and can't be inserted, see heldPlaceholders)
+      setSelected(new Set([...assessments.keys()].filter(id => {
+        const change = visibleChanges.find(c => c.id === id);
+        return change && !unresolvedPlaceholders(commentFor(change, assessments.get(id)!), sources).length;
+      })));
       setInserted(new Map());
       if (settings.sound) playSound('done');
-      setAnalysis(a => a && { ...a, running: false, overview: unmask(parsed.overview), assessments, details: { ...a.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt } });
+      setAnalysis(a => a && { ...a, running: false, overview: unmask(parsed.overview), assessments, sources, details: { ...a.details, thoughts: unmask(rawThoughts), durationMs: Date.now() - startedAt } });
     } catch (e) {
       const message = controller.signal.aborted
         ? '⏹️ Leállítottad az elemzést.'
@@ -256,12 +263,18 @@ export default function ComparePanel({
     }
   };
 
+  /** Placeholders a change's comment still has after unmasking: such a comment is never inserted */
+  const heldPlaceholders = (change: VersionChange): string[] => {
+    const assessment = analysis?.assessments?.get(change.id);
+    return assessment ? unresolvedPlaceholders(commentFor(change, assessment), analysis?.sources ?? []) : [];
+  };
+
   /** Inserts the comments of the given changes (default: the ticked ones not inserted yet); each only once */
   const insertComments = async (only?: number[]) => {
     if (!comparison || !analysis?.assessments) return;
     const wanted = only ? new Set(only) : selected;
-    // Changes hidden by the author filter are left out too
-    const chosen = visibleChanges.filter(c => wanted.has(c.id) && analysis.assessments!.has(c.id) && !inserted.has(c.id));
+    // Changes hidden by the author filter are left out too, and so is any comment with an unresolved placeholder
+    const chosen = visibleChanges.filter(c => wanted.has(c.id) && analysis.assessments!.has(c.id) && !inserted.has(c.id) && !heldPlaceholders(c).length);
     if (!chosen.length) return;
     setInserting(true);
     setInsertStatus(null);
@@ -310,7 +323,8 @@ export default function ComparePanel({
   const allAuthors = comparison?.authors ? [...new Set([...comparison.authors.values()].flat())].sort((a, b) => a.localeCompare(b, 'hu')) : [];
   const hiddenCount = (comparison?.changes.length ?? 0) - changes.length;
   // The batch button only covers ticked changes whose comment is not in the document yet
-  const toInsert = changes.filter(c => selected.has(c.id) && analysis?.assessments?.has(c.id) && !inserted.has(c.id)).length;
+  const toInsert = changes.filter(c => selected.has(c.id) && analysis?.assessments?.has(c.id) && !inserted.has(c.id) && !heldPlaceholders(c).length).length;
+  const heldCount = analysis?.assessments ? changes.filter(c => heldPlaceholders(c).length).length : 0;
   // A saved quick button sends its instruction; the button shows its label
   const presets = [
     ...DEFAULT_PRESETS.compare.map(label => ({ label, instruction: label })),
@@ -442,6 +456,9 @@ export default function ComparePanel({
                   </button>
                 </div>
               )}
+              {heldCount > 0 && (
+                <p className="text-red-700">⛔ {heldCount} értékelésben fel nem oldott helyettesítő maradt (mögötte nincs valódi adat), ezeket nem szúrom be a dokumentumba. Futtasd újra az elemzést.</p>
+              )}
               {insertStatus && <p className="font-medium text-green-700">{insertStatus}</p>}
               <RequestDetails details={analysis.details} isLoading={analysis.running} onNeverHide={onNeverHide} />
             </div>
@@ -495,7 +512,7 @@ export default function ComparePanel({
                   <input
                     type="checkbox"
                     checked={selected.has(change.id) || inserted.get(change.id) === 'inserted'}
-                    disabled={inserted.has(change.id)}
+                    disabled={inserted.has(change.id) || heldPlaceholders(change).length > 0}
                     onChange={() => setSelected(s => {
                       const next = new Set(s);
                       if (next.has(change.id)) next.delete(change.id);
@@ -509,7 +526,9 @@ export default function ComparePanel({
                     {assessment.recommendation && <span className="block text-neutral-500">Javaslat: {assessment.recommendation}</span>}
                   </span>
                 </label>
-                {inserted.get(change.id) === 'inserted' ? (
+                {heldPlaceholders(change).length > 0 ? (
+                  <p className="mt-1 text-[11px] text-red-700">⛔ Nem szúrható be: fel nem oldott helyettesítő maradt benne ({heldPlaceholders(change).join(', ')}).</p>
+                ) : inserted.get(change.id) === 'inserted' ? (
                   <p className="mt-1 text-[11px] font-semibold text-green-700">✓ Megjegyzés beszúrva</p>
                 ) : inserted.get(change.id) === 'skipped' ? (
                   <p className="mt-1 text-[11px] text-amber-700">A bekezdés azóta megváltozott, ezt kihagytam. Futtasd újra az összevetést.</p>
