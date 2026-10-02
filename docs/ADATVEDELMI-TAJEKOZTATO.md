@@ -76,7 +76,8 @@ A munkaablak **„Részletek”** paneljén minden válasznál látszik:
 - **A kitakarás szabályalapú, nem tökéletes.**
   - Egy ritka utónevű személynév kulcsszó, személyes adat vagy szerepkör nélkül a szöveg közepén, vagy az ügyletből kikövetkeztethető információ (egyedi összeg, ingatlan leírása) átjuthat.
   - Ha az AI a választ fel nem oldható helyettesítővel adja vissza, azt a program nem írja be a dokumentumba.
-  - Érzékeny ügyben érdemes a „mindig elrejtendő kifejezések” közé felvenni a kulcsneveket, és a „Részletek” panelen ellenőrizni.
+  - Érzékeny ügyben érdemes a „mindig elrejtendő kifejezések” közé felvenni a kulcsneveket, és bekapcsolni a „Küldés előtt mutasd meg, mit kap az AI” ellenőrzést.
+  - A maszkolás alapból kötelező: a szerver a maszkolatlan kérést visszautasítja (az üzemeltető `MASKING_POLICY=optional` beállítással engedheti a kikapcsolását).
 - **Nem maszkolt adat:** a szerződés tartalma és az összegek nem maszkolódnak, mert ezek nélkül az elemzés értelmetlen lenne. Ezeket a Vertex AI EU garanciái védik.
 - **Hozzáférés:** egy közös hozzáférési kulcs védi a szervert, ezért a kulcsot bizalmasan kell kezelni.
 - **Jogszabály-ellenőrzés:** a modell tudása nem élő jogszabálytár. Amiben bizonytalan, azt jelzi, és njt.hu-s ellenőrzést kér.

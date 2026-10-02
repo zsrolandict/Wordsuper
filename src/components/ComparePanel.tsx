@@ -1,6 +1,6 @@
 import React, { useRef, useState } from 'react';
 import { FileUp, Loader2, Sparkles, Square, MessageSquarePlus, AlertTriangle, KeyRound, FileDiff, Check, X } from 'lucide-react';
-import { MAX_COMPARE_CHARS, MAX_INSTRUCTION_CHARS } from '../shared/aiConfig';
+import { MAX_COMPARE_CHARS, MAX_INSTRUCTION_CHARS, type AIRequestBody } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import { readDocxParagraphs } from '../services/docxText';
 import { carryOver, compareVersions, formatChangesForAI, parseCompareResult, type ChangeAssessment, type VersionChange } from '../services/versionCompare';
@@ -8,7 +8,7 @@ import { UserFacingError, canResolveRevisions, insertCommentsAtParagraphs, jumpT
 import { SEVERITY_LABELS } from '../services/review';
 import { describeStyle, type Settings } from '../services/settings';
 import { formatNumber } from '../services/format';
-import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
+import { Masker, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
 import { DiffView, SEVERITY_STYLES } from './Proposal';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
@@ -74,6 +74,7 @@ function commentFor(change: VersionChange, assessment: ChangeAssessment): string
 export default function ComparePanel({
   settings,
   party,
+  prepareSend,
   onRateLimit,
   onOpenSettings,
   onNeverHide,
@@ -81,6 +82,8 @@ export default function ComparePanel({
   settings: Settings;
   /** The represented party: the changes are judged from its point of view */
   party: string;
+  /** Masks the request, and shows it before sending when the settings ask for it; null: the user cancelled */
+  prepareSend: (request: AIRequestBody, masker: Masker | null) => Promise<{ sent: AIRequestBody; masker: Masker | null } | null>;
   /** A masked value the user wants the AI to see from now on */
   onNeverHide?: (value: string) => void;
   onRateLimit: (info: RateLimitInfo) => void;
@@ -211,9 +214,10 @@ export default function ComparePanel({
       party,
     };
     if (settings.sound) primeSound();
-    const masker = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
-    const request = { mode: 'compare' as const, instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth, ...(party ? { party } : {}) };
-    const sentRequest = masker ? maskRequest(request, masker) : request;
+    const request: AIRequestBody = { mode: 'compare', instruction: userInstruction, originalText: '', documentContext: changeList, styleProfile: settings.styleProfile, depth: settings.depth, ...(party ? { party } : {}) };
+    const prepared = await prepareSend(request, settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null);
+    if (!prepared) return;
+    const { sent: sentRequest, masker } = prepared;
     const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
     details.masking = masker ? { summary: masker.summary(), entries: masker.entries() } : null;
     let rawThoughts = '';
@@ -257,7 +261,7 @@ export default function ComparePanel({
       const message = controller.signal.aborted
         ? '⏹️ Leállítottad az elemzést.'
         : e instanceof Error && e.message.startsWith('Az elemzés') ? e.message : describeRequestError(e);
-      const authProblem = e instanceof AIRequestError && e.code === 'UNAUTHORIZED';
+      const authProblem = e instanceof AIRequestError && (e.code === 'UNAUTHORIZED' || e.code === 'MASKING_REQUIRED');
       if (settings.sound && !controller.signal.aborted) playSound('error');
       setAnalysis(a => a && { ...a, running: false, error: message, authProblem, details: { ...a.details, durationMs: Date.now() - startedAt } });
     } finally {

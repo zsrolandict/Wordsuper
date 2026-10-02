@@ -193,6 +193,8 @@ export function describeRequestError(error: unknown): string {
         return 'Ezen a szerveren az üzemeltető csak EU-ban (Vertex AI, europe-… régió) feldolgozott felhős diktálást engedélyez, és ez a szerver nem EU-ban dolgoz fel. Használd a helyi diktálást (Beállítások → Diktálás), ott a hang el sem hagyja a gépet.';
       case 'DICTATION_RISK_NOT_ACCEPTED':
         return 'A felhős diktálás itt nem EU-ban dolgozik fel. Ha vállalod a kockázatot, a Beállítások → Diktálás részen jelöld be az „Elfogadom” négyzetet.';
+      case 'MASKING_REQUIRED':
+        return 'Az üzemeltető kötelezővé tette a maszkolást, ezért maszkolás nélkül nem küldhetek semmit az AI-nak. Kapcsold vissza: Beállítások → Adatvédelem → „Érzékeny adatok maszkolása”.';
       case 'RATE_LIMITED':
         return 'Túl sok kérés érkezett egy percen belül. Várj egy kicsit, és próbáld újra.';
       case 'INCOMPLETE':
@@ -215,6 +217,8 @@ export interface ServerInfo {
   location: string | null;
   euResident: boolean;
   dictationPolicy: 'eu-only' | 'user-risk';
+  /** required: the server refuses unmasked requests, so masking can't be switched off */
+  maskingPolicy?: 'required' | 'optional';
 }
 
 /** What the server runs (version, model, where it processes data); null when it can't be reached */

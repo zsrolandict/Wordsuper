@@ -22,7 +22,13 @@ export interface Settings {
   /** Insert without the preview step */
   autoApply: boolean;
   /** Replace sensitive values with placeholders before anything is sent to the AI */
-  masking: { enabled: boolean; extraTerms: string; neverHide: string };
+  masking: {
+    enabled: boolean;
+    extraTerms: string;
+    neverHide: string;
+    /** Show what the AI will get, and wait for "Küldés", before every request */
+    previewBeforeSend: boolean;
+  };
   /** A soft chime when an answer is ready */
   sound: boolean;
   /**
@@ -45,7 +51,7 @@ export const DEFAULT_SETTINGS: Settings = {
   styleProfile: { addressing: '', tone: '', notes: '' },
   customPresets: [],
   autoApply: false,
-  masking: { enabled: true, extraTerms: '', neverHide: '' },
+  masking: { enabled: true, extraTerms: '', neverHide: '', previewBeforeSend: false },
   sound: true,
   // base misunderstands Hungarian too often to be the default
   dictation: { engine: 'local', localModel: 'small', riskAccepted: false },
@@ -76,6 +82,7 @@ function sanitize(raw: unknown): Settings {
       enabled: value.masking?.enabled !== false,
       extraTerms: typeof value.masking?.extraTerms === 'string' ? value.masking.extraTerms : '',
       neverHide: typeof value.masking?.neverHide === 'string' ? value.masking.neverHide : '',
+      previewBeforeSend: value.masking?.previewBeforeSend === true,
     },
     sound: value.sound !== false,
     depth: (DEPTH_VALUES as readonly unknown[]).includes(value.depth) ? value.depth as Depth : 'auto',

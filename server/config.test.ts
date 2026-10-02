@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accessKeyProblem, parseDictationPolicy, parseTrustProxy } from './config';
+import { accessKeyProblem, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from './config';
 import { mapGeminiFinish } from './ai/gemini';
 
 test('access key: missing, placeholder and short keys are refused, whitespace is ignored', () => {
@@ -37,4 +37,11 @@ test('dictation policy: the user may accept the risk unless the operator forbids
   assert.equal(parseDictationPolicy('eu-only'), 'eu-only');
   assert.equal(parseDictationPolicy(' EU-ONLY '), 'eu-only');
   assert.equal(parseDictationPolicy('whatever'), 'user-risk');
+});
+
+test('masking is required unless the operator makes it optional', () => {
+  assert.equal(parseMaskingPolicy(undefined), 'required');
+  assert.equal(parseMaskingPolicy(''), 'required');
+  assert.equal(parseMaskingPolicy('nonsense'), 'required');
+  assert.equal(parseMaskingPolicy(' Optional '), 'optional');
 });

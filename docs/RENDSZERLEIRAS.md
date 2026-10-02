@@ -163,6 +163,8 @@ Mindkét esetben:
 ## 4. Adatvédelem – maszkolás
 
 - **Alapból bekapcsolva** (Beállítások → Adatvédelem).
+- **Az üzemeltető kötelezővé teheti** (`MASKING_POLICY=required`, ez az alapértelmezés): a szerver visszautasítja a maszkolatlan kérést, a Beállításokban a kapcsoló zárolva van, és a hibaüzenet megmondja, hol kell visszakapcsolni. `MASKING_POLICY=optional` esetén a felhasználó kikapcsolhatja. (Ez a véletlen ellen véd, nem egy szándékosan átírt kliens ellen.)
+- **Küldés előtti ellenőrzés** (bekapcsolható): minden kérés előtt megjelenik, pontosan mit kap az AI, a helyettesítők kiemelve. Ha valami kimaradt, ott helyben elrejthető (a „Mindig elrejtendő kifejezések” közé is bekerül, és a kérés újra maszkolódik); csak a „Küldés” után megy ki bármi, a „Mégse” után semmi.
 - Minden kérés előtt, még a gépen, szabályalapú felismeréssel helyettesítőre cseréli ezeket:
 
   | Kategória | Helyettesítő |

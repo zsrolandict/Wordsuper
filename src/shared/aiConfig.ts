@@ -92,7 +92,9 @@ export type ApiErrorCode =
   /** The operator forbids cloud dictation outside the EU (DICTATION_POLICY=eu-only) */
   | 'DICTATION_NOT_ALLOWED'
   /** Cloud dictation outside the EU needs the user's explicit acceptance in the settings */
-  | 'DICTATION_RISK_NOT_ACCEPTED';
+  | 'DICTATION_RISK_NOT_ACCEPTED'
+  /** The operator requires masking (MASKING_POLICY=required) and the request was not masked */
+  | 'MASKING_REQUIRED';
 
 export const contextLimitFor = (mode: Mode) =>
   mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;

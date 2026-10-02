@@ -13,6 +13,14 @@ export type DictationPolicy = "eu-only" | "user-risk";
 export const parseDictationPolicy = (value: string | undefined): DictationPolicy =>
   value?.trim().toLowerCase() === "eu-only" ? "eu-only" : "user-risk";
 
+/**
+ * required (default): the server refuses requests the task pane did not mask, so nothing leaves unmasked by mistake
+ * (e.g. a user switched masking off). optional: the user may switch masking off.
+ */
+export type MaskingPolicy = "required" | "optional";
+export const parseMaskingPolicy = (value: string | undefined): MaskingPolicy =>
+  value?.trim().toLowerCase() === "optional" ? "optional" : "required";
+
 export function accessKeyProblem(key: string | undefined): string | null {
   const value = key?.trim() ?? "";
   if (!value) return "APP_ACCESS_KEY is not set.";

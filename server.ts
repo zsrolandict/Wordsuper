@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { accessKeyProblem, parseDictationPolicy, parseTrustProxy } from "./server/config";
+import { accessKeyProblem, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from "./server/config";
 import { readVersion } from "./server/version";
 import { providerFromEnv } from "./server/ai";
 
@@ -80,7 +80,8 @@ async function startServer() {
 
   const version = readVersion();
   const dictationPolicy = parseDictationPolicy(process.env.DICTATION_POLICY);
-  console.log(`Version: ${version.commit} (${version.date || "no date"}); dictation policy: ${dictationPolicy}`);
+  const maskingPolicy = parseMaskingPolicy(process.env.MASKING_POLICY);
+  console.log(`Version: ${version.commit} (${version.date || "no date"}); dictation policy: ${dictationPolicy}; masking: ${maskingPolicy}`);
 
   // Lets the settings panel verify the access key without spending AI credits
   app.get("/api/auth-check", (req, res) => {
@@ -96,6 +97,7 @@ async function startServer() {
       location: "provider" in ai ? ai.provider.location : null,
       euResident: "provider" in ai ? ai.provider.euResident : false,
       dictationPolicy,
+      maskingPolicy,
     });
   });
 
@@ -111,6 +113,11 @@ async function startServer() {
       return res.status(400).json({ error: parsed.error, code: "BAD_REQUEST" });
     }
     const request = parsed.value;
+    // Against mistakes, not against a hostile client: the task pane says whether it masked the texts
+    if (maskingPolicy === "required" && !request.masked) {
+      audit({ ...auditBase(req), action: request.mode, status: "rejected", detail: "MASKING_REQUIRED", model: ai.provider.model, location: ai.provider.location, durationMs: 0 });
+      return res.status(403).json({ error: "This server only accepts masked requests (MASKING_POLICY=required).", code: "MASKING_REQUIRED" });
+    }
     const { systemInstruction, prompt, responseJsonSchema } = buildPrompt(request);
     // Metadata only: sizes and flags, never the texts
     const logResult = (status: AuditEntry["status"], extra: Partial<AuditEntry> = {}) => audit({

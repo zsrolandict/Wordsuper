@@ -46,6 +46,7 @@ import ComparePanel from './ComparePanel';
 import DictationButton from './DictationButton';
 import Logo from './Logo';
 import PartyBar from './PartyBar';
+import SendPreview, { type PreviewDecision } from './SendPreview';
 import { loadParty, saveParty } from '../services/parties';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, looksLikeReview, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 
@@ -230,6 +231,29 @@ export default function TaskPane() {
     // Instant, not smooth: a smooth scroll fires scroll events on its way and would stop following
     if (el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [messages.length, lastMessage?.content, lastMessage?.isLoading]);
+
+  // The request waiting for the user's look before it is sent (Settings → Adatvédelem)
+  const [sendPreview, setSendPreview] = useState<{ request: AIRequestBody; masker: Masker | null; resolve: (decision: PreviewDecision) => void } | null>(null);
+
+  /**
+   * Masks a request and, when the settings ask for it, shows what the AI will get before it is sent. The user may
+   * name one more thing to hide: it joins the "always hide" list and the request is masked again. null: cancelled.
+   */
+  const prepareSend = async (request: AIRequestBody, masker: Masker | null): Promise<{ sent: AIRequestBody; masker: Masker | null } | null> => {
+    let current = masker;
+    let extraTerms = parseExtraTerms(settings.masking.extraTerms);
+    for (;;) {
+      const sent = current ? maskRequest(request, current) : request;
+      if (!settings.masking.previewBeforeSend) return { sent, masker: current };
+      const decision = await new Promise<PreviewDecision>(resolve => setSendPreview({ request: sent, masker: current, resolve }));
+      setSendPreview(null);
+      if (decision.kind === 'send') return { sent, masker: current };
+      if (decision.kind === 'cancel') return null;
+      extraTerms = [...extraTerms, decision.term];
+      updateSettings(s => ({ ...s, masking: { ...s.masking, extraTerms: [s.masking.extraTerms.trim(), decision.term].filter(Boolean).join('\n') } }));
+      current = new Masker(extraTerms, parseExtraTerms(settings.masking.neverHide));
+    }
+  };
 
   // A newer version on the server (after an update): offer a reload instead of running old code
   const [newVersion, setNewVersion] = useState(false);
@@ -476,10 +500,14 @@ export default function TaskPane() {
         ...(party ? { party } : {}),
       };
       // Names and identifiers are replaced by placeholders before the request leaves the machine
-      const masker = refining
+      const prepared = await prepareSend(request, refining
         ? current!.masker
-        : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
-      const sentRequest = masker ? maskRequest(request, masker) : request;
+        : settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null);
+      if (!prepared) {
+        updateMessage(userMessageId, m => ({ ...m, status: { text: 'Nem küldtem el.', tone: 'neutral' } }));
+        return;
+      }
+      const { sent: sentRequest, masker } = prepared;
       const sources = [request.instruction, request.originalText, request.documentContext];
       const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
 
@@ -547,7 +575,7 @@ export default function TaskPane() {
           finishLoadingMessage({ status: { text: '⏹️ Leállítottad. A dokumentumot nem módosítottam.', tone: 'neutral' } });
         } else {
           chime('error');
-          const authProblem = aiError instanceof AIRequestError && aiError.code === 'UNAUTHORIZED';
+          const authProblem = aiError instanceof AIRequestError && (aiError.code === 'UNAUTHORIZED' || aiError.code === 'MASKING_REQUIRED');
           finishLoadingMessage({ role: 'system', content: describeRequestError(aiError), showSettingsLink: authProblem });
         }
         return;
@@ -920,6 +948,15 @@ export default function TaskPane() {
         </div>
       )}
 
+      {sendPreview && (
+        <SendPreview
+          request={sendPreview.request}
+          masked={!!sendPreview.masker}
+          summary={sendPreview.masker?.summary() ?? ''}
+          onDecide={sendPreview.resolve}
+        />
+      )}
+
       {confirmation && (
         <div className="fixed inset-0 z-40 bg-black/30 flex items-center justify-center p-4" role="dialog" aria-modal="true">
           <div className="bg-white rounded-xl shadow-lg p-4 max-w-sm w-full space-y-3">
@@ -1004,6 +1041,7 @@ export default function TaskPane() {
         <ComparePanel
           settings={settings}
           party={party}
+          prepareSend={prepareSend}
           onRateLimit={setRateLimit}
           onOpenSettings={() => setView('settings')}
           onNeverHide={value => updateSettings(s => ({ ...s, masking: { ...s.masking, neverHide: [s.masking.neverHide.trim(), value].filter(Boolean).join('\n') } }))}

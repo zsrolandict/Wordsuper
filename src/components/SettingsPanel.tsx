@@ -58,6 +58,8 @@ export default function SettingsPanel({
     return () => { cancelled = true; };
   }, [settings.accessKey]);
 
+  // undefined until the server answers: the switch is only locked once it is known
+  const maskingRequired = serverInfo ? serverInfo.maskingPolicy !== 'optional' : undefined;
   const style = settings.styleProfile;
   const setStyle = (changes: Partial<typeof style>) =>
     onChange(s => ({ ...s, styleProfile: { ...s.styleProfile, ...changes } }));
@@ -261,6 +263,8 @@ export default function SettingsPanel({
             <input
               type="checkbox"
               checked={settings.masking.enabled}
+              // The operator requires masking: it can be switched on, never off
+              disabled={maskingRequired && settings.masking.enabled}
               onChange={e => onChange(s => ({ ...s, masking: { ...s.masking, enabled: e.target.checked } }))}
               className="mt-0.5"
             />
@@ -271,6 +275,20 @@ export default function SettingsPanel({
                 Felismerem: {Object.values(ENTITY_LABELS).filter(label => label !== ENTITY_LABELS.EGYÉB).join(', ')}.
                 Hogy mit rejtettem el, azt minden válasz Részletek paneljén megnézheted.
               </span>
+              {maskingRequired && <span className="block text-xs text-blue-800 mt-0.5">🔒 Az üzemeltető kötelezővé tette, ezért nem kapcsolható ki.</span>}
+              {maskingRequired === false && !settings.masking.enabled && <span className="block text-xs text-amber-700 mt-0.5">⚠️ Kikapcsolva a nevek és azonosítók változtatás nélkül jutnak az AI-hoz.</span>}
+            </span>
+          </label>
+          <label className="flex items-start space-x-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={settings.masking.previewBeforeSend}
+              onChange={e => onChange(s => ({ ...s, masking: { ...s.masking, previewBeforeSend: e.target.checked } }))}
+              className="mt-0.5"
+            />
+            <span>
+              Küldés előtt mutasd meg, mit kap az AI
+              <span className="block text-xs text-neutral-500">Minden kérés előtt megmutatom a maszkolt szöveget. Ha valami kimaradt, ott helyben elrejtheted (a „Mindig elrejtendő kifejezések” közé is felveszem), és csak a „Küldés” után megy ki.</span>
             </span>
           </label>
           <label className="block text-xs font-medium text-neutral-700">
