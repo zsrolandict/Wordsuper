@@ -7,8 +7,9 @@ import type { TokenUsage } from "./ai/types";
  * set, are appended to that file too.
  */
 export interface AuditEntry {
-  /** Who: the ID the user entered in the task pane's settings (not verified), and the client address */
+  /** Who: the owner of a personal access key (verified), or the ID typed in the task pane's settings (not verified) */
   user: string;
+  verified?: boolean;
   ip: string;
   action: string;
   status: "ok" | "incomplete" | "error" | "aborted" | "rejected";

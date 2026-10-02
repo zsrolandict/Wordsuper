@@ -223,10 +223,11 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 ## 5/B. Auditnapló
 
 - Minden AI-műveletről egy JSON-sor készül, **tartalom nélkül**:
-  - időpont, felhasználói azonosító (Beállítások), IP;
+  - időpont, felhasználó, IP. Személyes hozzáférési kulccsal (`APP_ACCESS_KEYS`, kollégánként külön, egyenként visszavonható) a kulcs gazdája, ellenőrzötten (`verified: true`); közös kulccsal a Beállításokban beírt név, ellenőrizetlenül (`verified: false`);
   - művelet, méretek, maszkolás be/ki és a kitakart elemek száma;
   - modell, hely, státusz, időtartam, tokenszám.
 - A napló a szerver naplójába (Cloud Logging) kerül, és ha be van állítva, fájlba is (`AUDIT_LOG_FILE`).
+- Az INDITAS.bat figyelmeztet, ha a program mappája a OneDrive-on van: ilyenkor a `.env` (a kulcsokkal) és a naplófájl a felhőbe is szinkronizálódik, és a mappa megosztásával a kulcsok is továbbadódnak.
 - Az adatvédelmi részletek külön dokumentumban vannak: [ADATVEDELMI-TAJEKOZTATO.md](ADATVEDELMI-TAJEKOZTATO.md).
 
 ## 6. Ismert korlátok, kockázatok

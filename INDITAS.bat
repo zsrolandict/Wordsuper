@@ -35,6 +35,18 @@ if defined NEED_INSTALL (
 )
 if exist .git for /f %%v in ('git log -1 --format^=%%h 2^>nul') do echo Verzio: %%v
 
+rem --- OneDrive: a .env (kulcsok) es a naplo a felhobe is szinkronizalodna ---
+rem (ugrassal, nem zarojeles blokkban: a mappa neveben is lehet zarojel, pl. "OneDrive - Ceg (Kft)")
+echo "%CD%" | findstr /I /C:"OneDrive" >nul
+if errorlevel 1 goto nem_onedrive
+echo.
+echo FIGYELEM: ez a mappa a OneDrive-on van: %CD%
+echo A .env fajl (a Gemini- es a hozzaferesi kulccsal) es a naplofajl igy a Microsoft felhojebe is felkerul,
+echo es akivel a mappat megosztod, az a kulcsokat is megkapja.
+echo Javasolt: helyezd at a mappat OneDrive-on kivulre, pl. C:\WordWriter ala, es onnan inditsd.
+echo.
+:nem_onedrive
+
 rem --- Kulcsok: .env ---
 if not exist .env (
   copy .env.example .env >nul

@@ -104,7 +104,7 @@ export default function SettingsPanel({
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
         <Card title="Hozzáférési kulcs">
-          <p className="text-xs text-neutral-500">A szerver csak ezzel a kulccsal fogad kéréseket. Az üzemeltető adja meg (APP_ACCESS_KEY).</p>
+          <p className="text-xs text-neutral-500">A szerver csak ezzel a kulccsal fogad kéréseket. Az üzemeltető adja meg: közös kulcs (APP_ACCESS_KEY), vagy kollégánként személyes kulcs (APP_ACCESS_KEYS). Személyes kulccsal az auditnapló ellenőrzötten téged nevez meg.</p>
           <div className="flex space-x-2">
             <div className="relative flex-1">
               <input
@@ -142,7 +142,7 @@ export default function SettingsPanel({
               placeholder="Pl. dr. Kovács Anna vagy kovacs.anna@iroda.hu"
               className={`${inputClass} mt-1 font-normal`}
             />
-            <span className="block text-[10px] text-neutral-400 font-normal">A szerver auditnaplója ezzel jegyzi fel, ki mikor milyen műveletet futtatott. A dokumentum tartalma sosem kerül a naplóba, csak méretek, időpont, modell és tokenszám.</span>
+            <span className="block text-[10px] text-neutral-400 font-normal">Közös kulcsnál a szerver auditnaplója ezzel jegyzi fel, ki mikor milyen műveletet futtatott (ellenőrizetlenül); személyes kulcsnál a kulcs gazdáját írja. A dokumentum tartalma sosem kerül a naplóba, csak méretek, időpont, modell és tokenszám.</span>
           </label>
           {keyStatus.state === 'error' && <p className="text-xs text-red-700 whitespace-pre-wrap">{keyStatus.message}</p>}
         </Card>

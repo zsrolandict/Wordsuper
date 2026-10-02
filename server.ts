@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { accessKeyProblem, contentSecurityPolicy, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from "./server/config";
+import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy, type AccessKeys } from "./server/config";
 import { readVersion } from "./server/version";
 import { providerFromEnv } from "./server/ai";
 
@@ -20,14 +20,26 @@ function keysMatch(provided: string, expected: string) {
 }
 
 // 3. Access key (Prevents strangers from spending the AI credits of whoever hosts the add-in)
-function requireAccessKey(expected: string | null, problem: string | null) {
+/** Whose key it is: the owner of a personal key, "" for the shared key, null for no valid key */
+function keyOwner(keys: AccessKeys, provided: string): string | null {
+  let owner: string | null = null;
+  // Every key is compared, so the time taken does not tell which one matched
+  for (const [key, name] of keys.personal) if (keysMatch(provided, key)) owner = name;
+  if (keys.shared && keysMatch(provided, keys.shared) && owner === null) owner = "";
+  return owner;
+}
+
+function requireAccessKey(keys: AccessKeys) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (problem || !expected) {
-      return res.status(503).json({ error: `The access key is not configured properly: ${problem}`, code: "ACCESS_KEY_NOT_CONFIGURED" });
+    if (keys.problem) {
+      return res.status(503).json({ error: `The access key is not configured properly: ${keys.problem}`, code: "ACCESS_KEY_NOT_CONFIGURED" });
     }
-    if (!keysMatch(req.get(ACCESS_KEY_HEADER) ?? "", expected)) {
+    const owner = keyOwner(keys, req.get(ACCESS_KEY_HEADER) ?? "");
+    if (owner === null) {
       return res.status(401).json({ error: "Invalid or missing access key.", code: "UNAUTHORIZED" });
     }
+    // A personal key tells who it is; with the shared key only the name typed in the settings is known
+    res.locals.keyOwner = owner;
     next();
   };
 }
@@ -62,12 +74,17 @@ async function startServer() {
   }
 
   // Secrets from files or `gcloud secrets` often end with a newline; Node trims header values the same way
-  const accessKey = process.env.APP_ACCESS_KEY?.trim() || null;
-  const keyProblem = accessKeyProblem(accessKey ?? undefined);
-  if (keyProblem) console.warn(`${keyProblem} Every /api request will be refused.`);
+  const accessKeys = parseAccessKeys(process.env.APP_ACCESS_KEY, process.env.APP_ACCESS_KEYS);
+  accessKeys.warnings.forEach(warning => console.warn(warning));
+  if (accessKeys.problem) console.warn(`${accessKeys.problem} Every /api request will be refused.`);
+  else if (accessKeys.personal.size) console.log(`Personal access keys: ${accessKeys.personal.size}${accessKeys.shared ? " (and the shared key)" : ""}`);
 
   const audit = createAuditLogger(process.env.AUDIT_LOG_FILE);
-  const auditBase = (req: Request) => ({ user: readUserId(req.get(USER_ID_HEADER)), ip: req.ip ?? "" });
+  // The owner of a personal key is verified; the name typed in the settings is not
+  const auditBase = (req: Request) => {
+    const owner = (req.res?.locals.keyOwner as string | undefined) || "";
+    return owner ? { user: owner, verified: true, ip: req.ip ?? "" } : { user: readUserId(req.get(USER_ID_HEADER)), verified: false, ip: req.ip ?? "" };
+  };
 
   const ai = providerFromEnv(process.env);
   if ("problem" in ai) console.warn(ai.problem);
@@ -93,7 +110,7 @@ async function startServer() {
   });
 
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
-  app.use("/api/", (req, res, next) => (req.path === "/info" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKey, keyProblem));
+  app.use("/api/", (req, res, next) => (req.path === "/info" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKeys));
   
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));

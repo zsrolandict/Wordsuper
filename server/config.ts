@@ -29,6 +29,46 @@ export function accessKeyProblem(key: string | undefined): string | null {
   return null;
 }
 
+/** The server's access keys: a shared one (APP_ACCESS_KEY), and personal ones (APP_ACCESS_KEYS="anna:key1, péter:key2") */
+export interface AccessKeys {
+  shared: string | null;
+  /** key → whose it is */
+  personal: Map<string, string>;
+  /** Why no request can be accepted at all, or null */
+  problem: string | null;
+  /** Personal entries that were skipped, for the start-up log */
+  warnings: string[];
+}
+
+/**
+ * Personal keys let each colleague have their own key, revoked one by one, and make the audit log's user the
+ * verified owner of the key instead of a name anyone can type. The shared key keeps working next to them.
+ */
+export function parseAccessKeys(sharedRaw: string | undefined, personalRaw: string | undefined): AccessKeys {
+  const warnings: string[] = [];
+  const personal = new Map<string, string>();
+  const names = new Set<string>();
+  for (const entry of (personalRaw ?? '').split(/[,;\n]/).map(e => e.trim()).filter(Boolean)) {
+    const colon = entry.indexOf(':');
+    const name = colon > 0 ? entry.slice(0, colon).trim() : '';
+    const key = colon > 0 ? entry.slice(colon + 1).trim() : '';
+    const problem = !name ? 'it has no "name:" in front' : accessKeyProblem(key);
+    if (problem) warnings.push(`APP_ACCESS_KEYS entry ${name ? `"${name}"` : `#${personal.size + warnings.length + 1}`} skipped: ${problem.replace(/^APP_ACCESS_KEY/, 'the key')}`);
+    else if (personal.has(key)) warnings.push(`APP_ACCESS_KEYS entry "${name}" skipped: the same key is already given to "${personal.get(key)}".`);
+    else if (names.has(name)) warnings.push(`APP_ACCESS_KEYS entry "${name}" skipped: the name is used twice.`);
+    else {
+      personal.set(key, name);
+      names.add(name);
+    }
+  }
+  const sharedValue = sharedRaw?.trim() || null;
+  const sharedProblem = accessKeyProblem(sharedValue ?? undefined);
+  // Without a usable shared key, personal keys alone are enough
+  if (sharedProblem && sharedValue) warnings.push(`${sharedProblem} The shared key is not accepted.`);
+  const shared = sharedProblem ? null : sharedValue;
+  return { shared, personal, problem: !shared && !personal.size ? sharedProblem : null, warnings };
+}
+
 export type TrustProxy = false | number | string;
 
 /**
