@@ -136,3 +136,39 @@ test('while streaming, a half-arrived placeholder in any spelling is hidden', ()
   assert.equal(masker.unmask('A szerződő fél: [CÉG_', true), 'A szerződő fél: ');
   assert.equal(masker.unmask('A szerződő fél: [cég 1]', true), 'A szerződő fél: ABC Kft.');
 });
+
+const maskedBy = (text: string, masker = new Masker()) => masker.mask(text);
+
+test('names without a telltale word: party block, signature block, foreign names', () => {
+  assert.equal(maskedBy('Kiss Péter (születési hely, idő: Budapest, 1980.) mint Vevő'), '[SZEMÉLY_1] (születési hely, idő: Budapest, 1980.) mint Vevő');
+  assert.equal(maskedBy('Jiří Dvořák (szül.: Prága) és Anna Novák'), '[SZEMÉLY_1] (szül.: Prága) és [SZEMÉLY_2]');
+  // The line break stays: the role on the next line is not part of the name
+  assert.equal(maskedBy('____________\nKovács János\nEladó'), '____________\n[SZEMÉLY_1]\nEladó');
+  assert.equal(maskedBy('Jiří Dvořák ügyvezető'), '[SZEMÉLY_1] ügyvezető');
+  assert.equal(maskedBy('This Agreement is signed by Peter Kiss and John Smith.'), 'This Agreement is signed by [SZEMÉLY_1] and [SZEMÉLY_2].');
+});
+
+test('names with known given names, inflected, married, titled, in capitals', () => {
+  const masker = new Masker();
+  const masked = masker.mask('A díjat Kovács Annának kell megfizetni, Nagy-Szabó Jánosné és ifj. Tóth Gábor jelenlétében. DR. NAGY ANNA ellenjegyzi.');
+  assert.equal(masked, 'A díjat [SZEMÉLY_1]nak kell megfizetni, [SZEMÉLY_2] és [SZEMÉLY_3] jelenlétében. [SZEMÉLY_4] ellenjegyzi.');
+  // Back exactly as it was, suffixes included
+  assert.equal(masker.unmask(masked), 'A díjat Kovács Annának kell megfizetni, Nagy-Szabó Jánosné és ifj. Tóth Gábor jelenlétében. DR. NAGY ANNA ellenjegyzi.');
+});
+
+test('a found name is hidden in capitals and by its surname where that means the person', () => {
+  const masker = new Masker();
+  const text = 'Képviseli: Kovács János ügyvezető. Kovács úr kijelenti, hogy Kovácsné és dr. Kovács is tud róla.\nKOVÁCS JÁNOS';
+  const masked = masker.mask(text);
+  for (const secret of ['Kovács', 'KOVÁCS']) assert.ok(!masked.includes(secret), masked);
+  assert.equal(masker.unmask(masked), text);
+});
+
+test('ordinary capitalized words, institutions and defined terms are not taken for names', () => {
+  const text = 'A Vevő az Eladó részére fizet. Annak érdekében a Magyar Nemzeti Bank és a Polgári Törvénykönyv szerint a Felek megállapodnak; Budapest, Szent István körút.';
+  assert.equal(maskedBy(text), text);
+});
+
+test('invisible characters do not hide a name or a number', () => {
+  assert.equal(maskedBy('képviseli: Ko\u200bvács Já\u00adnos ügyvezető, e-mail: ko\u200bvacs@example.hu'), 'képviseli: [SZEMÉLY_1] ügyvezető, e-mail: [EMAIL_1]');
+});

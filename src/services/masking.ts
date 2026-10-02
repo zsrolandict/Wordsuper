@@ -1,4 +1,7 @@
 import type { AIRequestBody } from '../shared/aiConfig';
+import { GIVEN_NAMES } from './givenNames';
+import { KNOWN_ROLES } from './parties';
+import { stripControlChars } from './textDiff';
 
 /**
  * Reversible masking of sensitive data before text leaves the machine: names, companies, e-mail addresses,
@@ -26,12 +29,36 @@ export const ENTITY_LABELS: Record<EntityKind, string> = {
 };
 
 const U = 'A-ZÁÉÍÓÖŐÚÜŰ';
-const L = 'a-záéíóöőúüű';
-const NAME_WORD = `[${U}][${L}]+(?:-[${U}][${L}]+)?`;
 const LEGAL_FORMS = 'Kft|Zrt|Nyrt|Bt|Kkt|Kht|Ltd|GmbH|Inc|LLC|Plc|AG|SE';
-const PERSON_KEYWORDS = ['név', 'neve', 'nevű', 'képviseli', 'képviselő', 'képviseletében', 'ügyvezető', 'aláíró', 'meghatalmazott', 'tulajdonos', 'eladó', 'vevő', 'bérlő', 'bérbeadó', 'megbízó', 'megbízott']
-  .map(word => `[${word[0]}${word[0].toUpperCase()}]${word.slice(1)}`)
+/** "eladó" → "[eE]ladó": a word at the start of a sentence or a line is capitalized too */
+const eitherCase = (words: readonly string[]) => words.map(word => `[${word[0].toLowerCase()}${word[0].toUpperCase()}]${word.slice(1)}`).join('|');
+const PERSON_KEYWORDS = eitherCase(['név', 'neve', 'nevű', 'képviseli', 'képviselő', 'képviseletében', 'ügyvezető', 'aláíró', 'meghatalmazott', 'tulajdonos', 'eladó', 'vevő', 'bérlő', 'bérbeadó', 'megbízó', 'megbízott']);
+
+/** Capitalized words that are never part of a person's name: articles, parties, frequent defined terms */
+const NOT_NAME = ['A', 'Az', 'Egy', 'És', 'Mint', 'Alulírott', 'The', 'An', 'And', 'Budapest', 'Magyarország', 'Felek', 'Fél',
+  'Szerződés', 'Ingatlan', 'Vételár', 'Melléklet', 'Társaság', 'Ptk', 'Szent', ...KNOWN_ROLES];
+const notName = (words: string[]) => `(?!(?:${words.join('|')})(?![\\p{L}-]))`;
+/** Spaces inside a name; never a line break, so a name never runs into the next line ("Kovács János⏎Eladó") */
+const SP = '[^\\S\\n]+';
+/** One word of a person's name, in any alphabet: Kovács, Nagy-Szabó, Dvořák */
+const NAME_WORD = `${notName(NOT_NAME)}\\p{Lu}\\p{Ll}+(?:-\\p{Lu}\\p{Ll}+)?`;
+const NAME_WORD_UPPER = `${notName(NOT_NAME.map(w => w.toUpperCase()))}\\p{Lu}{2,}(?:-\\p{Lu}{2,})?`;
+/** dr., ifj., id., özv., prof. in front of a name belong to it */
+const TITLE = `(?:(?:[dD][rR]|[iI][fF][jJ]|[iI][dD]|[öÖ][zZ][vV]|[pP][rR][oO][fF])\\.${SP})*`;
+/**
+ * Given names, longest first; a final a/e may lengthen before a suffix (Anna → Annának), and the suffix stays
+ * outside the masked value, so the AI can still inflect the placeholder: "[SZEMÉLY_1]nak".
+ */
+const givenNames = (upper: boolean) => [...GIVEN_NAMES]
+  .sort((a, b) => b.length - a.length)
+  .map(name => (upper ? name.toUpperCase() : name).replace(/a$/, upper ? '[AÁ]' : '[aá]').replace(/e$/, upper ? '[EÉ]' : '[eé]'))
   .join('|');
+const GIVEN = `(?:${givenNames(false)})(?:né)?`;
+const GIVEN_UPPER = `(?:${givenNames(true)})(?:NÉ)?`;
+/** What follows the name of a party in its block: "Kiss Péter (szül.: …", "Jiří Dvořák, lakcím: …" */
+const PERSONAL_DATA = eitherCase(['szül', 'anyja', 'lakcím', 'lakóhely', 'állampolgár', 'személyi', 'adóazonosító', 'útlevél', 'date of birth', 'born', 'residing', 'passport', 'nationality']);
+/** What follows a name in a signature block or a party list: "Kovács János⏎Eladó", "Jiří Dvořák ügyvezető" */
+const ROLE_AFTER = `${eitherCase([...KNOWN_ROLES, 'ügyvezető', 'vezérigazgató', 'igazgató', 'cégvezető', 'képviselő', 'meghatalmazott', 'tanú', 'ügyvéd', 'közjegyző', 'aláíró'])}|s\\.\\s?k\\.`;
 
 interface Rule {
   kind: EntityKind;
@@ -61,17 +88,60 @@ const RULES: Rule[] = [
   // Companies: capitalized words before a legal form (the article in front is not part of the name)
   {
     kind: 'CÉG',
-    pattern: new RegExp(`(?<![\\p{L}\\d])(?!(?:A|Az|The)\\s)((?:[${U}0-9][\\p{L}0-9&.\\-]*\\s+){0,5}[${U}0-9][\\p{L}0-9&.\\-]*\\s+(?:${LEGAL_FORMS})(?![\\p{L}\\d])\\.?)`, 'gu'),
+    // Words of a name are one or two spaces apart: a wider gap (a two-column signature block) ends the name
+    pattern: new RegExp(`(?<![\\p{L}\\d])(?!(?:A|Az|The)\\s)((?:[${U}0-9][\\p{L}0-9&.\\-]*[ \\u00a0]{1,2}){0,5}[${U}0-9][\\p{L}0-9&.\\-]*[ \\u00a0]{1,2}(?:${LEGAL_FORMS})(?![\\p{L}\\d])\\.?)`, 'gu'),
     group: 1,
   },
-  // People after a telltale word: "képviseli: dr. Kiss Anna", "név: Nagy Péter", "ügyvezető Kovács János".
-  // Case-sensitive on purpose: only capitalized words count as a name ("… Anna ügyvezető" keeps "ügyvezető").
+  // People. Case-sensitive on purpose: only capitalized words count as a name ("… Anna ügyvezető" keeps "ügyvezető").
+  // After a telltale word: "képviseli: dr. Kiss Anna", "név: Nagy Péter", "ügyvezető Kovács János"
   {
     kind: 'SZEMÉLY',
-    pattern: new RegExp(`(?<![\\p{L}])(?:${PERSON_KEYWORDS})\\s*:?\\s+((?:[dD]r\\.\\s+)?${NAME_WORD}(?:\\s+${NAME_WORD}){1,2})`, 'gu'),
+    pattern: new RegExp(`(?<![\\p{L}])(?:${PERSON_KEYWORDS})\\s*:?\\s+(${TITLE}${NAME_WORD}(?:${SP}${NAME_WORD}){1,2})`, 'gu'),
+    group: 1,
+  },
+  // A party block: the name, then personal data ("Kiss Péter (születési hely, idő: …", "Jiří Dvořák, szül.: …")
+  {
+    kind: 'SZEMÉLY',
+    pattern: new RegExp(`(?<![\\p{L}])(${TITLE}${NAME_WORD}(?:${SP}${NAME_WORD}){1,3})(?=\\s*[(,]\\s*[^()\\n]{0,40}?(?:${PERSONAL_DATA}))`, 'gu'),
+    group: 1,
+  },
+  // A signature block or a list of signatories: the name, then the role ("Kovács János⏎Eladó", "… mint Vevő")
+  {
+    kind: 'SZEMÉLY',
+    pattern: new RegExp(`(?<![\\p{L}])(${TITLE}${NAME_WORD}(?:${SP}${NAME_WORD}){1,2})(?=[^\\S\\n]*,?\\s*(?:mint${SP})?(?:${ROLE_AFTER})(?![\\p{L}]))`, 'gu'),
+    group: 1,
+  },
+  // A known given name, Hungarian order: "Kovács János", "Nagy-Szabó Anna Mária", "Kovács Jánosné", "Kovács Annának"
+  {
+    kind: 'SZEMÉLY',
+    pattern: new RegExp(`(?<![\\p{L}])(${TITLE}${NAME_WORD}(?:${SP}${NAME_WORD})?${SP}${GIVEN}(?:${SP}${GIVEN})?)`, 'gu'),
+    group: 1,
+  },
+  // … and the other way round, as in English or German contracts: "Peter Kiss", "John Smith"
+  {
+    kind: 'SZEMÉLY',
+    pattern: new RegExp(`(?<![\\p{L}])(${TITLE}${GIVEN}(?:${SP}${GIVEN})?${SP}${NAME_WORD})(?![\\p{L}])`, 'gu'),
+    group: 1,
+  },
+  // In capitals, as in signature blocks: "KOVÁCS JÁNOS", "DR. NAGY ANNA", "PETER KISS"
+  {
+    kind: 'SZEMÉLY',
+    pattern: new RegExp(`(?<![\\p{L}])(${TITLE}${NAME_WORD_UPPER}(?:${SP}${NAME_WORD_UPPER})?${SP}${GIVEN_UPPER}|${TITLE}${GIVEN_UPPER}${SP}${NAME_WORD_UPPER})(?![\\p{L}])`, 'gu'),
     group: 1,
   },
 ];
+
+/** The surname of a masked name: the first word ("Kovács János"), or the last one after a given name ("Peter Kiss") */
+function surnameOf(name: string): string | null {
+  const words = name.split(/\s+/).filter(word => !word.endsWith('.'));
+  if (words.length < 2) return null;
+  const surname = (GIVEN_NAMES as readonly string[]).includes(words[0]) ? words[words.length - 1] : words[0];
+  return surname.length >= 3 ? surname : null;
+}
+
+/** A surname on its own is only a person with a form of address or as a married name: "Kovács úr", "Kovácsné", "dr. Kovács" */
+const surnameUse = (surname: string) =>
+  new RegExp(`(?<![\\p{L}])${surname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=né|${SP}(?:úr|asszony|úrhölgy|kisasszony)\\p{Ll}*(?![\\p{L}]))|(?<=(?:[dD]r|[iI]fj|[iI]d|[öÖ]zv)\\.${SP})${surname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?!${SP}\\p{Lu})(?![\\p{L}])`, 'gu');
 
 /**
  * How the AI writes a placeholder's kind when it does not copy it exactly: in lower case, without accents,
@@ -119,6 +189,8 @@ export class Masker {
   private kinds = new Map<string, EntityKind>();
   /** Placeholder-like text already in the document ("[CÉG_1]" in a template): never used as our own token */
   private reserved = new Set<string>();
+  /** Surnames masked only where they stand for the person ("Kovács úr"), never everywhere ("Magyar Nemzeti Bank") */
+  private contextual = new Set<string>();
   private extraTerms: string[];
   private neverHide: Set<string>;
 
@@ -131,9 +203,10 @@ export class Masker {
     this.neverHide = new Set(neverHide.map(t => t.trim()).filter(Boolean));
   }
 
-  private tokenFor(value: string, kind: EntityKind): string {
+  private tokenFor(value: string, kind: EntityKind, contextual = false): string {
     const existing = this.forward.get(value);
     if (existing) return existing;
+    if (contextual) this.contextual.add(value);
     let n = this.counters.get(kind) ?? 0;
     do n++; while (this.reserved.has(`[${kind}_${n}]`));
     this.counters.set(kind, n);
@@ -170,7 +243,8 @@ export class Masker {
 
   private maskText(text: string): string {
     if (!text) return text;
-    let result = text;
+    // Invisible characters inside a name or a number ("Ko\u200Bvács") would hide it from every rule
+    let result = stripControlChars(text);
     // The user's own terms first, then values already seen (so a name found in one field is hidden in all)
     for (const term of this.extraTerms) {
       result = result.split(term).join(this.tokenFor(term, 'EGYÉB'));
@@ -183,8 +257,20 @@ export class Masker {
         return match.replace(value, this.tokenFor(value.trim(), rule.kind));
       });
     }
+    // A person's surname alone, where it clearly means that person: "Kovács úr", "Kovácsné", "dr. Kovács"
+    for (const [value, token] of [...this.forward]) {
+      const surname = this.kinds.get(token) === 'SZEMÉLY' && !this.contextual.has(value) ? surnameOf(value) : null;
+      if (surname) result = result.replace(surnameUse(surname), () => this.tokenFor(surname, 'SZEMÉLY', true));
+    }
+    // Values already found are hidden wherever they occur, also in capitals ("KOVÁCS JÁNOS" in a signature block)
     for (const [value, token] of [...this.forward].sort((a, b) => b[0].length - a[0].length)) {
-      if (value.length >= 4) result = result.split(value).join(token);
+      if (value.length < 4 || this.contextual.has(value)) continue;
+      result = result.split(value).join(token);
+      const kind = this.kinds.get(token)!;
+      const upper = value.toUpperCase();
+      if ((kind === 'SZEMÉLY' || kind === 'CÉG') && upper !== value && result.includes(upper)) {
+        result = result.split(upper).join(this.tokenFor(upper, kind));
+      }
     }
     return result;
   }

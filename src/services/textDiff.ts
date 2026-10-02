@@ -81,7 +81,11 @@ const WORD_SPACING = /^[ \t\r\n\v\f]+|[ \t\r\n\v\f]+$/g;
  * Word puts invisible marks into range text (comment and field anchors show up as control characters).
  * They are dropped from what the AI sees, and ignored when comparing words.
  */
-export const stripControlChars = (text: string) => text.replace(/[\u0000-\u0008\u000e-\u001f]/g, '');
+/**
+ * Word's invisible marks (anchors, optional hyphens) and invisible format characters pasted from the web (soft
+ * hyphen, zero-width spaces and joiners): they split words, so names and identifiers would not be recognized.
+ */
+export const stripControlChars = (text: string) => text.replace(/[\u0000-\u0008\u000e-\u001f\u00ad\u200b-\u200d\u2060\ufeff]/g, '');
 
 export const tokenizeLikeWord = (text: string) => text.split(' ').map(t => t.replace(WORD_SPACING, '')).filter(Boolean);
 
