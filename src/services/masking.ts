@@ -65,25 +65,54 @@ interface Rule {
   pattern: RegExp;
   /** Capture group holding the value to mask; the whole match when omitted */
   group?: number;
+  /** A further check of the value the pattern can't express (e.g. the number of digits) */
+  accept?: (value: string) => boolean;
 }
+
+const digitCount = (value: string) => value.replace(/\D/g, '').length;
+/** Street, square, road… : what makes "Budapest XII. kerület, Fő u. 1." an address */
+const STREET = 'utca|út|útja|tér|tere|körút|krt\\.|u\\.|köz|sor|sétány|fasor|park|dűlő|lakótelep|lépcső|rakpart|liget|street|road|avenue|square|Straße|Strasse|Platz';
 
 // Order matters: specific identifiers first, so e.g. a tax number is not taken for a phone number
 const RULES: Rule[] = [
   { kind: 'EMAIL', pattern: /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g },
-  { kind: 'SZÁMLA', pattern: /\bHU\d{2}(?:\s?\d{4}){6}\b/g },
-  { kind: 'SZÁMLA', pattern: /\b\d{8}-\d{8}(?:-\d{8})?\b/g },
-  { kind: 'ADÓSZÁM', pattern: /\b\d{8}-\d-\d{2}\b/g },
+  // Bank accounts: IBAN of any country ("HU42 1177 …", "DE89 3704 0044 0532 0130 00"), and the Hungarian
+  // 2×8 or 3×8 digits with hyphens or spaces ("11773016-11111018", "11773016 11111018 00000000")
+  {
+    kind: 'SZÁMLA',
+    pattern: /\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){2,7}(?:[ ]?[A-Z0-9]{1,3})?\b/g,
+    accept: value => { const compact = value.replace(/ /g, ''); return compact.length >= 15 && compact.length <= 34 && digitCount(compact) >= 10; },
+  },
+  { kind: 'SZÁMLA', pattern: /(?<![\d-])\d{8}[- ]\d{8}(?:[- ]\d{8})?(?![\d-])/g },
+  // Tax numbers: "12345678-2-41" or with spaces, EU VAT "HU12345678", tax ID (adóazonosító jel) "8123456789" or "8 123 456 789"
+  { kind: 'ADÓSZÁM', pattern: /(?<![\d-])\d{8}[- ]\d[- ]\d{2}(?![\d-])/g },
+  { kind: 'ADÓSZÁM', pattern: /\bHU\d{8}\b/g },
   { kind: 'ADÓSZÁM', pattern: /(?<!\d)8\d{9}(?!\d)/g },
+  { kind: 'ADÓSZÁM', pattern: /\badóazonosító(?:\s+jel)?\s*:?\s*(8[\d ]{9,13}\d)/giu, group: 1, accept: value => digitCount(value) === 10 },
   { kind: 'CÉGJEGYZÉK', pattern: /(?:Cg\.\s*)?\b\d{2}-\d{2}-\d{6}\b/g },
   { kind: 'TELEFON', pattern: /(?:\+36|\b06)[\s\-/]?\(?\d{1,2}\)?[\s\-/]?\d{3}[\s-]?\d{3,4}\b/g },
   { kind: 'AZONOSÍTÓ', pattern: /\bTAJ(?:\s*szám)?\s*:?\s*(\d{3}\s?\d{3}\s?\d{3})\b/gu, group: 1 },
   { kind: 'AZONOSÍTÓ', pattern: /\b\d{6}[A-Z]{2}\b/g },
-  { kind: 'SZÜLETÉS', pattern: /\bszül(?:\.|etett|etési idő)\s*:?\s*(?:[^,;\d]{0,30},\s*)?(\d{4}\.\s*(?:\d{1,2}|[a-zá-ű]+)\.?\s*\d{1,2}\.?)/giu, group: 1 },
+  // Personal identification number ("személyi azonosító: 1 800101 1234") and passport number, after their name
+  { kind: 'AZONOSÍTÓ', pattern: /(?<!\p{L})személyi\s+(?:azonosító|szám)(?:\s+jel)?\s*:?\s*([1-8][ -]?\d{6}[ -]?\d{4})(?!\d)/giu, group: 1 },
+  { kind: 'AZONOSÍTÓ', pattern: /(?<!\p{L})(?:útlevél\p{L}*(?:\s+szám\p{L}*)?|passport(?:\s+no\.?|\s+number)?)\s*:?\s*([A-Z]{2}\s?\d{6,7})\b/giu, group: 1 },
+  // The date of birth: "szül.: 1980. 05. 12.", "születési hely, idő: Budapest, 1980. 01. 01.", "born on 12 May 1980"
+  { kind: 'SZÜLETÉS', pattern: /\bszül(?:\.|etett|etési)[^\d;)\n]{0,40}?(\d{4}\.\s*(?:\d{1,2}|[a-zá-ű]+)\.?\s*\d{1,2}\.?)/giu, group: 1 },
+  { kind: 'SZÜLETÉS', pattern: /\b(?:date\s+of\s+birth|born(?:\s+on)?)\s*:?\s*(\d{1,2}[./ ]\s?(?:\d{1,2}|\p{L}+)[./ ]\s?\d{4}|\d{4}[-./]\d{1,2}[-./]\d{1,2})/giu, group: 1 },
+  // Land registry numbers, before or after the word: "hrsz. 12345/6", "4521/12 helyrajzi számú", "12345/6 hrsz-ú"
   { kind: 'HRSZ', pattern: /\b(?:hrsz\.?|helyrajzi\s+sz(?:ámú|ámon|ám)?\.?)\s*:?\s*(\d+(?:\/\d+)*(?:\/[A-Z]\/\d+)?)/giu, group: 1 },
+  { kind: 'HRSZ', pattern: /(?<![\d/.])(\d+(?:\/\d+)*(?:\/[A-Z]\/\d+)?)\s*(?=(?:hrsz|helyrajzi\s+sz)\p{L}*)/giu, group: 1 },
   // 1111 Budapest, Fő utca 1. / 2600 Vác, Széchenyi u. 12/A
   {
     kind: 'CÍM',
-    pattern: new RegExp(`\\b\\d{4}\\s+[${U}][\\p{L}-]+,?\\s+[^,;()\\n]{1,60}?\\s(?:utca|út|útja|tér|tere|körút|krt\\.|u\\.|köz|sor|sétány|fasor|park|dűlő|lakótelep|lépcső)\\s*\\d+(?:[/-]?[A-Za-z0-9]+)*\\.?`, 'gu'),
+    pattern: new RegExp(`\\b\\d{4}\\s+[${U}][\\p{L}-]+,?\\s+[^,;()\\n]{1,60}?\\s(?:${STREET})\\s*\\d+(?:[/-]?[A-Za-z0-9]+)*\\.?`, 'gu'),
+  },
+  // Without a postal code, after its name: "lakcím: Budapest XII. kerület, Fő u. 1. 2. em. 3." – up to the next field
+  {
+    kind: 'CÍM',
+    pattern: new RegExp(`(?<![\\p{L}])(?:lakcím\\p{L}*|lakóhely\\p{L}*|székhely\\p{L}*|telephely\\p{L}*|tartózkodási\\s+hely\\p{L}*|levelezési\\s+cím\\p{L}*|címe?|address|residing\\s+at)\\s*:?\\s*([^;()\\n:]{3,120}?)(?=\\s*(?:;|\\)|\\n|$|,\\s*[\\p{L} .]{2,40}?:))`, 'giu'),
+    group: 1,
+    accept: value => new RegExp(`(?:^|\\s)(?:${STREET})(?:\\s|$)`, 'iu').test(value) && /\d/.test(value),
   },
   // Companies: capitalized words before a legal form (the article in front is not part of the name)
   {
@@ -253,7 +282,7 @@ export class Masker {
       result = result.replace(rule.pattern, (...args) => {
         const match = args[0] as string;
         const value = rule.group ? (args[rule.group] as string | undefined) : match;
-        if (!value || /\[[A-ZÁÉÍÓÖŐÚÜŰ]+_\d+\]/.test(value) || this.neverHide.has(value.trim())) return match;
+        if (!value || /\[[A-ZÁÉÍÓÖŐÚÜŰ]+_\d+\]/.test(value) || this.neverHide.has(value.trim()) || (rule.accept && !rule.accept(value))) return match;
         return match.replace(value, this.tokenFor(value.trim(), rule.kind));
       });
     }

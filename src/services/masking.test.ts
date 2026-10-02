@@ -172,3 +172,38 @@ test('ordinary capitalized words, institutions and defined terms are not taken f
 test('invisible characters do not hide a name or a number', () => {
   assert.equal(maskedBy('képviseli: Ko\u200bvács Já\u00adnos ügyvezető, e-mail: ko\u200bvacs@example.hu'), 'képviseli: [SZEMÉLY_1] ügyvezető, e-mail: [EMAIL_1]');
 });
+
+test('bank accounts, tax numbers and land registry numbers in every usual spelling', () => {
+  const cases: [string, string][] = [
+    ['bankszámlaszám: 11773016 11111018 00000000', 'bankszámlaszám: [SZÁMLA_1]'],
+    ['számlaszám: 11773016-11111018', 'számlaszám: [SZÁMLA_1]'],
+    ['IBAN: HU42 1177 3016 1111 1018 0000 0000', 'IBAN: [SZÁMLA_1]'],
+    ['IBAN: DE89 3704 0044 0532 0130 00', 'IBAN: [SZÁMLA_1]'],
+    ['adószám: 12345678 2 41', 'adószám: [ADÓSZÁM_1]'],
+    ['közösségi adószám: HU12345678', 'közösségi adószám: [ADÓSZÁM_1]'],
+    ['adóazonosító jel: 8 123 456 789', 'adóazonosító jel: [ADÓSZÁM_1]'],
+    ['a 4521/12 helyrajzi számú ingatlan', 'a [HRSZ_1] helyrajzi számú ingatlan'],
+    ['a 12345/6 hrsz-ú ingatlan', 'a [HRSZ_1] hrsz-ú ingatlan'],
+    ['belterület 12345/6 hrsz. alatti', 'belterület [HRSZ_1] hrsz. alatti'],
+    ['(hrsz.: 1234/5/A/12)', '(hrsz.: [HRSZ_1])'],
+  ];
+  for (const [text, expected] of cases) assert.equal(new Masker().mask(text), expected, text);
+});
+
+test('identifiers, dates of birth and addresses without a postal code', () => {
+  const cases: [string, string][] = [
+    ['személyi azonosító: 1 800101 1234', 'személyi azonosító: [AZONOSÍTÓ_1]'],
+    ['útlevélszám: AB1234567', 'útlevélszám: [AZONOSÍTÓ_1]'],
+    ['Passport No. AB 123456', 'Passport No. [AZONOSÍTÓ_1]'],
+    ['születési hely, idő: Budapest, 1980. 01. 01.; anyja', 'születési hely, idő: Budapest, [SZÜLETÉS_1]; anyja'],
+    ['born on 12 May 1980', 'born on [SZÜLETÉS_1]'],
+    ['lakcím: Budapest XII. kerület, Fő u. 1. 2. em. 3.', 'lakcím: [CÍM_1]'],
+    ['lakóhelye: Szeged, Kossuth tér 4., adóazonosító jel: 8123456789', 'lakóhelye: [CÍM_1], adóazonosító jel: [ADÓSZÁM_1]'],
+  ];
+  for (const [text, expected] of cases) assert.equal(new Masker().mask(text), expected, text);
+});
+
+test('amounts, legal references, dates and titles stay visible (the AI needs them)', () => {
+  const text = 'A vételár 85 000 000 Ft, azaz nyolcvanötmillió forint, amelyet 2026. október 1-ig a Ptk. 6:215. §-a és a 2013. évi V. törvény szerint kell megfizetni. Késedelmi kamat: 12 345 678 Ft. A szerződés címe: Adásvételi szerződés. Lásd az 1.2. pontot.';
+  assert.equal(new Masker().mask(text), text);
+});
