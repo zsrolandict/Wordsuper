@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { accessKeyProblem, contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy } from './config';
+import { accessKeyProblem, contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficeStyles } from './config';
 import { mapGeminiFinish } from './ai/gemini';
 
 test('access key: missing, placeholder and short keys are refused, whitespace is ignored', () => {
@@ -74,4 +74,18 @@ test('personal keys alone are enough; nothing usable refuses every request', () 
   assert.equal(placeholderShared.problem, null);
   assert.match(parseAccessKeys(undefined, undefined).problem!, /not set/);
   assert.match(parseAccessKeys('short', '').problem!, /shorter/);
+});
+
+test('office styles: read from the file, a list or { styles }, problems said, locked only with a yes', () => {
+  const files: Record<string, string> = { 'a.json': '{"styles":[{"name":"Iroda","profile":{}}]}', 'b.json': '[{"name":"X"}]', 'c.json': '{"x":1}', 'd.json': 'nem json' };
+  const read = (path: string) => { if (!(path in files)) throw new Error('ENOENT'); return files[path]; };
+  assert.deepEqual(readOfficeStyles(undefined, read), { styles: [] });
+  assert.equal(readOfficeStyles('a.json', read).styles.length, 1);
+  assert.equal(readOfficeStyles('b.json', read).styles.length, 1);
+  assert.match(readOfficeStyles('c.json', read).problem!, /no "styles"/);
+  assert.match(readOfficeStyles('d.json', read).problem!, /cannot be read/);
+  assert.match(readOfficeStyles('x.json', read).problem!, /ENOENT/);
+  assert.equal(parseStylesLocked('true'), true);
+  assert.equal(parseStylesLocked(undefined), false);
+  assert.equal(parseStylesLocked('nem'), false);
 });

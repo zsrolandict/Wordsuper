@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseTrustProxy, type AccessKeys } from "./server/config";
+import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficeStyles, type AccessKeys } from "./server/config";
 import { readVersion } from "./server/version";
 import { providerFromEnv } from "./server/ai";
 
@@ -115,7 +115,7 @@ async function startServer() {
   });
 
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
-  app.use("/api/", (req, res, next) => (req.path === "/info" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKeys));
+  app.use("/api/", (req, res, next) => (req.path === "/info" || req.path === "/office-styles" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKeys));
   
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));
@@ -141,6 +141,16 @@ async function startServer() {
       dictationPolicy,
       maskingPolicy,
     });
+  });
+
+  // The firm's own styles (OFFICE_STYLES_FILE), and whether they are the only ones allowed (OFFICE_STYLES_LOCKED)
+  const stylesLocked = parseStylesLocked(process.env.OFFICE_STYLES_LOCKED);
+  const firstStyles = readOfficeStyles(process.env.OFFICE_STYLES_FILE, path => fs.readFileSync(path, "utf8"));
+  if (firstStyles.problem) console.warn(firstStyles.problem);
+  else if (firstStyles.styles.length) console.log(`Office styles: ${firstStyles.styles.length}${stylesLocked ? " (locked)" : ""}`);
+  app.get("/api/office-styles", (req, res) => {
+    const { styles } = readOfficeStyles(process.env.OFFICE_STYLES_FILE, path => fs.readFileSync(path, "utf8"));
+    res.json({ styles, locked: stylesLocked && styles.length > 0 });
   });
 
   app.post("/api/edit-stream", async (req, res) => {

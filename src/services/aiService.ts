@@ -261,3 +261,15 @@ export async function fetchServerInfo(accessKey: string): Promise<ServerInfo | n
     return null;
   }
 }
+
+/** The firm's styles from the server (OFFICE_STYLES_FILE) and whether only they may be used; null when unreachable */
+export async function fetchOfficeStyles(accessKey: string): Promise<{ styles: unknown[]; locked: boolean } | null> {
+  try {
+    const response = await fetch('/api/office-styles', { headers: authHeaders(accessKey) });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return { styles: Array.isArray(data?.styles) ? data.styles : [], locked: data?.locked === true };
+  } catch {
+    return null;
+  }
+}

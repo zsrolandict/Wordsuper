@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Download, ExternalLink, Loader2, MousePointerClick, Paintbrush, RefreshCw, Save, ShieldCheck, Star, Trash2 } from 'lucide-react';
 import {
   defaultOptions, defaultProfile, STYLE_PRESETS, FORMAT_CATEGORIES, headingLevelCount, planFormatting, summarize, TEXT_CATEGORIES,
@@ -6,11 +6,12 @@ import {
 } from '../services/formatting';
 import { UserFacingError, applyFormatPlan, canOpenNewDocument, jumpToParagraph, openNewDocument, readDocumentFile, readFormatAudit, readSelectionFormat } from '../services/wordDocument';
 import { AI_MARK_LABELS, findAiMarks, type AiMarkKind } from '../services/aiMarks';
-import { MAX_STYLE_NAME, loadCustomStyles, newStyleId, saveCustomStyles, type CustomStyle } from '../services/customStyles';
+import { MAX_STYLE_NAME, loadCustomStyles, newStyleId, readStylesFile, saveCustomStyles, stylesFile, type CustomStyle } from '../services/customStyles';
+import { fetchOfficeStyles } from '../services/aiService';
 import { toBase64 } from '../services/docxWriter';
 import { buildDocumentGraph } from '../services/structure';
 import FormatElements from './FormatElements';
-import { documentName, downloadDocx } from '../services/download';
+import { documentName, downloadDocx, downloadFile } from '../services/download';
 import { formatNumber } from '../services/format';
 
 const CATEGORY_LABELS: Record<Category, { label: string; title: string }> = {
@@ -197,7 +198,7 @@ function StylePreview({ profile }: { profile: FormatProfile }) {
  * (a szöveget csak a külön bekapcsolható szövegfésülés módosítja); előtte elmenti a dokumentum teljes állapotát, ami
  * egy kattintással új ablakban megnyitható.
  */
-export default function FormatPanel({ active, onDocumentChanged }: { active: boolean; onDocumentChanged: () => void }) {
+export default function FormatPanel({ active, accessKey, onDocumentChanged }: { active: boolean; accessKey: string; onDocumentChanged: () => void }) {
   const [audit, setAudit] = useState<FormatAudit | null>(null);
   const [reading, setReading] = useState(false);
   const [profile, setProfile] = useState<FormatProfile | null>(null);
@@ -208,6 +209,10 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   const [view, setView] = useState<'styles' | 'manual' | 'text' | 'elements' | 'scope'>('styles');
   const [ownStyles, setOwnStyles] = useState<CustomStyle[]>(loadCustomStyles);
   const [styleName, setStyleName] = useState('');
+  /** The firm's styles from the server; locked: only these, and their values can't be changed here */
+  const [officeStyles, setOfficeStyles] = useState<CustomStyle[]>([]);
+  const [locked, setLocked] = useState(false);
+  const importInput = useRef<HTMLInputElement>(null);
   const [options, setOptions] = useState<FormatOptions>(defaultOptions);
   /** The answer to the heading question; null: not asked or not answered yet */
   const [headingAnswer, setHeadingAnswer] = useState<'separate' | 'unified' | null>(null);
@@ -243,6 +248,27 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
     }
   }, []);
 
+  // The firm's styles: once, on the first visit
+  const officeLoaded = useRef(false);
+  useEffect(() => {
+    if (!active || officeLoaded.current || typeof Word === 'undefined') return;
+    officeLoaded.current = true;
+    fetchOfficeStyles(accessKey).then(result => {
+      if (!result) return;
+      const { styles } = readStylesFile(result.styles, 'office');
+      setOfficeStyles(styles);
+      setLocked(result.locked && styles.length > 0);
+    });
+  }, [active, accessKey]);
+  // Locked: the first of the firm's styles is the one in use until another of them is chosen
+  useEffect(() => {
+    if (locked && officeStyles.length && !officeStyles.some(o => o.id === presetId)) {
+      setProfile(officeStyles[0].profile);
+      setPresetId(officeStyles[0].id);
+      setCustomized(false);
+    }
+  }, [locked, officeStyles, presetId, audit]);
+
   // Read on the first visit; on every later visit again (the document may have changed), keeping the choices
   useEffect(() => {
     if (!active || typeof Word === 'undefined') return;
@@ -269,11 +295,31 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   };
   const choosePreset = (id: string) => {
     if (!audit) return;
-    const own = ownStyles.find(o => o.id === id);
+    const own = ownStyles.find(o => o.id === id) ?? officeStyles.find(o => o.id === id);
     setProfile(id === DOCUMENT_PRESET ? defaultProfile(summarize(audit)) : own ? own.profile : STYLE_PRESETS.find(p => p.id === id)!.profile);
     setPresetId(id);
     setCustomized(false);
-    setStyleName(own?.name ?? '');
+    setStyleName(ownStyles.some(o => o.id === id) ? own!.name : '');
+  };
+
+  /** Own styles to a file: for a colleague, or for the server as the firm's styles (OFFICE_STYLES_FILE) */
+  const exportStyles = () => {
+    downloadFile(JSON.stringify(stylesFile(ownStyles), null, 2), 'word-writer-stilusok.json', 'application/json');
+    setStatus(`📤 ${ownStyles.length} saját stílust exportáltam (word-writer-stilusok.json). Kollégád az „Importálás” gombbal veheti át; irodai stílusnak az üzemeltető a szerverre teszi.`);
+  };
+  const importStyles = async (file: File) => {
+    try {
+      const { styles, skipped } = readStylesFile(JSON.parse(await file.text()), 'own');
+      const names = new Set(ownStyles.map(o => o.name));
+      const added = styles.filter(s => !names.has(s.name)).map(s => ({ ...s, id: newStyleId() }));
+      storeOwn([...ownStyles, ...added]);
+      setStatus(`📥 ${added.length} stílust vettem át${styles.length - added.length ? `, ${styles.length - added.length} ilyen nevű már volt` : ''}${skipped ? `, ${skipped} hibásat kihagytam` : ''}.`);
+    } catch (e) {
+      console.error(e);
+      setError('Ez nem Word Writer stílusfájl.');
+    } finally {
+      if (importInput.current) importInput.current.value = '';
+    }
   };
   const ownSelected = ownStyles.find(o => o.id === presetId);
   const storeOwn = (next: CustomStyle[]) => {
@@ -441,7 +487,9 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
     aiMarks.length ? `${aiMarks.length} AI-nyom` : '',
   ].filter(Boolean) : [];
 
-  const presetCards = [
+  const officeCards = officeStyles.map(o => ({ id: o.id, name: o.name, description: `Irodai stílus: ${o.profile.font} ${formatNumber(o.profile.bodySize)} pt`, featured: false, profile: o.profile, own: false, office: true }));
+  const presetCards = locked ? officeCards : [
+    ...officeCards,
     ...STYLE_PRESETS.filter(p => p.featured),
     { id: DOCUMENT_PRESET, name: 'Ebből a dokumentumból', description: 'A dokumentum leggyakoribb beállításai, egységesítve', featured: false, profile: null as FormatProfile | null, own: false },
     ...STYLE_PRESETS.filter(p => !p.featured).map(p => ({ ...p, own: false })),
@@ -543,6 +591,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                         </span>
                       )}
                       {card.own && <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-neutral-200 text-neutral-700">Saját</span>}
+                      {'office' in card && card.office && <span className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-800">Irodai</span>}
                       <span
                         className="font-semibold text-[13px] leading-tight"
                         style={{
@@ -559,15 +608,16 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                     </button>
                   );
                 })}
-                <button
+                {!locked && <button
                   onClick={() => { setStyleName(''); setPresetId('new'); setView('manual'); }}
                   disabled={busy}
                   className="text-left rounded-lg border border-dashed border-neutral-300 p-2 text-neutral-600 hover:border-neutral-500 hover:text-neutral-900 disabled:opacity-50"
                 >
                   <span className="block font-semibold text-[13px]">+ Új stílus</span>
                   <span className="block mt-0.5 text-[10.5px] text-neutral-500">A mostaniból kiindulva, kézzel beállítva, néven mentve</span>
-                </button>
+                </button>}
               </div>
+              {locked && <p className="text-[11px] text-blue-800">Az üzemeltető az irodai stílusokat tette kötelezővé: csak ezek közül választhatsz, és az értékeik itt nem módosíthatók.</p>}
               <StylePreview profile={profile} />
               <p className="text-[10.5px] text-neutral-400">Minta, kicsinyítve. Ha a betűtípus nincs telepítve ezen a gépen, a minta hasonlóval mutatja.</p>
             </div>
@@ -576,6 +626,8 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
           {view === 'manual' && (
             <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-3">
               <StylePreview profile={profile} />
+              {locked && <p className="text-blue-800">Az irodai stílus zárolva van: az értékek itt csak megtekinthetők.</p>}
+              <fieldset disabled={locked} className="space-y-3 disabled:opacity-60">
               <div className="space-y-1.5">
                 <p className="font-semibold text-neutral-600">Betűk</p>
                 <label className="flex items-center justify-between space-x-2">
@@ -677,7 +729,14 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                   )}
                 </div>
                 <p className="text-neutral-400">A saját stílusok ezen a gépen maradnak; a Stílusok fülön „Saját” jelöléssel jelennek meg.</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button onClick={exportStyles} disabled={!ownStyles.length} className="px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50">Exportálás (.json)</button>
+                  <button onClick={() => importInput.current?.click()} className="px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100">Importálás…</button>
+                  <input ref={importInput} type="file" accept=".json,application/json" className="hidden" aria-label="Stílusfájl" onChange={e => e.target.files?.[0] && importStyles(e.target.files[0])} />
+                </div>
+                <p className="text-neutral-400">Az exportált fájlt egy kolléga importálhatja, vagy az üzemeltető a szerverre téve az egész iroda stílusává teheti (OFFICE_STYLES_FILE, zárolva: OFFICE_STYLES_LOCKED=true).</p>
               </div>
+              </fieldset>
             </div>
           )}
 

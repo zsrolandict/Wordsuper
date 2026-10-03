@@ -63,3 +63,32 @@ export function saveCustomStyles(styles: CustomStyle[]) {
 }
 
 export const newStyleId = () => `own-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+/** The file the "Exportálás" button saves and "Importálás" reads; the same file can be the server's office styles */
+export interface StylesFile {
+  app: 'word-writer';
+  kind: 'styles';
+  version: 1;
+  styles: { name: string; profile: FormatProfile }[];
+}
+
+export const stylesFile = (styles: CustomStyle[]): StylesFile => ({
+  app: 'word-writer', kind: 'styles', version: 1, styles: styles.map(({ name, profile }) => ({ name, profile })),
+});
+
+/**
+ * The valid styles of an exported file (or the server's list): each checked field by field, the rest left out.
+ * prefix: the id prefix ("own" for imported, "office" for the firm's).
+ */
+export function readStylesFile(data: unknown, prefix: string): { styles: CustomStyle[]; skipped: number } {
+  const list = Array.isArray(data) ? data : Array.isArray((data as StylesFile | null)?.styles) ? (data as StylesFile).styles : [];
+  const styles: CustomStyle[] = [];
+  let skipped = 0;
+  list.forEach((item: { name?: unknown; profile?: unknown }, i: number) => {
+    const profile = sanitizeProfile(item?.profile);
+    const name = typeof item?.name === 'string' ? item.name.trim().slice(0, MAX_STYLE_NAME) : '';
+    if (profile && name) styles.push({ id: `${prefix}-${i}-${name}`, name, profile });
+    else skipped++;
+  });
+  return { styles, skipped };
+}

@@ -1087,7 +1087,7 @@ export default function TaskPane() {
       </div>
 
       <div className={tab === 'format' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
-        <FormatPanel active={tab === 'format'} onDocumentChanged={() => setDocumentVersion(v => v + 1)} />
+        <FormatPanel active={tab === 'format'} accessKey={settings.accessKey} onDocumentChanged={() => setDocumentVersion(v => v + 1)} />
       </div>
 
       <div className={tab === 'assistant' ? 'contents' : 'hidden'}>

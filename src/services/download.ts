@@ -6,7 +6,12 @@ export const plainFileName = (name: string) =>
 
 /** Offers a .docx made in the pane as a download */
 export function downloadDocx(bytes: Uint8Array, fileName: string) {
-  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: DOCX_TYPE }));
+  downloadFile(bytes, fileName, DOCX_TYPE);
+}
+
+/** Offers any file made in the pane as a download */
+export function downloadFile(content: Uint8Array | string, fileName: string, type: string) {
+  const url = URL.createObjectURL(new Blob([content as BlobPart], { type }));
   const link = document.createElement('a');
   link.href = url;
   link.download = plainFileName(fileName);

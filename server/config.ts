@@ -113,3 +113,23 @@ export function contentSecurityPolicy(setting: string | undefined): string | nul
     "form-action 'self'",
   ].join("; ");
 }
+
+/**
+ * The firm's own styles for the Formázás tab, from a JSON file next to the server (OFFICE_STYLES_FILE): the
+ * "Exportálás" file of the task pane, put there by whoever runs the server. Read on every request, so a new file
+ * needs no restart. The task pane checks every field again before it uses a style.
+ */
+export function readOfficeStyles(path: string | undefined, read: (path: string) => string): { styles: unknown[]; problem?: string } {
+  if (!path?.trim()) return { styles: [] };
+  try {
+    const data = JSON.parse(read(path.trim()));
+    const styles = Array.isArray(data) ? data : Array.isArray(data?.styles) ? data.styles : null;
+    if (!styles) return { styles: [], problem: `OFFICE_STYLES_FILE (${path}) has no "styles" list.` };
+    return { styles: styles.slice(0, 20) };
+  } catch (error) {
+    return { styles: [], problem: `OFFICE_STYLES_FILE (${path}) cannot be read: ${(error as Error).message}` };
+  }
+}
+
+/** OFFICE_STYLES_LOCKED=true: only the firm's styles can be used, and their values can't be changed in the pane */
+export const parseStylesLocked = (value: string | undefined) => /^(1|true|yes|igen)$/i.test(value?.trim() ?? '');
