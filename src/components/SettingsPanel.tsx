@@ -5,6 +5,7 @@ import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, PRESET_MODES as MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
+import ErrorReport from './ErrorReport';
 import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
 import { MODE_LABELS, modeLabel, presetNeedsInstruction } from './modes';
 
@@ -449,6 +450,7 @@ export default function SettingsPanel({
             <p className="text-amber-700">A felület és a szerver verziója eltér: töltsd újra a bővítményt. Ha utána is eltér, zárd be a Wordöt, és indítsd újra az INDITAS.bat-ot.</p>
           )}
           {serverInfo?.model && <p>{serverInfo.model} · {serverInfo.location}</p>}
+          <ErrorReport serverInfo={serverInfo ?? null} settings={settings} />
           <button
             onClick={onReload}
             title="Ha a bővítmény nem válaszol, vagy új verzió érhető el"

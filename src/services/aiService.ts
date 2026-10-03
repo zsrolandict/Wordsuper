@@ -1,3 +1,4 @@
+import { recordEvent } from './diagnostics';
 import { ACCESS_KEY_HEADER, USER_ID_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
 
 export class AIRequestError extends Error {
@@ -77,6 +78,21 @@ async function errorFromResponse(response: Response): Promise<AIRequestError> {
 const IDLE_TIMEOUT_MS = 90 * 1000;
 
 export async function streamAIResponse(request: AIRequestBody, handlers: StreamHandlers, options: StreamOptions): Promise<string> {
+  // For the error report: the mode, the size and how it ended, never the text
+  const started = Date.now();
+  const size = request.originalText.length + request.documentContext.length;
+  try {
+    const answer = await streamOnce(request, handlers, options);
+    recordEvent('request', `${request.mode}: ok, ${size} karakter, ${Date.now() - started} ms`);
+    return answer;
+  } catch (error) {
+    const how = options.signal?.aborted ? 'leállítva' : error instanceof AIRequestError ? `hiba ${error.code ?? error.status ?? ''}${error.reason ? ` (${error.reason})` : ''}` : `hiba (${error instanceof Error ? error.name : 'ismeretlen'})`;
+    recordEvent('request', `${request.mode}: ${how}, ${size} karakter, ${Date.now() - started} ms`);
+    throw error;
+  }
+}
+
+async function streamOnce(request: AIRequestBody, handlers: StreamHandlers, options: StreamOptions): Promise<string> {
   // Aborted by the user (options.signal) or by the idle timer
   const controller = new AbortController();
   const onUserAbort = () => controller.abort();
