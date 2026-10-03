@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultOptions, defaultProfile, headingLevelCount, planFormatting, roleOf, summarize, type FormatAudit, type ParagraphFormat } from './formatting';
+import { defaultOptions, STYLE_PRESETS, defaultProfile, headingLevelCount, planFormatting, roleOf, summarize, type FormatAudit, type ParagraphFormat } from './formatting';
 
 const para = (text: string, extra: Partial<ParagraphFormat> = {}): ParagraphFormat => ({
   text, styleBuiltIn: 'Normal', tableLevel: 0, font: 'Calibri', size: 11, bold: false, alignment: 'Justified', spaceBefore: 0, spaceAfter: 6, lineSpacing: 13.8, ...extra,
@@ -85,4 +85,13 @@ test('categories switched off change nothing of theirs', () => {
   const plan = planFormatting(audit, defaultProfile(summarize(audit)), options);
   assert.ok(plan.changes.every(c => Object.keys(c).join() === 'index,font'));
   assert.deepEqual(plan.footnotes, { font: 'Calibri' });
+});
+
+test('the ready-made styles: a Garamond classic, and all of them usable', () => {
+  assert.deepEqual(STYLE_PRESETS.map(p => p.id), ['classic', 'modern', 'compact']);
+  assert.equal(STYLE_PRESETS[0].profile.font, 'Garamond');
+  for (const preset of STYLE_PRESETS) {
+    assert.ok(preset.profile.headingSize > preset.profile.bodySize && preset.profile.footnoteSize < preset.profile.bodySize, preset.id);
+    assert.ok(planFormatting(audit, preset.profile, defaultOptions()).changes.length > 0, preset.id);
+  }
 });

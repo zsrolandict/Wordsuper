@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Download, ExternalLink, Loader2, MousePointerClick, Paintbrush, RefreshCw, ShieldCheck } from 'lucide-react';
 import {
-  defaultOptions, defaultProfile, FORMAT_CATEGORIES, headingLevelCount, planFormatting, summarize, TEXT_CATEGORIES,
+  defaultOptions, defaultProfile, STYLE_PRESETS, FORMAT_CATEGORIES, headingLevelCount, planFormatting, summarize, TEXT_CATEGORIES,
   type AuditSummary, type Category, type FormatAudit, type FormatOptions, type FormatProfile,
 } from '../services/formatting';
 import { UserFacingError, applyFormatPlan, canOpenNewDocument, openNewDocument, readDocumentFile, readFormatAudit, readSelectionFormat } from '../services/wordDocument';
@@ -258,6 +258,12 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
 
           <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
             <p className="font-semibold text-neutral-700">Egységes stílus</p>
+            <div className="flex flex-wrap gap-1.5">
+              <button onClick={() => audit && setProfile(defaultProfile(summarize(audit)))} disabled={busy} title="A dokumentum leggyakoribb beállításai" className="px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50">Ebből a dokumentumból</button>
+              {STYLE_PRESETS.map(preset => (
+                <button key={preset.id} onClick={() => setProfile(preset.profile)} disabled={busy} title={preset.description} className="px-2 py-1 border border-blue-300 text-blue-800 rounded-md hover:bg-blue-50 disabled:opacity-50">{preset.name}</button>
+              ))}
+            </div>
             <label className="flex items-center justify-between space-x-2">
               <span className="text-neutral-600">Betűtípus</span>
               <select value={profile.font} disabled={busy} onChange={e => setProfileValue('font', e.target.value)} aria-label="Betűtípus" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">

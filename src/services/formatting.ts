@@ -264,3 +264,32 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
   counts.doubleSpaces = on.doubleSpaces ? summary.doubleSpaces : 0;
   return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, counts };
 }
+
+export interface StylePreset {
+  id: string;
+  name: string;
+  description: string;
+  profile: FormatProfile;
+}
+
+/** Ready-made looks; "Ebből a dokumentumból" (the document's own most common settings) stays the default */
+export const STYLE_PRESETS: StylePreset[] = [
+  {
+    id: 'classic',
+    name: 'Klasszikus',
+    description: 'Garamond 12 pt, sorkizárt, egyenletes, hagyományos szerződés',
+    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, alignment: 'Justified' },
+  },
+  {
+    id: 'modern',
+    name: 'Modern',
+    description: 'Calibri 11 pt, balra zárt, levegős térközökkel',
+    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, alignment: 'Left' },
+  },
+  {
+    id: 'compact',
+    name: 'Kompakt',
+    description: 'Arial 10 pt, sorkizárt, szűk térközök: hosszú szerződéshez, kevesebb oldal',
+    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, alignment: 'Justified' },
+  },
+];
