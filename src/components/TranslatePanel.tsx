@@ -11,6 +11,7 @@ import { buildDocumentGraph } from '../services/structure';
 import { canOpenNewDocument, openNewDocument, readParagraphsForTranslation } from '../services/wordDocument';
 import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
 import { formatNumber } from '../services/format';
+import { documentName, downloadDocx } from '../services/download';
 import { playSound, primeSound } from '../services/sound';
 import type { Settings } from '../services/settings';
 
@@ -43,17 +44,6 @@ interface Output {
 class Cancelled extends Error {}
 
 const other = (language: Language): Language => (language === 'hu' ? 'en' : 'hu');
-
-/** The open document's name without the extension ("Adásvételi szerződés"), '' for a new document */
-function documentName(): string {
-  const url = typeof Office !== 'undefined' ? Office.context?.document?.url ?? '' : '';
-  const name = decodeURIComponent(url.split(/[\\/]/).pop() ?? '');
-  return name.replace(/\.(docx?|dotx?|rtf)$/i, '');
-}
-
-/** Some browsers drop a download name with accents or dashes: the file name is kept to plain letters */
-const plainFileName = (name: string) =>
-  name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9 ._()-]+/g, '-').replace(/\s+/g, ' ').trim();
 
 /** Waits, but stops at once when the run is stopped */
 const wait = (ms: number, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
@@ -122,17 +112,6 @@ export default function TranslatePanel({
       console.error(e);
       setOpenError('Nem sikerült új dokumentumként megnyitni. Töltsd le, és nyisd meg a letöltött fájlt.');
     }
-  };
-
-  const download = (target: Output) => {
-    const url = URL.createObjectURL(new Blob([target.bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = target.fileName;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
   };
 
   const run = async () => {
@@ -220,7 +199,7 @@ export default function TranslatePanel({
       const result: Output = {
         base64: toBase64(bytes),
         bytes,
-        fileName: plainFileName(`${name || 'Dokumentum'} ${from.toUpperCase()}-${to.toUpperCase()}.docx`),
+        fileName: `${name || 'Dokumentum'} ${from.toUpperCase()}-${to.toUpperCase()}.docx`,
         rows: rows.length,
         untranslated: rows.filter(r => r.warning).length,
         maskSummary: masker?.summary() ?? '',
@@ -333,7 +312,7 @@ export default function TranslatePanel({
             <button onClick={() => open(output)} className="flex items-center px-2.5 py-1.5 font-medium border border-blue-600 text-blue-700 hover:bg-blue-50 rounded-lg">
               <ExternalLink className="w-3.5 h-3.5 mr-1" />{output.opened ? 'Megnyitás újra' : 'Megnyitás'}
             </button>
-            <button onClick={() => download(output)} className="flex items-center px-2.5 py-1.5 font-medium border border-neutral-300 text-neutral-700 hover:bg-neutral-100 rounded-lg">
+            <button onClick={() => downloadDocx(output.bytes, output.fileName)} className="flex items-center px-2.5 py-1.5 font-medium border border-neutral-300 text-neutral-700 hover:bg-neutral-100 rounded-lg">
               <Download className="w-3.5 h-3.5 mr-1" />Letöltés (.docx)
             </button>
           </div>

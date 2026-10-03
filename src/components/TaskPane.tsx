@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Zap, Undo2 } from 'lucide-react';
+import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Paintbrush, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, fetchServerInfo, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
@@ -45,6 +45,7 @@ import SettingsPanel, { isOtherVersion } from './SettingsPanel';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
 import TranslatePanel from './TranslatePanel';
+import FormatPanel from './FormatPanel';
 import DictationButton from './DictationButton';
 import Logo from './Logo';
 import PartyBar from './PartyBar';
@@ -110,7 +111,7 @@ const WELCOME_MESSAGE: Message = {
 
 const ALTERNATIVE_INSTRUCTION = 'Kérek egy másik változatot.';
 
-type Tab = 'assistant' | 'structure' | 'compare' | 'translate';
+type Tab = 'assistant' | 'structure' | 'compare' | 'translate' | 'format';
 // The icons give way first when the pane is narrow, so every label stays readable
 const TAB_ICON = 'w-3.5 h-3.5 mr-1 shrink-0 hidden min-[440px]:block';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
@@ -118,6 +119,7 @@ const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
   { id: 'structure', label: 'Szerkezet', icon: <ListTree className={TAB_ICON} /> },
   { id: 'compare', label: 'Összevetés', icon: <GitCompare className={TAB_ICON} /> },
   { id: 'translate', label: 'Kétnyelvű', icon: <Languages className={TAB_ICON} /> },
+  { id: 'format', label: 'Formázás', icon: <Paintbrush className={TAB_ICON} /> },
 ];
 
 /**
@@ -1082,6 +1084,10 @@ export default function TaskPane() {
           onRateLimit={setRateLimit}
           onOpenSettings={() => setView('settings')}
         />
+      </div>
+
+      <div className={tab === 'format' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+        <FormatPanel active={tab === 'format'} onDocumentChanged={() => setDocumentVersion(v => v + 1)} />
       </div>
 
       <div className={tab === 'assistant' ? 'contents' : 'hidden'}>

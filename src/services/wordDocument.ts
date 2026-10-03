@@ -5,6 +5,7 @@ import { reviewCommentText, reviewFix, searchCandidates } from './review';
 import { planDocumentEdits, summarizeDocumentEdits, type DocumentEditOp } from './documentEdit';
 import { formatNumber } from './format';
 import { withAutoNumbers, type ParagraphInfo } from './structure';
+import type { FormatAudit, FormatPlan } from './formatting';
 
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
@@ -1118,5 +1119,181 @@ export async function insertCommentsAtParagraphs(items: { paragraph: number; exp
     });
     await context.sync();
     return { inserted, skipped };
+  });
+}
+
+const FORMAT_PROPERTIES = 'items/text,items/styleBuiltIn,items/alignment,items/spaceAfter,items/spaceBefore,items/lineSpacing,items/tableNestingLevel,items/font/name,items/font/size,items/font/bold';
+
+/** Reading and changing the footnotes needs WordApi 1.5 */
+export const canFormatFootnotes = () => isSupported('1.5');
+
+/** The formatting of every paragraph (and of the footnotes, where Word can tell), for the Formázás tab */
+export async function readFormatAudit(): Promise<FormatAudit> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.body.paragraphs;
+    paragraphs.load(FORMAT_PROPERTIES);
+    const notes = canFormatFootnotes() ? context.document.body.footnotes : null;
+    notes?.load('items/body/font/name,items/body/font/size');
+    await context.sync();
+    return {
+      paragraphs: paragraphs.items.map(p => ({
+        text: p.text,
+        styleBuiltIn: String(p.styleBuiltIn),
+        tableLevel: p.tableNestingLevel || 0,
+        // Word gives "" or null for a paragraph with mixed fonts or sizes
+        font: p.font.name || null,
+        size: p.font.size || null,
+        bold: typeof p.font.bold === 'boolean' ? p.font.bold : null,
+        alignment: String(p.alignment),
+        spaceBefore: p.spaceBefore || 0,
+        spaceAfter: p.spaceAfter || 0,
+        lineSpacing: p.lineSpacing || 0,
+      })),
+      footnotes: notes ? notes.items.map(n => ({ font: n.body.font.name || null, size: n.body.font.size || null })) : null,
+    };
+  });
+}
+
+/** The font, size and spacing of the paragraph the cursor is in: "like this one" for the style profile */
+export async function readSelectionFormat(): Promise<{ font: string | null; size: number | null; spaceAfter: number; lineSpacing: number; alignment: string }> {
+  return Word.run(async (context) => {
+    const paragraph = context.document.getSelection().paragraphs.getFirst();
+    paragraph.load('alignment,spaceAfter,lineSpacing,font/name,font/size');
+    await context.sync();
+    return { font: paragraph.font.name || null, size: paragraph.font.size || null, spaceAfter: paragraph.spaceAfter || 0, lineSpacing: paragraph.lineSpacing || 0, alignment: String(paragraph.alignment) };
+  });
+}
+
+export interface FormatOutcome {
+  formatted: number;
+  footnotes: number;
+  deleted: number;
+  spaces: number;
+  /** How the text changes went in; null when there were none */
+  write: WriteMode | null;
+}
+
+/**
+ * Applies a formatting plan. The formatting goes in without Track Changes (a tracked formatting change is only
+ * noise for the other side); Word's own setting is put back afterwards. The text changes (extra empty lines, double
+ * spaces) follow the usual Track Changes rule. Nothing happens when the document changed since it was read.
+ */
+export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[]): Promise<FormatOutcome> {
+  return Word.run(async (context) => {
+    const doc = context.document;
+    const paragraphs = doc.body.paragraphs;
+    paragraphs.load('items/text');
+    doc.load('changeTrackingMode');
+    await context.sync();
+    if (paragraphs.items.length !== expectedTexts.length || paragraphs.items.some((p, i) => p.text !== expectedTexts[i])) {
+      throw new UserFacingError('A dokumentum változott az átvilágítás óta, ezért nem nyúltam hozzá. Nyomd meg újra az Átvilágítás gombot.');
+    }
+    const previous = doc.changeTrackingMode;
+    let footnotes = 0;
+    try {
+      if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+      for (const change of plan.changes) {
+        const p = paragraphs.items[change.index];
+        if (change.font !== undefined) p.font.name = change.font;
+        if (change.size !== undefined) p.font.size = change.size;
+        if (change.bold) p.font.bold = true;
+        if (change.spaceBefore !== undefined) p.spaceBefore = change.spaceBefore;
+        if (change.spaceAfter !== undefined) p.spaceAfter = change.spaceAfter;
+        if (change.lineSpacing !== undefined) p.lineSpacing = change.lineSpacing;
+        if (change.alignment !== undefined) p.alignment = change.alignment;
+      }
+      if (plan.footnotes && canFormatFootnotes()) {
+        const notes = doc.body.footnotes;
+        notes.load('items');
+        await context.sync();
+        notes.items.forEach(n => {
+          if (plan.footnotes!.font) n.body.font.name = plan.footnotes!.font;
+          if (plan.footnotes!.size) n.body.font.size = plan.footnotes!.size;
+        });
+        footnotes = notes.items.length;
+      }
+      await context.sync();
+    } finally {
+      if (previous !== 'Off') {
+        doc.changeTrackingMode = previous;
+        await context.sync().catch(() => Word.run(async (fresh) => {
+          fresh.document.changeTrackingMode = previous;
+          await fresh.sync();
+        }).catch(() => {}));
+      }
+    }
+
+    let deleted = 0;
+    let spaces = 0;
+    let write: WriteMode | null = null;
+    if (plan.deleteEmpty.length || plan.doubleSpaces) {
+      ({ write } = await withTrackChanges(context, async () => {
+        // Only paragraphs still empty; one holding a picture is kept
+        const candidates = plan.deleteEmpty.map(i => paragraphs.items[i]).filter(p => p && !p.text.trim());
+        const pictures = candidates.map(p => {
+          const items = p.inlinePictures;
+          items.load('items');
+          return items;
+        });
+        await context.sync();
+        candidates.forEach((p, i) => {
+          if (pictures[i].items.length) return;
+          p.delete();
+          deleted++;
+        });
+        await context.sync();
+        // Three spaces in a row need two rounds; stop when a round finds no fewer
+        let last = Infinity;
+        for (let round = 0; plan.doubleSpaces && round < 4; round++) {
+          const found = doc.body.search('  ', { matchCase: true });
+          found.load('items');
+          await context.sync();
+          if (!found.items.length || found.items.length >= last) break;
+          last = found.items.length;
+          found.items.forEach(r => r.insertText(' ', 'Replace'));
+          spaces += found.items.length;
+          await context.sync();
+        }
+      }));
+    }
+    return { formatted: plan.changes.length, footnotes, deleted, spaces, write };
+  });
+}
+
+/**
+ * The whole document as a .docx file, exactly as it is now (tracked changes and comments included): the "previous
+ * state" kept before the formatting is changed
+ */
+export function readDocumentFile(): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 4 * 1024 * 1024 }, (result) => {
+      if (result.status !== Office.AsyncResultStatus.Succeeded) {
+        reject(result.error);
+        return;
+      }
+      const file = result.value;
+      const slices: Uint8Array[] = [];
+      const fail = (error: unknown) => file.closeAsync(() => reject(error));
+      const next = (index: number) => file.getSliceAsync(index, (slice) => {
+        if (slice.status !== Office.AsyncResultStatus.Succeeded) {
+          fail(slice.error);
+          return;
+        }
+        slices.push(new Uint8Array(slice.value.data));
+        if (index + 1 < file.sliceCount) {
+          next(index + 1);
+          return;
+        }
+        file.closeAsync();
+        const bytes = new Uint8Array(slices.reduce((n, s) => n + s.length, 0));
+        let at = 0;
+        slices.forEach(s => {
+          bytes.set(s, at);
+          at += s.length;
+        });
+        resolve(bytes);
+      });
+      next(0);
+    });
   });
 }

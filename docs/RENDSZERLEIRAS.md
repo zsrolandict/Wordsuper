@@ -143,7 +143,19 @@ Mindkét esetben:
 - A kész dokumentum új, mentetlen Word-ablakban nyílik meg (WordApi 1.3); ha ez nem megy, letölthető .docx-ként.
 - Az irányt a program a szöveg alapján kitalálja, egy gombbal megfordítható.
 
-### 3.5 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
+### 3.5 Formázás fül (AI nélkül)
+
+- **Átvilágítás:** betűtípusok és -méretek (hány bekezdésben melyik), térközök, címsorok szintenként, stílus nélküli „ál-címek” (rövid, félkövér vagy csupa nagybetűs sor záró írásjel nélkül), lábjegyzetek mérete, többszörös üres sorok, dupla szóközök.
+- **Címsor-kérdés:** ha több címsorszint van (az ál-címek egy további szintnek számítanak), megkérdezi: tudatosan külön szintek-e (a magasabb szint nagyobb), vagy valójában mind egy szint (mind egyforma). Válasz nélkül nem lehet egységesíteni. A számozás és a tartalomjegyzék szintjei mindkét esetben maradnak: csak a megjelenés változik, a stílus nem.
+- **Egységes stílus:** betűtípus, szövegméret, címsorméret, lábjegyzetméret, bekezdés utáni és címsor előtti térköz, igazítás (sorkizárt / balra zárt). Alapérték a dokumentum leggyakoribb beállítása; a „mint a kijelölt” gombbal egy jól formázott bekezdésről vagy címről is átvehető.
+- **Kategóriánként kapcsolható**, darabszámmal: betűtípus, betűméret, címsorok, lábjegyzetek, térközök, igazítás. A középre és jobbra igazított bekezdéshez (cím, keltezés, aláírás) nem nyúl; táblázatban csak a betűtípust és a méretet állítja. A félkövér, dőlt és aláhúzott kiemelések megmaradnak.
+- **Szöveget módosító lehetőségek** (alapból kikapcsolva): többszörös üres sorok törlése (egy marad; képet tartalmazó bekezdés nem), dupla szóközök cseréje. Ezek a szokásos korrektúraszabály szerint kerülnek be.
+- **A formázás korrektúra nélkül kerül be** (a formázási korrektúra a másik félnek csak zaj); a Word saját „Változások követése” beállítása utána visszaáll.
+- **Visszaút:** egységesítés előtt a program elmenti a teljes dokumentumot (korrektúrákkal, megjegyzésekkel). Az első és a legutóbbi egységesítés előtti állapot egy kattintással új ablakban megnyitható vagy letölthető. Ha a mentés nem sikerül, csak kifejezett „Mentés nélkül folytatom” után megy tovább.
+- Ha a dokumentum az átvilágítás óta változott, nem nyúl hozzá, hanem újra kell átvilágítani.
+- Valódi Wordben még ellenőrizendő: a sorköz beállítása (a Word pontban adja meg), és a lábjegyzetek kezelése (WordApi 1.5 kell hozzá; régebbi Wordben a lábjegyzetek kimaradnak).
+
+### 3.6 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
 
 - **Részleges elfogadás mindenhol:**
   - Szerkesztésnél a javaslat minden változása kattintható. A kihagyott változásnál az eredeti szöveg marad, és csak a kiválasztottak kerülnek be.
