@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Download, ExternalLink, Loader2, MousePointerClick, Paintbrush, RefreshCw, ShieldCheck } from 'lucide-react';
+import { ChevronDown, Download, ExternalLink, Loader2, MousePointerClick, Paintbrush, RefreshCw, ShieldCheck, Star } from 'lucide-react';
 import {
   defaultOptions, defaultProfile, STYLE_PRESETS, FORMAT_CATEGORIES, headingLevelCount, planFormatting, summarize, TEXT_CATEGORIES,
   type AuditSummary, type Category, type FormatAudit, type FormatOptions, type FormatProfile,
@@ -12,29 +12,40 @@ import { formatNumber } from '../services/format';
 const CATEGORY_LABELS: Record<Category, { label: string; title: string }> = {
   font: { label: 'Betűtípus', title: 'Minden bekezdés (és lábjegyzet) ugyanazzal a betűtípussal' },
   size: { label: 'Betűméret', title: 'A szövegtörzs (és a táblázatok) egy méretben' },
-  headings: { label: 'Címsorok', title: 'A címsorok nagyobbak és félkövérek' },
+  headings: { label: 'Címsorok', title: 'A címsorok nagyobbak, félkövérek (és ha kéred, kiskapitálisak, díszvonallal)' },
   footnotes: { label: 'Lábjegyzetek', title: 'A lábjegyzetek kisebbek' },
   spacing: { label: 'Térközök', title: 'Egységes bekezdés előtti/utáni térköz és sorköz (táblázaton kívül)' },
-  color: { label: 'Címek színe', title: 'A címek egyforma színűek (csak ha választasz színt)' },
+  alignment: { label: 'Igazítás', title: 'A balra zárt és sorkizárt bekezdések egyformán; a középre és jobbra igazítotthoz nem nyúl' },
+  color: { label: 'Színek', title: 'A címek és a szöveg színe (csak ha választasz színt)' },
   indent: { label: 'Behúzások', title: 'Első sor, bal és jobb behúzás a szövegbekezdéseken (számozott listákhoz nem nyúl)' },
   pagination: { label: 'Címsor együtt marad a következővel', title: 'A címsor stílusa: a cím nem maradhat egyedül a lap alján' },
   margins: { label: 'Oldalmargók', title: 'Felső, alsó, bal és jobb margó (csak ha megadsz értéket; asztali Word kell)' },
-  alignment: { label: 'Igazítás', title: 'A balra zárt és sorkizárt bekezdések egyformán; a középre és jobbra igazítotthoz nem nyúl' },
+  styles: { label: 'A Word saját stílusai is', title: 'A Normál és a Címsor stílusok is az új formát kapják, így az utána begépelt szöveg is egységes marad' },
+  nbsp: { label: 'Nem törő szóközök', title: '§ 5, 2013. évi V. törvény, 2026. október 3., 100 000 Ft: nem törhet két sorba' },
+  quotes: { label: 'Magyar idézőjelek', title: '"…" helyett „…”' },
   emptyParagraphs: { label: 'Többszörös üres sorok törlése', title: 'Ahol két vagy több üres bekezdés áll egymás után, csak egy marad' },
   doubleSpaces: { label: 'Dupla szóközök cseréje', title: 'Két vagy több szóköz helyett egy' },
 };
 
+const COMMON_FONTS = ['Calibri', 'Cambria', 'Garamond', 'Georgia', 'Times New Roman', 'Arial', 'Tahoma', 'Verdana'];
+const SERIF_FONTS = /Cambria|Garamond|Georgia|Times|Book|Palatino/i;
+const ICT_DARK = '#0B3B60';
+const ICT_ACCENT = '#2E75B6';
 const HEADING_COLORS: [string, string][] = [
   ['', 'Nem változtat'],
+  [ICT_DARK, 'ICT Europa sötétkék'],
+  [ICT_ACCENT, 'ICT Europa kék'],
   ['#000000', 'Fekete'],
   ['#1F3864', 'Sötétkék'],
   ['#404040', 'Sötétszürke'],
   ['#7B1E3A', 'Bordó'],
   ['#1E4D2B', 'Sötétzöld'],
 ];
-const COMMON_FONTS = ['Calibri', 'Arial', 'Times New Roman', 'Garamond', 'Cambria', 'Georgia', 'Tahoma', 'Verdana'];
+const RULE_COLORS: [string, string][] = [['', 'Nincs'], [ICT_ACCENT, 'ICT Europa kék'], [ICT_DARK, 'ICT Europa sötétkék'], ['#808080', 'Szürke']];
+const BODY_COLORS: [string, string][] = [['', 'Nem változtat'], ['#1A1A1A', 'Grafit (kíméli a szemet)'], ['#000000', 'Fekete'], ['#262626', 'Sötétszürke']];
 const LEVEL_NAMES = (level: number) => `Címsor ${level}`;
 const pt = (n: number) => `${formatNumber(Math.round(n * 10) / 10)} pt`;
+const DOCUMENT_PRESET = 'document';
 
 interface Snapshot {
   bytes: Uint8Array;
@@ -94,14 +105,95 @@ function CmInput({ label, value, onChange, disabled }: { label: string; value: n
   );
 }
 
+function ColorSelect({ label, value, options, onChange, disabled }: { label: string; value: string; options: [string, string][]; onChange: (v: string) => void; disabled?: boolean }) {
+  return (
+    <label className="flex items-center justify-between space-x-2">
+      <span className="text-neutral-600">{label}</span>
+      <span className="flex items-center space-x-1.5">
+        {value && <span className="w-3 h-3 rounded-sm border border-neutral-300" style={{ background: value }} />}
+        <select value={value} disabled={disabled} onChange={e => onChange(e.target.value)} aria-label={label} className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[9.5rem]">
+          {options.map(([v, name]) => <option key={v} value={v}>{name}</option>)}
+        </select>
+      </span>
+    </label>
+  );
+}
+
+/** The font as the browser can show it: the named font if installed, a similar family otherwise */
+const cssFont = (font: string) => `"${font}", ${SERIF_FONTS.test(font) ? 'Georgia, "Times New Roman", serif' : 'Calibri, Arial, sans-serif'}`;
+
 /**
- * Formázás nézet: a dokumentum formázásának átvilágítása (AI nélkül) és egységesítése. Csak a megjelenéshez nyúl;
- * előtte elmenti a dokumentum teljes állapotát, ami egy kattintással új ablakban megnyitható.
+ * A small sample page in the chosen style: a top-level heading (small capitals, the rule under it), a second-level
+ * heading (the bar beside it) and a paragraph. Sizes are scaled down to fit the pane; the proportions are right.
+ */
+function StylePreview({ profile }: { profile: FormatProfile }) {
+  const scale = 1.333 * 0.82;
+  const px = (points: number) => `${(points * scale).toFixed(1)}px`;
+  const headingFont = cssFont(profile.headingFont || profile.font);
+  const headingColor = profile.headingColor || '#111111';
+  const lineHeight = profile.lineSpacing > 0 ? (profile.lineSpacing / profile.bodySize).toFixed(2) : '1.3';
+  const body: React.CSSProperties = {
+    fontFamily: cssFont(profile.font),
+    fontSize: px(profile.bodySize),
+    color: profile.bodyColor || '#000000',
+    lineHeight,
+    textAlign: profile.alignment === 'Justified' ? 'justify' : 'left',
+    textIndent: profile.firstLineIndent ? px(profile.firstLineIndent) : undefined,
+    marginTop: px(profile.bodySpaceBefore),
+    marginBottom: px(profile.bodySpaceAfter),
+  };
+  return (
+    <div className="bg-white border border-neutral-200 rounded-lg px-4 py-3 shadow-inner" aria-label="Élő előnézet">
+      <p
+        style={{
+          fontFamily: headingFont,
+          fontSize: px(profile.headingSize),
+          fontWeight: 700,
+          fontVariant: profile.headingSmallCaps ? 'small-caps' : undefined,
+          color: headingColor,
+          borderBottom: profile.h1Rule ? `1.5px solid ${profile.h1Rule}` : undefined,
+          paddingBottom: profile.h1Rule ? '2px' : undefined,
+          marginBottom: px(profile.headingSpaceAfter),
+        }}
+      >
+        1. A szerződés tárgya
+      </p>
+      <p style={body}>
+        Eladó eladja, Vevő megvásárolja a 2. pontban meghatározott ingatlant a jelen szerződésben foglalt feltételekkel, a Ptk. § 6:215
+        szerint, 2026. október 3. napján.
+      </p>
+      <p
+        style={{
+          fontFamily: headingFont,
+          fontSize: px(Math.max(profile.bodySize + 1, profile.headingSize - 1)),
+          fontWeight: 700,
+          fontVariant: profile.headingSmallCaps ? 'small-caps' : undefined,
+          color: headingColor,
+          borderLeft: profile.h2Bar ? `3px solid ${profile.h2Bar}` : undefined,
+          paddingLeft: profile.h2Bar ? '6px' : undefined,
+          marginTop: px(Math.min(profile.headingSpaceBefore, 14)),
+          marginBottom: px(profile.headingSpaceAfter),
+        }}
+      >
+        1.1 Vételár
+      </p>
+      <p style={{ ...body, marginBottom: 0 }}>A vételár 125 000 000 Ft, amelyet Vevő a birtokbaadáskor fizet meg.</p>
+    </div>
+  );
+}
+
+/**
+ * Formázás nézet: a dokumentum formázásának átvilágítása (AI nélkül) és egységesítése. Csak a megjelenéshez nyúl
+ * (a szöveget csak a külön bekapcsolható szövegfésülés módosítja); előtte elmenti a dokumentum teljes állapotát, ami
+ * egy kattintással új ablakban megnyitható.
  */
 export default function FormatPanel({ active, onDocumentChanged }: { active: boolean; onDocumentChanged: () => void }) {
   const [audit, setAudit] = useState<FormatAudit | null>(null);
   const [reading, setReading] = useState(false);
   const [profile, setProfile] = useState<FormatProfile | null>(null);
+  /** The style card chosen; "customized": a value was changed by hand after */
+  const [presetId, setPresetId] = useState(DOCUMENT_PRESET);
+  const [customized, setCustomized] = useState(false);
   const [options, setOptions] = useState<FormatOptions>(defaultOptions);
   /** The answer to the heading question; null: not asked or not answered yet */
   const [headingAnswer, setHeadingAnswer] = useState<'separate' | 'unified' | null>(null);
@@ -124,6 +216,8 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
       setAudit(next);
       if (!keepProfile) {
         setProfile(defaultProfile(summarize(next)));
+        setPresetId(DOCUMENT_PRESET);
+        setCustomized(false);
         setHeadingAnswer(null);
       }
     } catch (e) {
@@ -147,11 +241,23 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
     () => (audit && profile ? planFormatting(audit, profile, { ...options, unifyHeadings: headingAnswer === 'unified' }) : null),
     [audit, profile, options, headingAnswer]
   );
-  const total = plan ? plan.changes.length + (plan.footnotes ? 1 : 0) + plan.keepWithNextStyles.length + (plan.margins ? 1 : 0) + plan.deleteEmpty.length + (plan.doubleSpaces ? 1 : 0) : 0;
+  const total = plan
+    ? plan.changes.length + (plan.footnotes ? 1 : 0) + plan.styleUpdates.length + plan.keepWithNextStyles.length + (plan.margins ? 1 : 0)
+      + plan.textFixes.length + plan.deleteEmpty.length + (plan.doubleSpaces ? 1 : 0)
+    : 0;
   const busy = reading || applying;
 
   const setCategory = (category: Category, on: boolean) => setOptions(o => ({ ...o, categories: { ...o.categories, [category]: on } }));
-  const setProfileValue = <K extends keyof FormatProfile>(key: K, value: FormatProfile[K]) => setProfile(p => p && { ...p, [key]: value });
+  const setProfileValue = <K extends keyof FormatProfile>(key: K, value: FormatProfile[K]) => {
+    setProfile(p => p && { ...p, [key]: value });
+    setCustomized(true);
+  };
+  const choosePreset = (id: string) => {
+    if (!audit) return;
+    setProfile(id === DOCUMENT_PRESET ? defaultProfile(summarize(audit)) : STYLE_PRESETS.find(p => p.id === id)!.profile);
+    setPresetId(id);
+    setCustomized(false);
+  };
 
   /** "Like the paragraph the cursor is in": for the body text, or for the headings */
   const takeFromSelection = async (role: 'body' | 'heading') => {
@@ -174,6 +280,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
           ...(format.alignment === 'Left' || format.alignment === 'Justified' ? { alignment: format.alignment } : {}),
         };
       });
+      setCustomized(true);
       setStatus(role === 'heading' ? 'A címsor méretét a kijelölt bekezdésről vettem át.' : 'A betűtípust, a méretet és a térközt a kijelölt bekezdésről vettem át.');
     } catch (e) {
       console.error(e);
@@ -205,9 +312,12 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
       onDocumentChanged();
       const parts = [
         outcome.formatted ? `${formatNumber(outcome.formatted)} bekezdés formázása` : '',
+        outcome.styles ? `${outcome.styles} Word-stílus frissítve` : '',
         outcome.footnotes ? `${formatNumber(outcome.footnotes)} lábjegyzet` : '',
         outcome.keepWithNext ? `${outcome.keepWithNext} címsorstílus együtt marad a következő bekezdéssel` : '',
         outcome.margins ? `oldalmargók (${outcome.margins} szakasz)` : '',
+        outcome.nbsp ? `${formatNumber(outcome.nbsp)} nem törő szóköz` : '',
+        outcome.quotes ? `${formatNumber(outcome.quotes)} idézőjel` : '',
         outcome.deleted ? `${formatNumber(outcome.deleted)} üres sor törölve` : '',
         outcome.spaces ? `${formatNumber(outcome.spaces)} dupla szóköz cserélve` : '',
       ].filter(Boolean);
@@ -242,40 +352,112 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   const fonts = summary ? [...new Set([...summary.fonts.map(([f]) => f).filter(Boolean), ...COMMON_FONTS])] : COMMON_FONTS;
   const footnotesKnown = !!audit?.footnotes?.length;
   const marginsKnown = !!audit?.margins?.length;
-  const textCategories = TEXT_CATEGORIES.filter(c => (c === 'emptyParagraphs' ? summary?.extraEmpty.length : summary?.doubleSpaces));
+  const textCounts: Partial<Record<Category, number>> = summary
+    ? { nbsp: summary.nbsp, quotes: summary.straightQuotes, emptyParagraphs: summary.extraEmpty.length, doubleSpaces: summary.doubleSpaces }
+    : {};
+
+  // The state in one line: what is uneven, or that nothing is
+  const findings = summary ? [
+    summary.fonts.length > 1 ? `${summary.fonts.length} féle betűtípus` : '',
+    summary.sizes.length > 1 ? `${summary.sizes.length} féle betűméret` : '',
+    summary.spacings > 1 ? `${summary.spacings} féle térköz` : '',
+    summary.fakeHeadings.length ? `${summary.fakeHeadings.length} stílus nélküli cím` : '',
+    summary.straightQuotes ? `${formatNumber(summary.straightQuotes)} egyenes idézőjel` : '',
+    summary.nbsp ? `${formatNumber(summary.nbsp)} hiányzó nem törő szóköz` : '',
+    summary.extraEmpty.length ? `${summary.extraEmpty.length} fölösleges üres sor` : '',
+  ].filter(Boolean) : [];
+
+  const presetCards = [
+    ...STYLE_PRESETS.filter(p => p.featured),
+    { id: DOCUMENT_PRESET, name: 'Ebből a dokumentumból', description: 'A dokumentum leggyakoribb beállításai, egységesítve', featured: false, profile: null as FormatProfile | null },
+    ...STYLE_PRESETS.filter(p => !p.featured),
+  ];
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-xs">
-      <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2">
-        <div className="flex items-center justify-between">
-          <p className="text-neutral-600">A dokumentum formázásának átvilágítása és egységesítése, AI nélkül. A szöveghez nem nyúl.</p>
+      {/* State */}
+      <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
+        <div className="flex items-start justify-between">
+          {reading && !summary ? (
+            <p className="flex items-center text-neutral-500"><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />Átvilágítom…</p>
+          ) : summary ? (
+            <p className="text-neutral-800">
+              <span className={`inline-block w-2 h-2 mr-1.5 rounded-full align-middle ${findings.length ? 'bg-amber-500' : 'bg-green-600'}`} />
+              <strong>Állapot:</strong> {findings.length ? findings.join(', ') : 'a dokumentum formázása egységes'}.
+            </p>
+          ) : <span />}
           <button onClick={() => read()} disabled={busy} title="Átvilágítás újra" aria-label="Átvilágítás" className="ml-2 p-1 text-neutral-500 hover:text-neutral-800 disabled:opacity-50">
             <RefreshCw className={`w-3.5 h-3.5 ${reading ? 'animate-spin' : ''}`} />
           </button>
         </div>
-        {reading && !summary && <p className="flex items-center text-neutral-500"><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />Átvilágítom…</p>}
         {summary && (
-          <ul className="space-y-0.5 text-neutral-800">
-            <li><strong>Betűtípus:</strong> {summary.fonts.map(([f, n]) => `${f || 'vegyes'} (${n})`).join(', ') || '–'}</li>
-            <li><strong>Betűméret:</strong> {summary.sizes.map(([s, n]) => `${pt(s)} (${n})`).join(', ') || '–'}</li>
-            <li><strong>Térközök:</strong> {summary.spacings <= 1 ? 'egységes' : `${summary.spacings} féle beállítás`}</li>
-            <li>
-              <strong>Címsorok:</strong>{' '}
-              {[
-                ...summary.headingLevels.map(([level, n]) => `${LEVEL_NAMES(level)}: ${n}`),
-                summary.fakeHeadings.length ? `stílus nélküli (félkövér vagy nagybetűs): ${summary.fakeHeadings.length}` : '',
-              ].filter(Boolean).join(', ') || 'nincs'}
-            </li>
-            {audit?.footnotes && <li><strong>Lábjegyzetek:</strong> {audit.footnotes.length ? `${audit.footnotes.length} (${summary.footnoteSizes!.map(([s]) => pt(s)).join(', ')})` : 'nincs'}</li>}
-            {summary.extraEmpty.length > 0 && <li><strong>Többszörös üres sor:</strong> {summary.extraEmpty.length}</li>}
-            {summary.doubleSpaces > 0 && <li><strong>Dupla szóköz:</strong> {summary.doubleSpaces}</li>}
-          </ul>
+          <details className="group">
+            <summary className="cursor-pointer text-neutral-500 hover:text-neutral-800 select-none">Részletek</summary>
+            <ul className="mt-1 space-y-0.5 text-neutral-700">
+              <li><strong>Betűtípus:</strong> {summary.fonts.map(([f, n]) => `${f || 'vegyes'} (${n})`).join(', ') || '–'}</li>
+              <li><strong>Betűméret:</strong> {summary.sizes.map(([s, n]) => `${pt(s)} (${n})`).join(', ') || '–'}</li>
+              <li><strong>Térközök:</strong> {summary.spacings <= 1 ? 'egységes' : `${summary.spacings} féle beállítás`}</li>
+              <li>
+                <strong>Címsorok:</strong>{' '}
+                {[
+                  ...summary.headingLevels.map(([level, n]) => `${LEVEL_NAMES(level)}: ${n}`),
+                  summary.fakeHeadings.length ? `stílus nélküli (félkövér vagy nagybetűs): ${summary.fakeHeadings.length}` : '',
+                ].filter(Boolean).join(', ') || 'nincs'}
+              </li>
+              {audit?.footnotes && <li><strong>Lábjegyzetek:</strong> {audit.footnotes.length ? `${audit.footnotes.length} (${summary.footnoteSizes!.map(([s]) => pt(s)).join(', ')})` : 'nincs'}</li>}
+              {summary.extraEmpty.length > 0 && <li><strong>Többszörös üres sor:</strong> {summary.extraEmpty.length}</li>}
+              {summary.doubleSpaces > 0 && <li><strong>Dupla szóköz:</strong> {summary.doubleSpaces}</li>}
+            </ul>
+          </details>
         )}
         {error && <p className="text-red-700">{error}</p>}
       </div>
 
       {summary && profile && plan && (
         <>
+          {/* Style cards and the live preview */}
+          <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2">
+            <p className="font-semibold text-neutral-800">Stílus{customized && <span className="ml-1 font-normal text-neutral-500">(módosítva)</span>}</p>
+            <div className="grid grid-cols-2 gap-1.5" role="group" aria-label="Stílusok">
+              {presetCards.map(card => {
+                const selected = presetId === card.id;
+                const sampleFont = card.profile ? cssFont(card.profile.font) : cssFont(profile.font);
+                return (
+                  <button
+                    key={card.id}
+                    onClick={() => choosePreset(card.id)}
+                    disabled={busy}
+                    aria-label={card.name}
+                    aria-pressed={selected}
+                    title={card.description}
+                    className={`relative text-left rounded-lg border p-2 transition-colors disabled:opacity-50 ${card.featured ? 'col-span-2' : ''} ${selected ? 'border-blue-600 ring-1 ring-blue-600 bg-blue-50/60' : 'border-neutral-200 hover:border-neutral-400 bg-white'}`}
+                  >
+                    {card.featured && (
+                      <span className="absolute top-1.5 right-1.5 flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-semibold text-white" style={{ background: ICT_DARK }}>
+                        <Star className="w-2.5 h-2.5 mr-0.5 fill-current" />Ajánlott
+                      </span>
+                    )}
+                    <span
+                      className="font-semibold text-[13px] leading-tight"
+                      style={{
+                        fontFamily: card.profile ? cssFont(card.profile.headingFont || card.profile.font) : sampleFont,
+                        fontVariant: card.profile?.headingSmallCaps ? 'small-caps' : undefined,
+                        color: card.profile?.headingColor || '#171717',
+                        borderBottom: card.profile?.h1Rule ? `1.5px solid ${card.profile.h1Rule}` : undefined,
+                        display: 'inline-block',
+                      }}
+                    >
+                      {card.name}
+                    </span>
+                    <span className="block mt-0.5 text-[10.5px] leading-snug text-neutral-500" style={{ fontFamily: sampleFont }}>{card.description}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <StylePreview profile={profile} />
+            <p className="text-[10.5px] text-neutral-400">Minta, kicsinyítve. Ha a betűtípus nincs telepítve ezen a gépen, a minta hasonlóval mutatja.</p>
+          </div>
+
           {summary.fakeHeadings.length > 0 && (
             <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1">
               <label className="flex items-start space-x-2 cursor-pointer">
@@ -301,109 +483,34 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
             </div>
           )}
 
-          <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
-            <p className="font-semibold text-neutral-700">Egységes stílus</p>
-            <div className="flex flex-wrap gap-1.5">
-              <button onClick={() => audit && setProfile(defaultProfile(summarize(audit)))} disabled={busy} title="A dokumentum leggyakoribb beállításai" className="px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50">Ebből a dokumentumból</button>
-              {STYLE_PRESETS.map(preset => (
-                <button key={preset.id} onClick={() => setProfile(preset.profile)} disabled={busy} title={preset.description} className="px-2 py-1 border border-blue-300 text-blue-800 rounded-md hover:bg-blue-50 disabled:opacity-50">{preset.name}</button>
+          {/* Text cleanup: these change the text, so they are off until asked for */}
+          {TEXT_CATEGORIES.some(c => textCounts[c]) && (
+            <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
+              <p className="font-semibold text-neutral-800">Szövegfésülés <span className="font-normal text-neutral-500">– a szöveget is módosítja, korrektúrával</span></p>
+              {TEXT_CATEGORIES.filter(c => textCounts[c]).map(c => (
+                <label key={c} className="flex items-center justify-between cursor-pointer" title={CATEGORY_LABELS[c].title}>
+                  <span className="flex items-center space-x-2">
+                    <input type="checkbox" checked={options.categories[c]} disabled={busy} onChange={e => setCategory(c, e.target.checked)} />
+                    <span>{CATEGORY_LABELS[c].label}</span>
+                  </span>
+                  <span className="text-neutral-500">{formatNumber(textCounts[c] ?? 0)}</span>
+                </label>
               ))}
+              {(textCounts.nbsp || textCounts.quotes) ? <p className="text-neutral-400 pl-5">Magyar jogi mikrotipográfia: § 5, 2013. évi V. törvény, 2026. október 3., 100 000 Ft nem törik két sorba; "…" helyett „…”.</p> : null}
             </div>
-            <label className="flex items-center justify-between space-x-2">
-              <span className="text-neutral-600">Betűtípus</span>
-              <select value={profile.font} disabled={busy} onChange={e => setProfileValue('font', e.target.value)} aria-label="Betűtípus" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">
-                {fonts.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </label>
-            <label className="flex items-center justify-between space-x-2">
-              <span className="text-neutral-600">Címsorok betűtípusa</span>
-              <select value={profile.headingFont} disabled={busy} onChange={e => setProfileValue('headingFont', e.target.value)} aria-label="Címsorok betűtípusa" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">
-                <option value="">Mint a szöveg</option>
-                {fonts.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </label>
-            <PointsInput label="Szöveg mérete" value={profile.bodySize} disabled={busy} onChange={n => setProfileValue('bodySize', Math.max(6, n))} />
-            <PointsInput label={askHeadings && headingAnswer !== 'unified' ? 'Legnagyobb címsor mérete' : 'Címsor mérete'} value={profile.headingSize} disabled={busy} onChange={n => setProfileValue('headingSize', Math.max(6, n))} />
-            {footnotesKnown && <PointsInput label="Lábjegyzet mérete" value={profile.footnoteSize} disabled={busy} onChange={n => setProfileValue('footnoteSize', Math.max(6, n))} />}
-            <PointsInput label="Bekezdés előtti térköz" value={profile.bodySpaceBefore} disabled={busy} onChange={n => setProfileValue('bodySpaceBefore', n)} />
-            <PointsInput label="Bekezdés utáni térköz" value={profile.bodySpaceAfter} disabled={busy} onChange={n => setProfileValue('bodySpaceAfter', n)} />
-            <PointsInput label="Címsor előtti térköz" value={profile.headingSpaceBefore} disabled={busy} onChange={n => setProfileValue('headingSpaceBefore', n)} />
-            <PointsInput label="Címsor utáni térköz" value={profile.headingSpaceAfter} disabled={busy} onChange={n => setProfileValue('headingSpaceAfter', n)} />
-            <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
-            <p className="text-neutral-500">Pontban: a szöveg méretének kb. 1,2-szerese a megszokott (11 pt-nál 13–14 pt).</p>
-            <PointsInput label="Első sor behúzása (0 = nem változtat)" value={profile.firstLineIndent} disabled={busy} onChange={n => setProfileValue('firstLineIndent', n)} />
-            <PointsInput label="Bal behúzás (0 = nem változtat)" value={profile.leftIndent} disabled={busy} onChange={n => setProfileValue('leftIndent', n)} />
-            <PointsInput label="Jobb behúzás (0 = nem változtat)" value={profile.rightIndent} disabled={busy} onChange={n => setProfileValue('rightIndent', n)} />
-            <label className="flex items-center justify-between space-x-2">
-              <span className="text-neutral-600">Címek színe</span>
-              <select value={profile.headingColor} disabled={busy} onChange={e => setProfileValue('headingColor', e.target.value)} aria-label="Címek színe" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
-                {HEADING_COLORS.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
-              </select>
-            </label>
-            {marginsKnown && (
-              <div className="pt-1 space-y-1.5">
-                <p className="text-neutral-500">Oldalmargók cm-ben (0 = nem változtat):</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-                  <CmInput label="Felső margó" value={profile.marginTop} disabled={busy} onChange={n => setProfileValue('marginTop', n)} />
-                  <CmInput label="Alsó margó" value={profile.marginBottom} disabled={busy} onChange={n => setProfileValue('marginBottom', n)} />
-                  <CmInput label="Bal margó" value={profile.marginLeft} disabled={busy} onChange={n => setProfileValue('marginLeft', n)} />
-                  <CmInput label="Jobb margó" value={profile.marginRight} disabled={busy} onChange={n => setProfileValue('marginRight', n)} />
-                </div>
-              </div>
-            )}
-            <label className="flex items-center justify-between space-x-2">
-              <span className="text-neutral-600">Igazítás</span>
-              <select value={profile.alignment} disabled={busy} onChange={e => setProfileValue('alignment', e.target.value as FormatProfile['alignment'])} aria-label="Igazítás" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
-                <option value="Justified">Sorkizárt</option>
-                <option value="Left">Balra zárt</option>
-              </select>
-            </label>
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              <button onClick={() => takeFromSelection('body')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott szövegbekezdésbe, majd ide">
-                <MousePointerClick className="w-3 h-3 mr-1" />Szöveg: mint a kijelölt
-              </button>
-              <button onClick={() => takeFromSelection('heading')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott címbe, majd ide">
-                <MousePointerClick className="w-3 h-3 mr-1" />Cím: mint a kijelölt
-              </button>
-            </div>
-          </div>
+          )}
 
-          <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
-            <p className="font-semibold text-neutral-700">Mit egységesítsek?</p>
-            {FORMAT_CATEGORIES.filter(c => (c !== 'footnotes' || footnotesKnown) && (c !== 'margins' || marginsKnown)).map(c => (
-              <label key={c} className="flex items-center justify-between cursor-pointer" title={CATEGORY_LABELS[c].title}>
-                <span className="flex items-center space-x-2">
-                  <input type="checkbox" checked={options.categories[c]} disabled={busy} onChange={e => setCategory(c, e.target.checked)} />
-                  <span>{CATEGORY_LABELS[c].label}</span>
-                </span>
-                <span className="text-neutral-500">{options.categories[c] ? (plan.counts[c] ? `${formatNumber(plan.counts[c])} helyen` : 'rendben') : 'kihagyva'}</span>
-              </label>
-            ))}
-            {textCategories.length > 0 && (
-              <div className="pt-1.5 mt-1 border-t border-neutral-100 space-y-1.5">
-                <p className="text-neutral-500">A szöveget is módosítja (korrektúrával, a szokásos szabály szerint):</p>
-                {textCategories.map(c => (
-                  <label key={c} className="flex items-center justify-between cursor-pointer" title={CATEGORY_LABELS[c].title}>
-                    <span className="flex items-center space-x-2">
-                      <input type="checkbox" checked={options.categories[c]} disabled={busy} onChange={e => setCategory(c, e.target.checked)} />
-                      <span>{CATEGORY_LABELS[c].label}</span>
-                    </span>
-                    <span className="text-neutral-500">{c === 'emptyParagraphs' ? summary.extraEmpty.length : summary.doubleSpaces}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-
+          {/* The one big action */}
           <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2">
             <p className="text-neutral-700">
               {total
-                ? <>Ez történik: <strong>{formatNumber(plan.changes.length)} bekezdés</strong> formázása{plan.footnotes ? ', a lábjegyzetek' : ''}{plan.deleteEmpty.length ? `, ${plan.deleteEmpty.length} üres sor törlése` : ''}{plan.doubleSpaces ? `, ${summary.doubleSpaces} dupla szóköz cseréje` : ''}.</>
+                ? <>Ez történik: <strong>{formatNumber(plan.changes.length)} bekezdés</strong> formázása
+                  {plan.styleUpdates.length ? `, ${plan.styleUpdates.length} Word-stílus frissítése` : ''}
+                  {plan.footnotes ? ', a lábjegyzetek' : ''}
+                  {plan.textFixes.length ? `, szövegfésülés ${plan.textFixes.length} bekezdésben` : ''}
+                  {plan.deleteEmpty.length ? `, ${plan.deleteEmpty.length} üres sor törlése` : ''}
+                  {plan.doubleSpaces ? `, ${summary.doubleSpaces} dupla szóköz cseréje` : ''}.</>
                 : 'A kiválasztottak szerint a dokumentum már egységes, nincs mit változtatni.'}
-            </p>
-            <p className="flex items-start text-neutral-500">
-              <ShieldCheck className="w-3.5 h-3.5 mr-1 mt-px shrink-0 text-green-700" />
-              Előtte elmentem a dokumentum mostani állapotát (korrektúrákkal, megjegyzésekkel), és itt bármikor megnyithatod. A félkövér, dőlt, aláhúzott kiemelések, a számozás és a címsorszintek megmaradnak. A formázás korrektúra nélkül kerül be.
             </p>
             {askHeadings && !headingAnswer && <p className="text-amber-700">Előbb válaszolj a címsorszintekről fent.</p>}
             {noSnapshotAsk ? (
@@ -418,14 +525,115 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
               <button
                 onClick={() => apply()}
                 disabled={busy || !total || (askHeadings && !headingAnswer)}
-                className="w-full flex items-center justify-center py-2 font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg"
+                className="w-full flex items-center justify-center py-2.5 text-sm font-semibold text-white rounded-lg disabled:opacity-40"
+                style={{ background: ICT_DARK }}
               >
-                {applying ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Paintbrush className="w-4 h-4 mr-1" />}
+                {applying ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Paintbrush className="w-4 h-4 mr-1.5" />}
                 Egységesítés
               </button>
             )}
+            <p className="flex items-start text-neutral-500">
+              <ShieldCheck className="w-3.5 h-3.5 mr-1 mt-px shrink-0 text-green-700" />
+              Előtte elmentem a dokumentum mostani állapotát, és lent bármikor megnyithatod. A kiemelések, a számozás és a címsorszintek megmaradnak; a formázás korrektúra nélkül kerül be.
+            </p>
             {status && <p className="font-medium text-green-700">{status}</p>}
           </div>
+
+          {/* Everything else, for those who want it */}
+          <details className="bg-white border border-neutral-200 rounded-xl group">
+            <summary className="flex items-center justify-between p-3 cursor-pointer select-none font-semibold text-neutral-800 list-none">
+              Részletes beállítások és finomhangolás
+              <ChevronDown className="w-4 h-4 text-neutral-500 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="px-3 pb-3 space-y-3">
+              <div className="space-y-1.5">
+                <p className="font-semibold text-neutral-600">Betűk</p>
+                <label className="flex items-center justify-between space-x-2">
+                  <span className="text-neutral-600">Betűtípus</span>
+                  <select value={profile.font} disabled={busy} onChange={e => setProfileValue('font', e.target.value)} aria-label="Betűtípus" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">
+                    {fonts.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </label>
+                <PointsInput label="Szöveg mérete" value={profile.bodySize} disabled={busy} onChange={n => setProfileValue('bodySize', Math.max(6, n))} />
+                {footnotesKnown && <PointsInput label="Lábjegyzet mérete" value={profile.footnoteSize} disabled={busy} onChange={n => setProfileValue('footnoteSize', Math.max(6, n))} />}
+                <ColorSelect label="Szöveg színe" value={profile.bodyColor} options={BODY_COLORS} disabled={busy} onChange={v => setProfileValue('bodyColor', v)} />
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="font-semibold text-neutral-600">Címek</p>
+                <label className="flex items-center justify-between space-x-2">
+                  <span className="text-neutral-600">Címsorok betűtípusa</span>
+                  <select value={profile.headingFont} disabled={busy} onChange={e => setProfileValue('headingFont', e.target.value)} aria-label="Címsorok betűtípusa" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">
+                    <option value="">Mint a szöveg</option>
+                    {fonts.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </label>
+                <PointsInput label={askHeadings && headingAnswer !== 'unified' ? 'Legnagyobb címsor mérete' : 'Címsor mérete'} value={profile.headingSize} disabled={busy} onChange={n => setProfileValue('headingSize', Math.max(6, n))} />
+                <ColorSelect label="Címek színe" value={profile.headingColor} options={HEADING_COLORS} disabled={busy} onChange={v => setProfileValue('headingColor', v)} />
+                <label className="flex items-center justify-between cursor-pointer">
+                  <span className="text-neutral-600">Kiskapitális címek</span>
+                  <input type="checkbox" checked={profile.headingSmallCaps} disabled={busy} onChange={e => setProfileValue('headingSmallCaps', e.target.checked)} aria-label="Kiskapitális címek" />
+                </label>
+                <ColorSelect label="Vonal a főcím alatt" value={profile.h1Rule} options={RULE_COLORS} disabled={busy} onChange={v => setProfileValue('h1Rule', v)} />
+                <ColorSelect label="Csík a 2. szint mellett" value={profile.h2Bar} options={RULE_COLORS} disabled={busy} onChange={v => setProfileValue('h2Bar', v)} />
+                <PointsInput label="Címsor előtti térköz" value={profile.headingSpaceBefore} disabled={busy} onChange={n => setProfileValue('headingSpaceBefore', n)} />
+                <PointsInput label="Címsor utáni térköz" value={profile.headingSpaceAfter} disabled={busy} onChange={n => setProfileValue('headingSpaceAfter', n)} />
+                <p className="text-neutral-400">A vonal és a csík a Word címsorstílusán keresztül kerül fel (asztali Word kell hozzá).</p>
+              </div>
+
+              <div className="space-y-1.5">
+                <p className="font-semibold text-neutral-600">Bekezdések</p>
+                <PointsInput label="Bekezdés előtti térköz" value={profile.bodySpaceBefore} disabled={busy} onChange={n => setProfileValue('bodySpaceBefore', n)} />
+                <PointsInput label="Bekezdés utáni térköz" value={profile.bodySpaceAfter} disabled={busy} onChange={n => setProfileValue('bodySpaceAfter', n)} />
+                <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
+                <p className="text-neutral-400">Pontban: a szöveg méretének kb. 1,2–1,3-szorosa a megszokott (11 pt-nál 13–14,5 pt).</p>
+                <PointsInput label="Első sor behúzása (0 = nem változtat)" value={profile.firstLineIndent} disabled={busy} onChange={n => setProfileValue('firstLineIndent', n)} />
+                <PointsInput label="Bal behúzás (0 = nem változtat)" value={profile.leftIndent} disabled={busy} onChange={n => setProfileValue('leftIndent', n)} />
+                <PointsInput label="Jobb behúzás (0 = nem változtat)" value={profile.rightIndent} disabled={busy} onChange={n => setProfileValue('rightIndent', n)} />
+                <label className="flex items-center justify-between space-x-2">
+                  <span className="text-neutral-600">Igazítás</span>
+                  <select value={profile.alignment} disabled={busy} onChange={e => setProfileValue('alignment', e.target.value as FormatProfile['alignment'])} aria-label="Igazítás" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
+                    <option value="Justified">Sorkizárt</option>
+                    <option value="Left">Balra zárt</option>
+                  </select>
+                </label>
+              </div>
+
+              {marginsKnown && (
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-neutral-600">Oldal <span className="font-normal text-neutral-400">– margók cm-ben (0 = nem változtat)</span></p>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                    <CmInput label="Felső margó" value={profile.marginTop} disabled={busy} onChange={n => setProfileValue('marginTop', n)} />
+                    <CmInput label="Alsó margó" value={profile.marginBottom} disabled={busy} onChange={n => setProfileValue('marginBottom', n)} />
+                    <CmInput label="Bal margó" value={profile.marginLeft} disabled={busy} onChange={n => setProfileValue('marginLeft', n)} />
+                    <CmInput label="Jobb margó" value={profile.marginRight} disabled={busy} onChange={n => setProfileValue('marginRight', n)} />
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-1.5">
+                <button onClick={() => takeFromSelection('body')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott szövegbekezdésbe, majd ide">
+                  <MousePointerClick className="w-3 h-3 mr-1" />Szöveg: mint a kijelölt
+                </button>
+                <button onClick={() => takeFromSelection('heading')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott címbe, majd ide">
+                  <MousePointerClick className="w-3 h-3 mr-1" />Cím: mint a kijelölt
+                </button>
+              </div>
+
+              <div className="space-y-1.5 pt-2 border-t border-neutral-100">
+                <p className="font-semibold text-neutral-600">Mit egységesítsek?</p>
+                {FORMAT_CATEGORIES.filter(c => (c !== 'footnotes' || footnotesKnown) && (c !== 'margins' || marginsKnown)).map(c => (
+                  <label key={c} className="flex items-center justify-between cursor-pointer" title={CATEGORY_LABELS[c].title}>
+                    <span className="flex items-center space-x-2">
+                      <input type="checkbox" checked={options.categories[c]} disabled={busy} onChange={e => setCategory(c, e.target.checked)} />
+                      <span>{CATEGORY_LABELS[c].label}</span>
+                    </span>
+                    <span className="text-neutral-500">{options.categories[c] ? (plan.counts[c] ? `${formatNumber(plan.counts[c])} helyen` : 'rendben') : 'kihagyva'}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </details>
         </>
       )}
 

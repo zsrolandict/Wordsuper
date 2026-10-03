@@ -57,7 +57,8 @@ test('the plan: body unified, headings graded by level, tables only font and siz
   assert.deepEqual(at(4), { index: 4, font: 'Calibri', size: 11, spaceAfter: 6 });
   // A fake heading below heading styles gets the smallest heading size
   assert.deepEqual(at(7), { index: 7, size: 12, bold: true, spaceBefore: 12 });
-  assert.deepEqual(at(8), { index: 8, font: 'Calibri', size: 11 });
+  // The table keeps its own spacing and alignment: pinned, since the Normal style changes
+  assert.deepEqual(at(8), { index: 8, font: 'Calibri', size: 11, spaceBefore: 0, spaceAfter: 0, lineSpacing: 13.8, alignment: 'Left' });
   assert.equal(at(9), undefined);
   assert.deepEqual(plan.footnotes, { font: 'Calibri', size: 9 });
   assert.deepEqual(plan.deleteEmpty, []);
@@ -88,8 +89,8 @@ test('categories switched off change nothing of theirs', () => {
 });
 
 test('the ready-made styles: a Garamond classic, and all of them usable', () => {
-  assert.deepEqual(STYLE_PRESETS.map(p => p.id), ['classic', 'modern', 'compact', 'premium', 'legal']);
-  assert.equal(STYLE_PRESETS[0].profile.font, 'Garamond');
+  assert.deepEqual(STYLE_PRESETS.map(p => p.id), ['executive', 'classic', 'modern', 'compact', 'premium', 'legal']);
+  assert.equal(STYLE_PRESETS.find(p => p.id === 'classic')!.profile.font, 'Garamond');
   for (const preset of STYLE_PRESETS) {
     assert.ok(preset.profile.headingSize > preset.profile.bodySize && preset.profile.footnoteSize < preset.profile.bodySize, preset.id);
     assert.ok(planFormatting(audit, preset.profile, defaultOptions()).changes.length > 0, preset.id);
@@ -131,4 +132,43 @@ test('heading colour, indents (lists left alone), keep with next, margins in poi
   off.categories.color = false;
   const plan2 = planFormatting(withMargins, profile, off);
   assert.deepEqual([plan2.keepWithNextStyles, plan2.margins, plan2.changes.find(c => c.index === 1)?.color], [[], null, undefined]);
+});
+
+test('Word styles are updated too: Normal and the heading levels, with the rule under the top one', () => {
+  const withNames: FormatAudit = {
+    ...audit,
+    paragraphs: audit.paragraphs.map(p => ({ ...p, style: { Normal: 'Normál', Heading1: 'Címsor 1', Heading2: 'Címsor 2', Title: 'Cím' }[p.styleBuiltIn] })),
+  };
+  const executive = STYLE_PRESETS.find(p => p.id === 'executive')!.profile;
+  const plan = planFormatting(withNames, executive, defaultOptions());
+  const byName = new Map(plan.styleUpdates.map(u => [u.name, u]));
+  assert.deepEqual([...byName.keys()], ['Normál', 'Címsor 1', 'Címsor 2', 'Cím']);
+  assert.deepEqual(byName.get('Normál')!.font, { name: 'Cambria', size: 11, color: '#1A1A1A' });
+  assert.deepEqual(byName.get('Normál')!.paragraph, { spaceBefore: 0, spaceAfter: 8, lineSpacing: 14.5, alignment: 'Justified' });
+  assert.deepEqual(byName.get('Címsor 1')!.font, { name: 'Cambria', size: 14, bold: true, smallCaps: true, color: '#0B3B60' });
+  assert.deepEqual(byName.get('Címsor 1')!.border, { location: 'Bottom', color: '#2E75B6' });
+  assert.deepEqual(byName.get('Címsor 2')!.border, { location: 'Left', color: '#2E75B6' });
+  assert.equal(byName.get('Cím')!.paragraph, undefined, 'the title keeps its own spacing');
+  // Headings in small capitals, fake headings too; the body in graphite
+  assert.equal(plan.changes.find(c => c.index === 7)?.smallCaps, true);
+  assert.equal(plan.changes.find(c => c.index === 2)?.color, '#1A1A1A');
+  // Without the styles category nothing is pinned and no style is touched
+  const off = defaultOptions();
+  off.categories.styles = false;
+  const plain = planFormatting(withNames, executive, off);
+  assert.deepEqual(plain.styleUpdates, []);
+  assert.equal(plain.changes.find(c => c.index === 8)?.spaceAfter, undefined);
+});
+
+test('microtypography only when asked, per paragraph', () => {
+  const texts: FormatAudit = { ...audit, paragraphs: [...audit.paragraphs, para('A "Vevő" a § 5 szerint 100 000 Ft-ot fizet.')] };
+  assert.deepEqual(planFormatting(texts, defaultProfile(summarize(texts)), defaultOptions()).textFixes, []);
+  const options = defaultOptions();
+  options.categories.nbsp = true;
+  options.categories.quotes = true;
+  const plan = planFormatting(texts, defaultProfile(summarize(texts)), options);
+  const last = plan.textFixes.at(-1)!;
+  assert.deepEqual([last.index, last.nbsp.map(r => r.find), last.quotes], [11, ['§ 5', '100 000 Ft'], ['„', '”']]);
+  assert.ok(plan.textFixes.some(f => f.nbsp.some(r => r.find === '2026. október 3.')), 'the date in the place line too');
+  assert.equal(summarize(texts).straightQuotes, 2);
 });

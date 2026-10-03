@@ -1131,7 +1131,8 @@ export const canFormatFootnotes = () => isSupported('1.5');
 export async function readFormatAudit(): Promise<FormatAudit> {
   return Word.run(async (context) => {
     const paragraphs = context.document.body.paragraphs;
-    paragraphs.load(FORMAT_PROPERTIES);
+    // Small capitals can only be read (and set) in desktop Word; asking for it elsewhere would fail the whole read
+    paragraphs.load(canUseSmallCaps() ? `${FORMAT_PROPERTIES},items/font/smallCaps` : FORMAT_PROPERTIES);
     const notes = canFormatFootnotes() ? context.document.body.footnotes : null;
     notes?.load('items/body/font/name,items/body/font/size');
     await context.sync();
@@ -1154,6 +1155,7 @@ export async function readFormatAudit(): Promise<FormatAudit> {
         leftIndent: p.leftIndent || 0,
         rightIndent: p.rightIndent || 0,
         color: p.font.color || null,
+        smallCaps: canUseSmallCaps() && typeof p.font.smallCaps === 'boolean' ? p.font.smallCaps : null,
         style: p.style || undefined,
         isList: !!p.isListItem,
       })),
@@ -1161,6 +1163,13 @@ export async function readFormatAudit(): Promise<FormatAudit> {
     };
   });
 }
+
+const isDesktopSupported = (version: string) =>
+  typeof Office !== 'undefined' && !!Office.context?.requirements?.isSetSupported('WordApiDesktop', version);
+/** Small capitals: WordApiDesktop 1.3 */
+export const canUseSmallCaps = () => isDesktopSupported('1.3');
+/** Style borders (the rule under a heading): WordApiDesktop 1.1 */
+export const canSetStyleBorders = () => isDesktopSupported('1.1');
 
 /** Page margins need WordApiDesktop 1.3 (desktop Word); elsewhere they are not offered */
 export const canSetMargins = () => typeof Office !== 'undefined' && !!Office.context?.requirements?.isSetSupported('WordApiDesktop', '1.3');
@@ -1197,6 +1206,11 @@ export async function readSelectionFormat(): Promise<{ font: string | null; size
 }
 
 export interface FormatOutcome {
+  /** Word styles updated (Normal, Címsor 1…) */
+  styles: number;
+  /** Non-breaking spaces and quotation marks put in */
+  nbsp: number;
+  quotes: number;
   formatted: number;
   /** Heading styles that now keep their paragraph with the next one */
   keepWithNext: number;
@@ -1242,7 +1256,8 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         if (change.leftIndent !== undefined) p.leftIndent = change.leftIndent;
         if (change.rightIndent !== undefined) p.rightIndent = change.rightIndent;
         if (change.color !== undefined) p.font.color = change.color;
-        if (change.alignment !== undefined) p.alignment = change.alignment;
+        if (change.smallCaps && canUseSmallCaps()) p.font.smallCaps = true;
+        if (change.alignment !== undefined) p.alignment = change.alignment as Word.Alignment;
       }
       if (plan.footnotes && canFormatFootnotes()) {
         const notes = doc.body.footnotes;
@@ -1267,6 +1282,61 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
 
     // Page-break rule and margins: a part of Word that is missing gives a note, not a failure of the rest
     const notes: string[] = [];
+    if (plan.changes.some(c => c.smallCaps) && !canUseSmallCaps()) notes.push('A kiskapitálist ez a Word innen nem tudja beállítani (asztali Word kell hozzá).');
+    let styles = 0;
+    if (plan.styleUpdates.length) {
+      if (!isSupported('1.5')) {
+        notes.push('A Word saját stílusait ez a Word innen nem tudja frissíteni (WordApi 1.5 kell); a bekezdések formázása megtörtént.');
+      } else {
+        try {
+          if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+          const collection = doc.getStyles();
+          const found = plan.styleUpdates.map(update => {
+            const style = collection.getByNameOrNullObject(update.name);
+            style.load('isNullObject');
+            return { update, style };
+          });
+          await context.sync();
+          let bordersSkipped = false;
+          for (const { update, style } of found) {
+            if (style.isNullObject) continue;
+            const { font, paragraph, border } = update;
+            if (font.name !== undefined) style.font.name = font.name;
+            if (font.size !== undefined) style.font.size = font.size;
+            if (font.bold !== undefined) style.font.bold = font.bold;
+            if (font.color !== undefined) style.font.color = font.color;
+            if (font.smallCaps !== undefined && canUseSmallCaps()) style.font.smallCaps = font.smallCaps;
+            if (paragraph?.spaceBefore !== undefined) style.paragraphFormat.spaceBefore = paragraph.spaceBefore;
+            if (paragraph?.spaceAfter !== undefined) style.paragraphFormat.spaceAfter = paragraph.spaceAfter;
+            if (paragraph?.lineSpacing !== undefined) style.paragraphFormat.lineSpacing = paragraph.lineSpacing;
+            if (paragraph?.alignment !== undefined) style.paragraphFormat.alignment = paragraph.alignment;
+            if (border) {
+              if (canSetStyleBorders()) {
+                const line = style.borders.getByLocation(border.location);
+                line.type = 'Single';
+                line.width = 'Pt100';
+                line.color = border.color;
+                line.visible = true;
+              } else {
+                bordersSkipped = true;
+              }
+            }
+            styles++;
+          }
+          await context.sync();
+          if (bordersSkipped) notes.push('A címek díszvonalát ez a Word nem tudja beállítani (asztali Word kell hozzá).');
+        } catch (e) {
+          console.error(e);
+          styles = 0;
+          notes.push('A Word saját stílusait nem sikerült frissíteni; a bekezdések formázása megtörtént.');
+        } finally {
+          if (previous !== 'Off') {
+            doc.changeTrackingMode = previous;
+            await context.sync().catch(() => {});
+          }
+        }
+      }
+    }
     let keepWithNext = 0;
     let marginSections = 0;
     if (plan.keepWithNextStyles.length) {
@@ -1333,9 +1403,48 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
 
     let deleted = 0;
     let spaces = 0;
+    let nbsp = 0;
+    let quotes = 0;
     let write: WriteMode | null = null;
-    if (plan.deleteEmpty.length || plan.doubleSpaces) {
+    if (plan.textFixes.length || plan.deleteEmpty.length || plan.doubleSpaces) {
       ({ write } = await withTrackChanges(context, async () => {
+        // Microtypography: only spaces become non-breaking and only straight quotes change
+        const searches = plan.textFixes.map(fix => {
+          const paragraph = paragraphs.items[fix.index];
+          const nbspSearches = fix.nbsp.map(r => {
+            const found = paragraph.search(r.find, { matchCase: true });
+            found.load('items');
+            return { r, found };
+          });
+          let quoteMarks: Word.RangeCollection | null = null;
+          if (fix.quotes.length) {
+            quoteMarks = paragraph.search('"', { matchCase: true });
+            quoteMarks.load('items/text');
+          }
+          return { fix, nbspSearches, quoteMarks };
+        });
+        await context.sync();
+        let quotesSkipped = 0;
+        for (const { fix, nbspSearches, quoteMarks } of searches) {
+          nbspSearches.forEach(({ r, found }) => found.items.forEach(range => {
+            range.insertText(r.replace, 'Replace');
+            nbsp++;
+          }));
+          if (quoteMarks) {
+            // Word may find curly quotes for a straight one too: only the straight ones count, and only when their
+            // number is the one planned
+            const straight = quoteMarks.items.filter(range => range.text === '"');
+            if (straight.length === fix.quotes.length) {
+              straight.forEach((range, i) => range.insertText(fix.quotes[i], 'Replace'));
+              quotes += straight.length;
+            } else {
+              quotesSkipped++;
+            }
+          }
+        }
+        await context.sync();
+        if (quotesSkipped) notes.push(`${quotesSkipped} bekezdésben az idézőjeleket nem cseréltem (nem egyértelmű a párosításuk).`);
+
         // Only paragraphs still empty; one holding a picture is kept
         const candidates = plan.deleteEmpty.map(i => paragraphs.items[i]).filter(p => p && !p.text.trim());
         const pictures = candidates.map(p => {
@@ -1364,7 +1473,7 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         }
       }));
     }
-    return { formatted: plan.changes.length, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
+    return { formatted: plan.changes.length, styles, nbsp, quotes, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
   });
 }
 

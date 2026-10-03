@@ -1,3 +1,5 @@
+import { countMicrotypography, nbspFixes, quoteFixes, type Replacement } from './microtypography';
+
 /**
  * The Formázás tab without AI: what the document's formatting looks like (fonts, sizes, spacing, headings), and the
  * plan that makes it uniform. Only appearance: the text, the heading levels (navigation, table of contents) and the
@@ -26,6 +28,8 @@ export interface ParagraphFormat {
   rightIndent?: number;
   /** Font color as "#RRGGBB"; null when mixed */
   color?: string | null;
+  /** Small capitals; null when mixed or unknown */
+  smallCaps?: boolean | null;
   /** Localized style name ("Címsor 1"), to set page-break rules on the style */
   style?: string;
   /** A numbered or bulleted paragraph: its indents belong to the list */
@@ -95,6 +99,9 @@ export interface AuditSummary {
   extraEmpty: number[];
   /** Places with two or more spaces in a row */
   doubleSpaces: number;
+  /** Places for a non-breaking space (§ 5, dates, laws, amounts) and straight double quotes */
+  nbsp: number;
+  straightQuotes: number;
   /** Footnote sizes; null when they can't be read */
   footnoteSizes: [number, number][] | null;
   dominant: { font: string; size: number; lineSpacing: number; spaceBefore: number; spaceAfter: number; alignment: 'Left' | 'Justified' };
@@ -110,6 +117,7 @@ export function summarize(audit: FormatAudit): AuditSummary {
     .map((p, i) => i)
     .filter(i => i > 0 && i < audit.paragraphs.length - 1 && roles[i].kind === 'empty' && roles[i - 1].kind === 'empty'
       && !audit.paragraphs[i].tableLevel && !audit.paragraphs[i - 1].tableLevel);
+  const micro = countMicrotypography(audit.paragraphs.map(p => p.text));
   const alignments = tally(body.map(p => p.alignment).filter(a => a === 'Left' || a === 'Justified'));
   return {
     fonts,
@@ -120,6 +128,8 @@ export function summarize(audit: FormatAudit): AuditSummary {
     titles: roles.filter(r => r.kind === 'title').length,
     extraEmpty,
     doubleSpaces: audit.paragraphs.reduce((n, p, i) => n + (roles[i].kind === 'empty' ? 0 : (p.text.match(/ {2,}/g)?.length ?? 0)), 0),
+    nbsp: micro.nbsp,
+    straightQuotes: micro.quotes,
     footnoteSizes: audit.footnotes && tally(audit.footnotes.map(f => f.size).filter((s): s is number => !!s).map(round)),
     dominant: {
       font: fonts.find(([f]) => f)?.[0] ?? 'Calibri',
@@ -160,6 +170,14 @@ export interface FormatProfile {
   rightIndent: number;
   /** Heading color "#RRGGBB"; empty: left as it is */
   headingColor: string;
+  /** Headings in small capitals */
+  headingSmallCaps: boolean;
+  /** A thin rule under Heading 1 in this color; empty: none */
+  h1Rule: string;
+  /** A thin bar left of Heading 2 in this color; empty: none */
+  h2Bar: string;
+  /** Body text color (e.g. a soft graphite instead of pure black); empty: left as it is */
+  bodyColor: string;
   /** Page margins in cm; 0: left as it is */
   marginTop: number;
   marginBottom: number;
@@ -185,6 +203,10 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
     leftIndent: 0,
     rightIndent: 0,
     headingColor: '',
+    headingSmallCaps: false,
+    h1Rule: '',
+    h2Bar: '',
+    bodyColor: '',
     marginTop: 0,
     marginBottom: 0,
     marginLeft: 0,
@@ -193,7 +215,7 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
   };
 }
 
-export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'emptyParagraphs' | 'doubleSpaces';
+export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'styles' | 'emptyParagraphs' | 'doubleSpaces' | 'nbsp' | 'quotes';
 
 export interface FormatOptions {
   categories: Record<Category, boolean>;
@@ -204,12 +226,12 @@ export interface FormatOptions {
 }
 
 /** Changes the formatting only: the text is never touched by these */
-export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment', 'color', 'indent', 'pagination', 'margins'];
+export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment', 'color', 'indent', 'pagination', 'margins', 'styles'];
 /** These change the text (so they go in like any other text change, by the Track Changes rule) */
-export const TEXT_CATEGORIES: Category[] = ['emptyParagraphs', 'doubleSpaces'];
+export const TEXT_CATEGORIES: Category[] = ['nbsp', 'quotes', 'emptyParagraphs', 'doubleSpaces'];
 
 export const defaultOptions = (): FormatOptions => ({
-  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, emptyParagraphs: false, doubleSpaces: false },
+  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, styles: true, emptyParagraphs: false, doubleSpaces: false, nbsp: false, quotes: false },
   fakeHeadings: true,
   unifyHeadings: false,
 });
@@ -226,7 +248,26 @@ export interface ParagraphChange {
   leftIndent?: number;
   rightIndent?: number;
   color?: string;
-  alignment?: 'Left' | 'Justified';
+  smallCaps?: true;
+  /** Pinned to the current value, so a new Normal style does not change it (table cells, centered lines) */
+  alignment?: string;
+}
+
+export interface StyleUpdate {
+  /** The style's name as this Word knows it (localized, e.g. "Címsor 1"); English fallback when not in the document */
+  name: string;
+  builtIn: string;
+  font: { name?: string; size?: number; bold?: boolean; color?: string; smallCaps?: boolean };
+  paragraph?: { spaceBefore?: number; spaceAfter?: number; lineSpacing?: number; alignment?: 'Left' | 'Justified' };
+  /** A rule under (Heading 1) or a bar left of (Heading 2) the paragraph */
+  border?: { location: 'Bottom' | 'Left'; color: string };
+}
+
+export interface TextFix {
+  index: number;
+  nbsp: Replacement[];
+  /** The replacement of each straight double quote, in order */
+  quotes: ('„' | '”')[];
 }
 
 export interface FormatPlan {
@@ -235,6 +276,10 @@ export interface FormatPlan {
   /** Paragraphs to delete (the extra empty lines) */
   deleteEmpty: number[];
   doubleSpaces: boolean;
+  /** Word's own style definitions, so text typed later looks the same */
+  styleUpdates: StyleUpdate[];
+  /** Microtypography per paragraph (text changes: tracked like any other) */
+  textFixes: TextFix[];
   /** Localized names of the heading styles that get "keep with next" */
   keepWithNextStyles: string[];
   /** New page margins in points (only the ones to change); null: none */
@@ -283,13 +328,24 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
       set('headings', 'size', size, differs(p.size, size));
       set('headings', 'bold', true, p.bold !== true);
       if (profile.headingColor) set('color', 'color', profile.headingColor, (p.color ?? '').toLowerCase() !== profile.headingColor.toLowerCase());
+      if (profile.headingSmallCaps) set('headings', 'smallCaps', true, p.smallCaps !== true);
       if (role.kind !== 'title') {
         set('spacing', 'spaceBefore', profile.headingSpaceBefore, differs(p.spaceBefore, profile.headingSpaceBefore));
         set('spacing', 'spaceAfter', profile.headingSpaceAfter, differs(p.spaceAfter, profile.headingSpaceAfter));
       }
     } else {
       set('size', 'size', profile.bodySize, differs(p.size, profile.bodySize));
-      // Table cells: only the font, so the table keeps its own layout
+      if (profile.bodyColor) set('color', 'color', profile.bodyColor, (p.color ?? '').toLowerCase() !== profile.bodyColor.toLowerCase());
+      // Table cells: only the font, so the table keeps its own layout. When the Normal style gets new spacing and
+      // alignment, a cell would take them over: its present values are pinned on the paragraph itself.
+      if (role.kind === 'table' && on.styles) {
+        if (on.spacing) {
+          change.spaceBefore = p.spaceBefore;
+          change.spaceAfter = p.spaceAfter;
+          if (p.lineSpacing > 0) change.lineSpacing = p.lineSpacing;
+        }
+        if (on.alignment && p.alignment !== 'Mixed') change.alignment = p.alignment;
+      }
       if (role.kind === 'body') {
         set('spacing', 'spaceBefore', profile.bodySpaceBefore, differs(p.spaceBefore, profile.bodySpaceBefore));
         set('spacing', 'spaceAfter', profile.bodySpaceAfter, differs(p.spaceAfter, profile.bodySpaceAfter));
@@ -339,49 +395,114 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
     }
   }
 
+  // Word's own styles, so what is typed later looks the same; only what the switched-on categories cover
+  const styleUpdates: StyleUpdate[] = [];
+  if (on.styles) {
+    const localName = (builtIn: string, english: string) => audit.paragraphs.find(p => p.styleBuiltIn === builtIn && p.style)?.style ?? english;
+    const font = (name: string) => (on.font ? { name } : {});
+    const normal: StyleUpdate = {
+      name: localName('Normal', 'Normal'),
+      builtIn: 'Normal',
+      font: { ...font(profile.font), ...(on.size ? { size: profile.bodySize } : {}), ...(on.color && profile.bodyColor ? { color: profile.bodyColor } : {}) },
+      paragraph: {
+        ...(on.spacing ? { spaceBefore: profile.bodySpaceBefore, spaceAfter: profile.bodySpaceAfter, ...(profile.lineSpacing > 0 ? { lineSpacing: profile.lineSpacing } : {}) } : {}),
+        ...(on.alignment ? { alignment: profile.alignment } : {}),
+      },
+    };
+    styleUpdates.push(normal);
+    const headingFont = profile.headingFont || profile.font;
+    const headingStyle = (builtIn: string, english: string, size: number, isTitle: boolean): StyleUpdate => ({
+      name: localName(builtIn, english),
+      builtIn,
+      font: {
+        ...font(headingFont),
+        ...(on.headings ? { size, bold: true, ...(profile.headingSmallCaps ? { smallCaps: true } : {}) } : {}),
+        ...(on.color && profile.headingColor ? { color: profile.headingColor } : {}),
+      },
+      ...(on.spacing && !isTitle ? { paragraph: { spaceBefore: profile.headingSpaceBefore, spaceAfter: profile.headingSpaceAfter } } : {}),
+    });
+    levels.forEach(level => {
+      const update = headingStyle(`Heading${level}`, `Heading ${level}`, headingSize(level, profile, options.unifyHeadings, levels), false);
+      // The rule under the top level and the bar beside the second one are part of the look of the headings
+      const rank = levels.indexOf(level);
+      if (on.headings && rank === 0 && profile.h1Rule) update.border = { location: 'Bottom', color: profile.h1Rule };
+      if (on.headings && rank === 1 && profile.h2Bar) update.border = { location: 'Left', color: profile.h2Bar };
+      styleUpdates.push(update);
+    });
+    if (summary.titles) styleUpdates.push(headingStyle('Title', 'Title', profile.headingSize + 2, true));
+  }
+  // An update with nothing in it is left out
+  const usefulStyles = styleUpdates.filter(u => Object.keys(u.font).length || Object.keys(u.paragraph ?? {}).length || u.border);
+  counts.styles = usefulStyles.length;
+
+  const textFixes: TextFix[] = [];
+  if (on.nbsp || on.quotes) {
+    audit.paragraphs.forEach((p, index) => {
+      if (!p.text.trim()) return;
+      const fix: TextFix = { index, nbsp: on.nbsp ? nbspFixes(p.text) : [], quotes: on.quotes ? quoteFixes(p.text) : [] };
+      if (fix.nbsp.length || fix.quotes.length) textFixes.push(fix);
+    });
+  }
+  counts.nbsp = on.nbsp ? summary.nbsp : 0;
+  counts.quotes = on.quotes ? summary.straightQuotes : 0;
+
   const deleteEmpty = on.emptyParagraphs ? summary.extraEmpty : [];
   counts.emptyParagraphs = deleteEmpty.length;
   counts.doubleSpaces = on.doubleSpaces ? summary.doubleSpaces : 0;
-  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, keepWithNextStyles, margins, counts };
+  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, styleUpdates: usefulStyles, textFixes, keepWithNextStyles, margins, counts };
 }
 
 export interface StylePreset {
   id: string;
   name: string;
   description: string;
+  /** Shown first and marked as recommended */
+  featured?: boolean;
   profile: FormatProfile;
 }
 
 /** Ready-made looks; "Ebből a dokumentumból" (the document's own most common settings) stays the default */
 export const STYLE_PRESETS: StylePreset[] = [
   {
+    id: 'executive',
+    name: 'ICT Europa Executive',
+    description: 'Cambria 11 pt grafit szöveg, kiskapitális sötétkék címek, kék vonal a főcím alatt, kék csík a második szint mellett',
+    featured: true,
+    profile: {
+      font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8,
+      headingSpaceBefore: 18, headingSpaceAfter: 6, lineSpacing: 14.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0,
+      headingColor: '#0B3B60', headingSmallCaps: true, h1Rule: '#2E75B6', h2Bar: '#2E75B6', bodyColor: '#1A1A1A',
+      marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified',
+    },
+  },
+  {
     id: 'classic',
     name: 'Klasszikus',
     description: 'Garamond 12 pt, sorkizárt, egyenletes, hagyományos szerződés',
-    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
+    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', headingSmallCaps: false, h1Rule: '', h2Bar: '', bodyColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
   {
     id: 'modern',
     name: 'Modern',
     description: 'Calibri 11 pt, balra zárt, levegős térközökkel',
-    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
+    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', headingSmallCaps: false, h1Rule: '', h2Bar: '', bodyColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
   },
   {
     id: 'compact',
     name: 'Kompakt',
     description: 'Arial 10 pt, sorkizárt, szűk térközök: hosszú szerződéshez, kevesebb oldal',
-    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
+    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', headingSmallCaps: false, h1Rule: '', h2Bar: '', bodyColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
   {
     id: 'premium',
     name: 'Prémium',
     description: 'Cambria 11 pt szöveg, Calibri címek, balra zárt, bőséges térközök: tanácsadói jelentések, ajánlatok',
-    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: 'Calibri', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '#1F3864', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
+    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: 'Calibri', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '#1F3864', headingSmallCaps: false, h1Rule: '', h2Bar: '', bodyColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
   },
   {
     id: 'legal',
     name: 'Jogi (angolszász)',
     description: 'Times New Roman 11 pt, sorkizárt, szűk, egyenletes térközök: nemzetközi szerződések',
-    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
+    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', headingSmallCaps: false, h1Rule: '', h2Bar: '', bodyColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
 ];
