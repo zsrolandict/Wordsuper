@@ -282,7 +282,8 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                 <option value="Left">Balra zárt</option>
               </select>
             </label>
-            {profile.lineSpacing > 0 && <p className="text-neutral-500">Sorköz: a leggyakoribb, {pt(profile.lineSpacing)}.</p>}
+            <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
+            <p className="text-neutral-500">Pontban: a szöveg méretének kb. 1,2-szerese a megszokott (11 pt-nál 13–14 pt).</p>
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button onClick={() => takeFromSelection('body')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott szövegbekezdésbe, majd ide">
                 <MousePointerClick className="w-3 h-3 mr-1" />Szöveg: mint a kijelölt
