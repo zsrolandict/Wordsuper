@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { FileUp, Loader2, Sparkles, Square, MessageSquarePlus, AlertTriangle, KeyRound, FileDiff, Check, X } from 'lucide-react';
 import { MAX_COMPARE_CHARS, MAX_INSTRUCTION_CHARS, type AIRequestBody } from '../shared/aiConfig';
-import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
+import { describeRequestError, needsSettings, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import { readDocxParagraphs } from '../services/docxText';
 import { carryOver, compareVersions, formatChangesForAI, parseCompareResult, type ChangeAssessment, type VersionChange } from '../services/versionCompare';
 import { UserFacingError, canResolveRevisions, insertCommentsAtParagraphs, jumpToParagraph, readParagraphs, readRevisions, resolveRevisions } from '../services/wordDocument';
@@ -261,7 +261,7 @@ export default function ComparePanel({
       const message = controller.signal.aborted
         ? '⏹️ Leállítottad az elemzést.'
         : e instanceof Error && e.message.startsWith('Az elemzés') ? e.message : describeRequestError(e);
-      const authProblem = e instanceof AIRequestError && (e.code === 'UNAUTHORIZED' || e.code === 'MASKING_REQUIRED');
+      const authProblem = needsSettings(e);
       if (settings.sound && !controller.signal.aborted) playSound('error');
       setAnalysis(a => a && { ...a, running: false, error: message, authProblem, details: { ...a.details, durationMs: Date.now() - startedAt } });
     } finally {

@@ -7,9 +7,11 @@ import type { TokenUsage } from "./ai/types";
  * set, are appended to that file too.
  */
 export interface AuditEntry {
-  /** Who: the owner of a personal access key (verified), or the ID typed in the task pane's settings (not verified) */
+  /** Who: the Microsoft work account or the owner of a personal access key (verified), or the ID typed in the task pane's settings (not verified) */
   user: string;
   verified?: boolean;
+  /** How the user signed in: Microsoft account, personal access key or the shared key */
+  auth?: "microsoft" | "personal-key" | "shared-key";
   ip: string;
   action: string;
   status: "ok" | "incomplete" | "error" | "aborted" | "rejected";

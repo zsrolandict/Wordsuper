@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Paintbrush, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
-import { AIRequestError, describeRequestError, fetchServerInfo, streamAIResponse, type RateLimitInfo } from '../services/aiService';
+import { describeRequestError, fetchServerInfo, needsSettings, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   UserFacingError,
   PartialWriteError,
@@ -42,6 +42,7 @@ import RequestDetails, { type RequestDetailsData } from './RequestDetails';
 import Proposal, { type FindingView, type ProposalState } from './Proposal';
 import LimitsBar from './LimitsBar';
 import SettingsPanel, { isOtherVersion } from './SettingsPanel';
+import { useAuthMode } from './MicrosoftSignIn';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
 import TranslatePanel from './TranslatePanel';
@@ -189,6 +190,8 @@ export default function TaskPane() {
   const [view, setView] = useState<'chat' | 'settings'>('chat');
   const [tab, setTab] = useState<Tab>('assistant');
   const [settings, updateSettings] = useSettings();
+  // With Microsoft sign-in no access key is needed, so its reminder is only shown for key sign-in
+  const authMode = useAuthMode();
   // Whose side we are on in this document; remembered on this machine, never written into the file
   const [party, setPartyState] = useState(() => loadParty(documentUrl()));
   const setParty = (value: string) => {
@@ -590,7 +593,7 @@ export default function TaskPane() {
           finishLoadingMessage({ status: { text: '⏹️ Leállítottad. A dokumentumot nem módosítottam.', tone: 'neutral' } });
         } else {
           chime('error');
-          const authProblem = aiError instanceof AIRequestError && (aiError.code === 'UNAUTHORIZED' || aiError.code === 'MASKING_REQUIRED');
+          const authProblem = needsSettings(aiError);
           finishLoadingMessage({ role: 'system', content: describeRequestError(aiError), showSettingsLink: authProblem });
         }
         return;
@@ -1208,7 +1211,7 @@ export default function TaskPane() {
       {/* Input Area */}
       <div className="p-3 bg-white border-t border-neutral-200 shrink-0">
 
-        {!settings.accessKey && (
+        {!settings.accessKey && authMode === 'key' && (
           <button
             onClick={() => setView('settings')}
             className="w-full mb-2 flex items-center text-left text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5"

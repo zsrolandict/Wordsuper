@@ -11,6 +11,7 @@ import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
 import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficeStyles, type AccessKeys } from "./server/config";
 import { readVersion } from "./server/version";
+import { bearerToken, createMicrosoftVerifier, parseAuthConfig, type MicrosoftAuthConfig, type MicrosoftVerifier } from "./server/msAuth";
 import { providerFromEnv } from "./server/ai";
 
 // Compare digests so neither the length nor the content of the key leaks through timing
@@ -29,17 +30,43 @@ function keyOwner(keys: AccessKeys, provided: string): string | null {
   return owner;
 }
 
-function requireAccessKey(keys: AccessKeys) {
-  return (req: Request, res: Response, next: NextFunction) => {
+function requireAuth(keys: AccessKeys, microsoft: MicrosoftAuthConfig, verify: MicrosoftVerifier | null) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    // Tells the task pane how to sign in, so it must work before signing in
+    if (req.path === "/auth-mode") return next();
+    if (microsoft.problem) {
+      return res.status(503).json({ error: `Microsoft sign-in is not configured properly: ${microsoft.problem}`, code: "AUTH_NOT_CONFIGURED" });
+    }
+    const token = microsoft.mode !== "key" ? bearerToken(req.get("Authorization")) : null;
+    let tokenProblem = "";
+    if (token && verify) {
+      const result = await verify(token);
+      if ("user" in result) {
+        // Verified by Microsoft: the audit log names the user's work account
+        res.locals.keyOwner = result.user;
+        res.locals.authMethod = "microsoft";
+        res.locals.displayName = result.name;
+        return next();
+      }
+      tokenProblem = result.error;
+    }
+    if (microsoft.mode === "microsoft") {
+      return res.status(401).json(tokenProblem
+        ? { error: `Microsoft sign-in failed: ${tokenProblem}.`, code: "MICROSOFT_TOKEN_INVALID" }
+        : { error: "This server needs Microsoft sign-in.", code: "MICROSOFT_LOGIN_REQUIRED" });
+    }
     if (keys.problem) {
       return res.status(503).json({ error: `The access key is not configured properly: ${keys.problem}`, code: "ACCESS_KEY_NOT_CONFIGURED" });
     }
     const owner = keyOwner(keys, req.get(ACCESS_KEY_HEADER) ?? "");
     if (owner === null) {
-      return res.status(401).json({ error: "Invalid or missing access key.", code: "UNAUTHORIZED" });
+      return res.status(401).json(tokenProblem
+        ? { error: `Microsoft sign-in failed: ${tokenProblem}, and there is no valid access key either.`, code: "MICROSOFT_TOKEN_INVALID" }
+        : { error: "Invalid or missing access key.", code: "UNAUTHORIZED" });
     }
     // A personal key tells who it is; with the shared key only the name typed in the settings is known
     res.locals.keyOwner = owner;
+    res.locals.authMethod = owner ? "personal-key" : "shared-key";
     next();
   };
 }
@@ -80,15 +107,23 @@ async function startServer() {
 
   // Secrets from files or `gcloud secrets` often end with a newline; Node trims header values the same way
   const accessKeys = parseAccessKeys(process.env.APP_ACCESS_KEY, process.env.APP_ACCESS_KEYS);
-  accessKeys.warnings.forEach(warning => console.warn(warning));
-  if (accessKeys.problem) console.warn(`${accessKeys.problem} Every /api request will be refused.`);
-  else if (accessKeys.personal.size) console.log(`Personal access keys: ${accessKeys.personal.size}${accessKeys.shared ? " (and the shared key)" : ""}`);
+  const microsoftAuth = parseAuthConfig(process.env);
+  if (microsoftAuth.problem) console.warn(`${microsoftAuth.problem} Every /api request will be refused.`);
+  else if (microsoftAuth.mode !== "key") console.log(`Microsoft sign-in: ${microsoftAuth.mode === "both" ? "on, access keys still accepted" : "required"}${microsoftAuth.allowedDomains.length ? ` (${microsoftAuth.allowedDomains.join(", ")})` : ""}`);
+  const verifyMicrosoft = microsoftAuth.mode !== "key" && !microsoftAuth.problem ? createMicrosoftVerifier(microsoftAuth) : null;
+  // With Microsoft sign-in only, the access keys are not used at all
+  if (microsoftAuth.mode !== "microsoft") {
+    accessKeys.warnings.forEach(warning => console.warn(warning));
+    if (accessKeys.problem) console.warn(`${accessKeys.problem} ${microsoftAuth.mode === "both" ? "Only Microsoft sign-in will work." : "Every /api request will be refused."}`);
+    else if (accessKeys.personal.size) console.log(`Personal access keys: ${accessKeys.personal.size}${accessKeys.shared ? " (and the shared key)" : ""}`);
+  }
 
   const audit = createAuditLogger(process.env.AUDIT_LOG_FILE);
-  // The owner of a personal key is verified; the name typed in the settings is not
+  // The Microsoft account and the owner of a personal key are verified; the name typed in the settings is not
   const auditBase = (req: Request) => {
     const owner = (req.res?.locals.keyOwner as string | undefined) || "";
-    return owner ? { user: owner, verified: true, ip: req.ip ?? "" } : { user: readUserId(req.get(USER_ID_HEADER)), verified: false, ip: req.ip ?? "" };
+    const auth = req.res?.locals.authMethod as AuditEntry["auth"];
+    return owner ? { user: owner, verified: true, auth, ip: req.ip ?? "" } : { user: readUserId(req.get(USER_ID_HEADER)), verified: false, auth, ip: req.ip ?? "" };
   };
 
   const ai = providerFromEnv(process.env);
@@ -115,7 +150,7 @@ async function startServer() {
   });
 
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
-  app.use("/api/", (req, res, next) => (req.path === "/info" || req.path === "/office-styles" ? infoLimiter : apiLimiter)(req, res, next), requireAccessKey(accessKeys));
+  app.use("/api/", (req, res, next) => (["/info", "/office-styles", "/auth-mode"].includes(req.path) ? infoLimiter : apiLimiter)(req, res, next), requireAuth(accessKeys, microsoftAuth, verifyMicrosoft));
   
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));
@@ -125,9 +160,14 @@ async function startServer() {
   const maskingPolicy = parseMaskingPolicy(process.env.MASKING_POLICY);
   console.log(`Version: ${version.commit} (${version.date || "no date"}); dictation policy: ${dictationPolicy}; masking: ${maskingPolicy}`);
 
-  // Lets the settings panel verify the access key without spending AI credits
+  // How the task pane signs in: Microsoft account, access key, or either
+  app.get("/api/auth-mode", (req, res) => {
+    res.json({ mode: microsoftAuth.problem ? "key" : microsoftAuth.mode });
+  });
+
+  // Lets the settings panel verify the sign-in without spending AI credits, and shows whom the server sees
   app.get("/api/auth-check", (req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, method: res.locals.authMethod, user: res.locals.keyOwner || null, name: res.locals.displayName || null });
   });
 
   // What is running: shown in the settings, so a stale server or page is visible

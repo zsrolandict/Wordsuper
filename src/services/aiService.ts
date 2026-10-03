@@ -1,5 +1,6 @@
 import { recordEvent } from './diagnostics';
-import { ACCESS_KEY_HEADER, USER_ID_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
+import { ACCESS_KEY_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
+import { forgetAuthMode, microsoftToken, requestHeaders, SignInError } from './signIn';
 
 export class AIRequestError extends Error {
   code?: ApiErrorCode;
@@ -45,11 +46,6 @@ export interface StreamOptions {
   signal?: AbortSignal;
 }
 
-export const authHeaders = (accessKey: string, userId = '') => ({
-  [ACCESS_KEY_HEADER]: accessKey,
-  ...(userId.trim() ? { [USER_ID_HEADER]: encodeURIComponent(userId.trim()) } : {}),
-});
-
 // express-rate-limit's draft-6 headers
 function readRateLimit(headers: Headers): RateLimitInfo | null {
   const remaining = headers.get('RateLimit-Remaining');
@@ -65,6 +61,7 @@ function readRateLimit(headers: Headers): RateLimitInfo | null {
 async function errorFromResponse(response: Response): Promise<AIRequestError> {
   // The server (and the rate limiter) answer non-stream errors as JSON: { error: "...", code: "..." }
   const data = await response.json().catch(() => null);
+  if (response.status === 401 || data?.code === 'AUTH_NOT_CONFIGURED') forgetAuthMode();
   return new AIRequestError(data?.error || `HTTP error! status: ${response.status}`, data?.code, response.status);
 }
 
@@ -86,7 +83,7 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
     recordEvent('request', `${request.mode}: ok, ${size} karakter, ${Date.now() - started} ms`);
     return answer;
   } catch (error) {
-    const how = options.signal?.aborted ? 'leállítva' : error instanceof AIRequestError ? `hiba ${error.code ?? error.status ?? ''}${error.reason ? ` (${error.reason})` : ''}` : `hiba (${error instanceof Error ? error.name : 'ismeretlen'})`;
+    const how = options.signal?.aborted ? 'leállítva' : error instanceof SignInError ? `belépési hiba ${error.code ?? ''}` : error instanceof AIRequestError ? `hiba ${error.code ?? error.status ?? ''}${error.reason ? ` (${error.reason})` : ''}` : `hiba (${error instanceof Error ? error.name : 'ismeretlen'})`;
     recordEvent('request', `${request.mode}: ${how}, ${size} karakter, ${Date.now() - started} ms`);
     throw error;
   }
@@ -113,7 +110,7 @@ async function streamOnce(request: AIRequestBody, handlers: StreamHandlers, opti
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...authHeaders(options.accessKey, options.userId),
+        ...(await requestHeaders(options.accessKey, options.userId ?? '')),
       },
       body: JSON.stringify(request),
       signal: controller.signal,
@@ -209,6 +206,32 @@ export async function checkAccessKey(accessKey: string): Promise<{ ok: boolean; 
   return response.ok ? { ok: true, rateLimit } : { ok: false, error: await errorFromResponse(response), rateLimit };
 }
 
+export interface SignInCheck {
+  ok: boolean;
+  error?: AIRequestError | SignInError;
+  rateLimit: RateLimitInfo | null;
+  /** Whom the server sees: the work account and the display name in it */
+  user?: string;
+  name?: string;
+}
+
+/** Signs in with the Microsoft account and asks the server whom it sees; interactive: Word may ask the user */
+export async function checkMicrosoftSignIn(interactive = true): Promise<SignInCheck> {
+  let token: string;
+  try {
+    token = await microsoftToken(interactive);
+  } catch (error) {
+    return { ok: false, error: error as SignInError, rateLimit: null };
+  }
+  const response = await fetch('/api/auth-check', { headers: { Authorization: `Bearer ${token}` } });
+  const rateLimit = readRateLimit(response.headers);
+  if (!response.ok) return { ok: false, error: await errorFromResponse(response), rateLimit };
+  const data = await response.json().catch(() => null);
+  // A server that took the token signs in with "microsoft"; anything else means it did not use the token
+  if (data?.method !== 'microsoft') return { ok: false, error: new AIRequestError('The server did not use the Microsoft sign-in.', 'MICROSOFT_TOKEN_INVALID', response.status), rateLimit };
+  return { ok: true, rateLimit, user: typeof data.user === 'string' ? data.user : '', name: typeof data.name === 'string' ? data.name : '' };
+}
+
 /** Hungarian explanation of a failed request, for the chat */
 /** Sends a dictated recording to the server and returns the transcript */
 export async function transcribeAudio(recording: Blob, accessKey: string, userId: string, riskAccepted: boolean, signal?: AbortSignal): Promise<string> {
@@ -218,7 +241,7 @@ export async function transcribeAudio(recording: Blob, accessKey: string, userId
   for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   const response = await fetch('/api/transcribe', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...authHeaders(accessKey, userId) },
+    headers: { 'Content-Type': 'application/json', ...(await requestHeaders(accessKey, userId)) },
     body: JSON.stringify({ audio: btoa(binary), mimeType: recording.type, riskAccepted }),
     signal,
   });
@@ -227,9 +250,21 @@ export async function transcribeAudio(recording: Blob, accessKey: string, userId
   return typeof data?.text === 'string' ? data.text.trim() : '';
 }
 
+/** The fix is in the settings: the key, the sign-in, or masking switched off on a server that requires it */
+export const needsSettings = (error: unknown) =>
+  error instanceof SignInError ||
+  (error instanceof AIRequestError && ['UNAUTHORIZED', 'MASKING_REQUIRED', 'MICROSOFT_LOGIN_REQUIRED', 'MICROSOFT_TOKEN_INVALID'].includes(error.code ?? ''));
+
 export function describeRequestError(error: unknown): string {
+  if (error instanceof SignInError) return error.message;
   if (error instanceof AIRequestError) {
     switch (error.code) {
+      case 'MICROSOFT_LOGIN_REQUIRED':
+        return 'Ez a szerver Microsoft-fiókos belépést kér, de a Word nem adott belépési tokent. Jelentkezz be a Wordbe a munkahelyi fiókoddal, majd a Beállításokban nyomd meg a „Bejelentkezés” gombot.';
+      case 'MICROSOFT_TOKEN_INVALID':
+        return `A szerver nem fogadta el a Microsoft-belépést (pl. nem az iroda fiókja, nem engedélyezett domain, vagy az alkalmazásregisztráció nem egyezik). Ha szerinted jó fiókkal vagy bent, szólj az üzemeltetőnek.\n(${error.message})`;
+      case 'AUTH_NOT_CONFIGURED':
+        return 'A szerveren hibásan van beállítva a Microsoft-fiókos belépés (AUTH_MODE, MS_CLIENT_ID vagy MS_TENANT_ID), ezért minden kérést elutasít. Az üzemeltetőnek kell javítania (docs/MICROSOFT-BELEPES.md).';
       case 'UNAUTHORIZED':
         return 'Hibás vagy hiányzó hozzáférési kulcs. Add meg a Beállításokban (fogaskerék ikon fent).';
       case 'ACCESS_KEY_NOT_CONFIGURED':
@@ -268,10 +303,13 @@ export interface ServerInfo {
   maskingPolicy?: 'required' | 'optional';
 }
 
-/** What the server runs (version, model, where it processes data); null when it can't be reached */
+/**
+ * What the server runs (version, model, where it processes data); null when it can't be reached. Asked in the
+ * background, so it never makes Word show a sign-in window.
+ */
 export async function fetchServerInfo(accessKey: string): Promise<ServerInfo | null> {
   try {
-    const response = await fetch('/api/info', { headers: { [ACCESS_KEY_HEADER]: accessKey } });
+    const response = await fetch('/api/info', { headers: await requestHeaders(accessKey, '', { interactive: false }) });
     return response.ok ? await response.json() : null;
   } catch {
     return null;
@@ -281,7 +319,7 @@ export async function fetchServerInfo(accessKey: string): Promise<ServerInfo | n
 /** The firm's styles from the server (OFFICE_STYLES_FILE) and whether only they may be used; null when unreachable */
 export async function fetchOfficeStyles(accessKey: string): Promise<{ styles: unknown[]; locked: boolean } | null> {
   try {
-    const response = await fetch('/api/office-styles', { headers: authHeaders(accessKey) });
+    const response = await fetch('/api/office-styles', { headers: await requestHeaders(accessKey, '', { interactive: false }) });
     if (!response.ok) return null;
     const data = await response.json();
     return { styles: Array.isArray(data?.styles) ? data.styles : [], locked: data?.locked === true };

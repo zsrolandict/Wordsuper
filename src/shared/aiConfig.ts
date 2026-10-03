@@ -98,7 +98,13 @@ export type ApiErrorCode =
   /** The operator requires masking (MASKING_POLICY=required) and the request was not masked */
   | 'MASKING_REQUIRED'
   /** The model (or the connection) went silent for too long, or did not finish in time */
-  | 'TIMEOUT';
+  | 'TIMEOUT'
+  /** AUTH_MODE=microsoft and the request came without a Microsoft token */
+  | 'MICROSOFT_LOGIN_REQUIRED'
+  /** The Microsoft token was refused (other directory, other app, expired…) and there was no valid access key */
+  | 'MICROSOFT_TOKEN_INVALID'
+  /** AUTH_MODE asks for Microsoft sign-in, but MS_CLIENT_ID / MS_TENANT_ID are missing or wrong */
+  | 'AUTH_NOT_CONFIGURED';
 
 export const contextLimitFor = (mode: Mode) =>
   mode === 'review' ? MAX_REVIEW_CHARS : mode === 'compare' ? MAX_COMPARE_CHARS : MAX_CONTEXT_CHARS;

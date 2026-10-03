@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowRightLeft, Download, ExternalLink, KeyRound, Languages, Loader2, RefreshCw, Square } from 'lucide-react';
 import type { AIRequestBody } from '../shared/aiConfig';
-import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
+import { AIRequestError, describeRequestError, needsSettings, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   LANGUAGE_LABELS, MAX_TRANSLATE_CHARS, PART_CHARS, chunkUnits, formatGlossary, formatUnits, glossaryInstruction, guessLanguage,
   parseBilingualDocumentXml, reuseTranslations, translateInParts, translateInstruction, translationUnits,
@@ -268,7 +268,7 @@ export default function TranslatePanel({
       } else {
         console.error(e);
         if (settings.sound) playSound('error');
-        setError({ message: describeRequestError(e), authProblem: e instanceof AIRequestError && (e.code === 'UNAUTHORIZED' || e.code === 'MASKING_REQUIRED') });
+        setError({ message: describeRequestError(e), authProblem: needsSettings(e) });
       }
     } finally {
       abortRef.current = null;

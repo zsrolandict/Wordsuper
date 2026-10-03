@@ -1,7 +1,24 @@
 /** Oldest Word API the add-in works with: comments and the Track Changes mode need WordApi 1.4 */
 export const REQUIRED_WORD_API_VERSION = "1.4";
 
-export function generateManifest(appUrl: string): string {
+/**
+ * Microsoft sign-in (Office single sign-on): Word gets tokens for this app registration. The Application ID URI must
+ * be api://<the add-in's host>/<client ID>, the same as in the app registration's "Expose an API" page.
+ */
+export function webApplicationInfo(baseUrl: string, clientId: string): string {
+  return `
+    <WebApplicationInfo>
+      <Id>${clientId}</Id>
+      <Resource>api://${new URL(baseUrl).host}/${clientId}</Resource>
+      <Scopes>
+        <Scope>openid</Scope>
+        <Scope>profile</Scope>
+      </Scopes>
+    </WebApplicationInfo>`;
+}
+
+/** ssoClientId: the app registration's client ID when the server uses Microsoft sign-in (AUTH_MODE) */
+export function generateManifest(appUrl: string, ssoClientId?: string): string {
   // Ensure the URL doesn't have a trailing slash for consistency
   const baseUrl = appUrl.replace(/\/$/, '');
   
@@ -112,7 +129,7 @@ export function generateManifest(appUrl: string): string {
         <bt:String id="GetStarted.Description" DefaultValue="Your AI assistant inside Word is loaded."/>
         <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Click to open the Word Writer Taskpane"/>
       </bt:LongStrings>
-    </Resources>
+    </Resources>${ssoClientId ? webApplicationInfo(baseUrl, ssoClientId) : ''}
   </VersionOverrides>
 </OfficeApp>`;
 }

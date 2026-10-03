@@ -6,6 +6,7 @@ import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, PRESET_MODES as MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
 import ErrorReport from './ErrorReport';
+import MicrosoftSignIn, { useAuthMode } from './MicrosoftSignIn';
 import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
 import { MODE_LABELS, modeLabel, presetNeedsInstruction } from './modes';
 
@@ -53,6 +54,7 @@ export default function SettingsPanel({
   const [presetInstruction, setPresetInstruction] = useState('');
   // What the server runs: its version, where it processes data (for dictation and the version line below)
   const [serverInfo, setServerInfo] = useState<ServerInfo | null | undefined>(undefined);
+  const authMode = useAuthMode();
   useEffect(() => {
     let cancelled = false;
     fetchServerInfo(settings.accessKey).then(info => { if (!cancelled) setServerInfo(info); });
@@ -104,7 +106,9 @@ export default function SettingsPanel({
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
-        <Card title="Hozzáférési kulcs">
+        {(authMode === 'microsoft' || authMode === 'both') && <MicrosoftSignIn mode={authMode} onRateLimit={onRateLimit} />}
+
+        {authMode !== 'microsoft' && <Card title={authMode === 'both' ? 'Hozzáférési kulcs (tartalék)' : 'Hozzáférési kulcs'}>
           <p className="text-xs text-neutral-500">A szerver csak ezzel a kulccsal fogad kéréseket. Az üzemeltető adja meg: közös kulcs (APP_ACCESS_KEY), vagy kollégánként személyes kulcs (APP_ACCESS_KEYS). Személyes kulccsal az auditnapló ellenőrzötten téged nevez meg.</p>
           <div className="flex space-x-2">
             <div className="relative flex-1">
@@ -146,7 +150,7 @@ export default function SettingsPanel({
             <span className="block text-[10px] text-neutral-400 font-normal">Közös kulcsnál a szerver auditnaplója ezzel jegyzi fel, ki mikor milyen műveletet futtatott (ellenőrizetlenül); személyes kulcsnál a kulcs gazdáját írja. A dokumentum tartalma sosem kerül a naplóba, csak méretek, időpont, modell és tokenszám.</span>
           </label>
           {keyStatus.state === 'error' && <p className="text-xs text-red-700 whitespace-pre-wrap">{keyStatus.message}</p>}
-        </Card>
+        </Card>}
 
         <Card title="Beszúrás">
           <label className="flex items-start space-x-2 cursor-pointer">
