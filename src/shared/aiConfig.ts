@@ -1,12 +1,14 @@
 // Shared by the server (server.ts) and the task pane, so the UI can show exactly what the AI received
+import type { Playbook } from './playbook';
 
 /** Modes of the assistant tab */
 export const ASSISTANT_MODES = ['edit', 'comment', 'generate', 'review'] as const;
 export type AssistantMode = typeof ASSISTANT_MODES[number];
 /** Modes a custom quick button can belong to; "compare" comes from the version comparison tab */
 export const PRESET_MODES = [...ASSISTANT_MODES, 'compare'] as const;
-/** Every request mode the server accepts; "translate" comes from the bilingual tab */
-export const MODES = [...PRESET_MODES, 'translate'] as const;
+/** Every request mode the server accepts; "translate" comes from the bilingual tab, "letter" (a cover letter to the
+ * counterparty, shown in the pane only) from a decided playbook review */
+export const MODES = [...PRESET_MODES, 'translate', 'letter'] as const;
 export type Mode = typeof MODES[number];
 
 // Our own limits (not the model's: it takes about a million tokens). They keep answers fast and costs
@@ -72,6 +74,8 @@ export interface AIRequestBody {
   depth?: Depth;
   /** The party the user represents ("Vevő"): the AI works from its point of view; empty: neutral */
   party?: string;
+  /** Review against the firm's playbook: one check per rule instead of free findings */
+  playbook?: Playbook;
 }
 
 export interface ReviewFinding {

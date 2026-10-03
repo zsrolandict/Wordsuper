@@ -23,6 +23,8 @@ import {
   type Tone,
 } from "../src/shared/aiConfig";
 
+import { MAX_PLAYBOOK_RULES, PLAYBOOK_POSITIONS, formatPlaybook, sanitizePlaybook } from "../src/shared/playbook";
+
 type ParseResult = { value: AIRequestBody } | { error: string };
 
 const asString = (value: unknown) => (typeof value === "string" ? value : "");
@@ -46,7 +48,7 @@ export function parseRequest(body: unknown): ParseResult {
 
   // Word separates paragraphs with \r; the model reads \n as a line break
   const originalText = toLineFeeds(asString(raw.originalText)).substring(0, MAX_SELECTION_CHARS);
-  if ((mode === "edit" || mode === "comment") && !originalText.trim()) {
+  if ((mode === "edit" || mode === "comment" || mode === "letter") && !originalText.trim()) {
     return { error: "Missing originalText" };
   }
 
@@ -72,9 +74,40 @@ export function parseRequest(body: unknown): ParseResult {
   };
 
   const party = asString(raw.party).replace(/\s+/g, " ").trim().substring(0, MAX_PARTY_CHARS);
+  // Only a review checks against a playbook; what arrives is checked like anything from a file
+  const playbook = mode === "review" && raw.playbook !== undefined ? sanitizePlaybook(raw.playbook) : null;
+  if (mode === "review" && raw.playbook !== undefined && !playbook) {
+    return { error: "Invalid playbook" };
+  }
 
-  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, ...(party ? { party } : {}), masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
+  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, ...(party ? { party } : {}), ...(playbook ? { playbook } : {}), masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
 }
+
+const QUOTE_DESCRIPTION = "Exact, verbatim excerpt copied character-for-character from the document that pinpoints where the comment belongs: 5-15 words, or up to one whole sentence (at most 250 characters) when the suggestion rewrites it.";
+
+// One check per playbook rule, every rule exactly once: the pane shows them all as a checklist
+const PLAYBOOK_SCHEMA = {
+  type: "object",
+  properties: {
+    checks: {
+      type: "array",
+      maxItems: MAX_PLAYBOOK_RULES,
+      items: {
+        type: "object",
+        properties: {
+          rule: { type: "string", description: "The rule id from the playbook, as in [r3] without the brackets." },
+          position: { type: "string", enum: [...PLAYBOOK_POSITIONS] },
+          quote: { type: "string", description: QUOTE_DESCRIPTION + " For a missing clause: the sentence after which it belongs." },
+          comment: { type: "string", description: "What the document says on this point, which level of the playbook it meets and what to do, written in the language of the user's instruction." },
+          suggestion: { type: "string", description: "The wording that replaces exactly the quoted text as a tracked change and brings the clause to the standard position; empty for a clause already at the standard." },
+        },
+        required: ["rule", "position", "quote", "comment", "suggestion"],
+        propertyOrdering: ["rule", "position", "quote", "comment", "suggestion"],
+      },
+    },
+  },
+  required: ["checks"],
+};
 
 // Standard JSON Schema, so any provider that supports structured output can use it
 const REVIEW_SCHEMA = {
@@ -83,7 +116,7 @@ const REVIEW_SCHEMA = {
   items: {
     type: "object",
     properties: {
-      quote: { type: "string", description: "Exact, verbatim excerpt copied character-for-character from the document that pinpoints where the comment belongs: 5-15 words, or up to one whole sentence (at most 250 characters) when the suggestion rewrites it." },
+      quote: { type: "string", description: QUOTE_DESCRIPTION },
       comment: { type: "string", description: "Concise comment for the margin, written in the language of the user's instruction." },
       severity: { type: "string", enum: [...SEVERITY_VALUES] },
       suggestion: { type: "string", description: "The corrected wording that replaces exactly the quoted text, as a tracked change. Empty string when the finding needs no change of wording." },
@@ -255,6 +288,37 @@ RULES:
 - Write in the language of the user's instruction.${style}`,
       prompt: `CHANGES BETWEEN THE EARLIER AND THE CURRENT VERSION:\n${documentContext}\n\n${historyBlock(history)}${instructionBlock}`,
       responseJsonSchema: COMPARE_SCHEMA,
+    };
+  }
+
+  if (mode === "letter") {
+    return {
+      systemInstruction: `You are a lawyer's assistant within Microsoft Word.
+Your task is to draft the cover email that goes to the counterparty's lawyer together with the marked-up contract.
+RULES:
+- Write in the language of the user's instruction (Hungarian unless it says otherwise), polite and professional, concise.
+- Start with a subject line ("Tárgy: …" in Hungarian, "Subject: …" in English), then the email.
+- Explain the changes listed under CHANGES WE MADE, grouped by topic, each with its reason in one sentence. Mention only those changes: never add new demands, concessions or facts.
+- No markdown, no placeholders for things you do not know (leave out names you do not have; sign as "[név]").${style}`,
+      prompt: `CHANGES WE MADE (in the marked-up contract):\n${originalText}\n\n${contextBlock("the beginning of the contract, for the parties and the subject only")}${historyBlock(history)}${instructionBlock}`,
+    };
+  }
+
+  if (mode === "review" && request.playbook) {
+    return {
+      systemInstruction: `You are a professional legal reviewer AI operating within Microsoft Word.
+Your task is to check the whole document against the firm's PLAYBOOK below: for each rule, which level of the firm's positions the document meets.
+RULES:
+- Return one check per rule, every rule id exactly once, in the order of the playbook. Never invent rules.
+- "position": standard = the clause meets the standard position (or is better for the side the playbook is written for); fallback1 / fallback2 = it meets only that compromise; walkaway = it is worse than the last acceptable compromise or matches the walk-away; missing = the document has no such clause at all. Do not soften: a clause is standard only if it really meets the standard.
+- Judge from the point of view of the side the playbook is written for; when it names none, of the party the user represents.
+- "quote" MUST be copied verbatim from the document (same characters, same punctuation), so the add-in can find it with an exact search: 5-15 words, or the whole sentence (at most 250 characters) when the suggestion rewrites it. It must come from a single paragraph. For a missing clause, quote the sentence after which it belongs.
+- A number in square brackets at the start of a line (e.g. [5.2.]) is Word's automatic paragraph numbering. It is not part of the text: never put it into a quote or a suggestion.
+- "comment": what the document says on this point, which level it meets, and what to do; concise, in the language of the user's instruction. Name the level in words (standard, Fallback 1, Fallback 2, elfogadhatatlan, hiányzik).
+- "suggestion": for fallback1, fallback2 and walkaway, the quoted text reworded to the standard position (use the model clause's wording where the playbook gives one); for missing, the quoted sentence followed by the new clause; for standard, an empty string. Write it in the language and style of the document, with its defined terms.
+- The playbook is the firm's internal policy: never mention it, its fallbacks or its walk-away in a suggestion.${style}`,
+      prompt: `${formatPlaybook(request.playbook)}\n\nDOCUMENT TO CHECK:\n${documentContext}\n\n${historyBlock(history)}${instructionBlock}`,
+      responseJsonSchema: PLAYBOOK_SCHEMA,
     };
   }
 

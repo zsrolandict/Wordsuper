@@ -61,6 +61,8 @@ Szerver (Node.js + Express)
 - A javítás csak akkor kerül a szövegbe, ha az idézet szó szerint megtalálható. Ha nem, a javasolt szöveg a megjegyzésbe kerül, hogy ne vesszen el.
 - Az átvizsgálás a Word **automatikus számozását** is látja, szögletes zárójelben (`[5.2.] …`), így a pontszámozást és a kereszthivatkozásokat is ellenőrizni tudja.
 
+**Playbook-ellenőrzés:** Átvizsgálás módban az iroda szabálykönyve szerint (standard, Fallback 1–2, elfogadhatatlan, hiányzik), pontonkénti összesítővel. Az eltérések egyenként, korrektúrával fogadhatók el, utána kísérőlevél kérhető a partnernek (csak a munkaablakban, kimásolható). Részletek: [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md).
+
 **Gyorsgombok:**
 - Beépített gyorsgombok minden módhoz. Átvizsgálásnál például: Kockázatok és hiányosságok, Ellentmondások keresése, **Jogszabályi hivatkozások**, **Kereszthivatkozások és számozás**, Helyesírás és stílus.
 - A két új gomb egy-egy részletes utasítást küld. A jogszabályinál: létezik-e a hely, jó helyre mutat-e, oda illik-e, hatályos-e; bizonytalanság esetén jelezze, hogy a njt.hu-n ellenőrizni kell.

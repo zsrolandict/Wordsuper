@@ -89,3 +89,12 @@ test('office styles: read from the file, a list or { styles }, problems said, lo
   assert.equal(parseStylesLocked(undefined), false);
   assert.equal(parseStylesLocked('nem'), false);
 });
+
+test('office playbooks: the exported file or a bare list, at most 30, unreadable files reported', async () => {
+  const { readOfficePlaybooks } = await import('./config');
+  assert.deepEqual(readOfficePlaybooks(undefined, () => ''), { playbooks: [] });
+  assert.equal(readOfficePlaybooks('p.json', () => JSON.stringify({ playbooks: Array.from({ length: 40 }, () => ({})) })).playbooks.length, 30);
+  assert.equal(readOfficePlaybooks('p.json', () => '[{"name":"A"}]').playbooks.length, 1);
+  assert.match(readOfficePlaybooks('p.json', () => '{"x":1}').problem!, /no "playbooks" list/);
+  assert.match(readOfficePlaybooks('p.json', () => { throw new Error('ENOENT'); }).problem!, /cannot be read: ENOENT/);
+});

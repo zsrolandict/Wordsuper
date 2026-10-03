@@ -79,6 +79,13 @@ if secret_exists office-styles; then
   STYLES_ENV="@OFFICE_STYLES_FILE=/secrets/office-styles.json@OFFICE_STYLES_LOCKED=${OFFICE_STYLES_LOCKED:-false}"
 fi
 
+# Az irodai playbookok (a „Playbookok kezelése → Exportálás” fájlja), ha van ilyen titok
+if secret_exists playbooks; then
+  grant_secret playbooks
+  SECRETS="$SECRETS,/secrets/playbooks.json=playbooks:latest"
+  STYLES_ENV="$STYLES_ENV@PLAYBOOKS_FILE=/secrets/playbooks.json"
+fi
+
 step "Beállítások"
 # A @ az elválasztó (^@^), mert a domainlistában vessző lehet
 ENV_VARS="^@^AI_PROVIDER=$AI_PROVIDER@AUTH_MODE=$AUTH_MODE$STYLES_ENV"

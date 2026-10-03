@@ -43,6 +43,12 @@ import Proposal, { type FindingView, type ProposalState } from './Proposal';
 import LimitsBar from './LimitsBar';
 import SettingsPanel, { isOtherVersion } from './SettingsPanel';
 import { useAuthMode } from './MicrosoftSignIn';
+import PlaybookBar from './PlaybookBar';
+import PlaybookPanel from './PlaybookPanel';
+import PlaybookSummary from './PlaybookSummary';
+import CopyButton from './CopyButton';
+import { coverLetterChanges, parsePlaybookChecks, playbookFindings, type PlaybookCheck } from '../services/playbook';
+import type { Playbook } from '../shared/playbook';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
 import TranslatePanel from './TranslatePanel';
@@ -83,6 +89,10 @@ interface Message {
   preset?: PresetMatch;
   /** Pl. hibás hozzáférési kulcsnál: gomb a Beállításokhoz */
   showSettingsLink?: boolean;
+  /** A playbook check: every rule with the level the document meets */
+  playbook?: { name: string; checks: PlaybookCheck[] };
+  /** Text to copy out (a cover letter): never written into the document */
+  copyText?: string;
 }
 
 /** A döntésre váró javaslat, mindennel, ami a beszúráshoz vagy a finomításhoz kell */
@@ -102,6 +112,8 @@ interface PendingProposal {
    * anything else left in the answer is an unresolved placeholder
    */
   sources: string[];
+  /** A playbook check: refinements and "Másik változat" check against the same playbook */
+  playbook?: Playbook;
 }
 
 const WELCOME_MESSAGE: Message = {
@@ -145,6 +157,8 @@ interface SendOptions {
   forceNew?: boolean;
   /** Surely meant for the pending proposal (Másik változat, a clarification answer): no selection check */
   explicitRefine?: boolean;
+  /** Review against this playbook */
+  playbook?: Playbook;
 }
 
 interface Confirmation {
@@ -187,7 +201,9 @@ export default function TaskPane() {
   const [isSending, setIsSending] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
-  const [view, setView] = useState<'chat' | 'settings'>('chat');
+  const [view, setView] = useState<'chat' | 'settings' | 'playbooks'>('chat');
+  // Bumped when the playbooks were edited, so the selector reloads them
+  const [playbookVersion, setPlaybookVersion] = useState(0);
   const [tab, setTab] = useState<Tab>('assistant');
   const [settings, updateSettings] = useSettings();
   // With Microsoft sign-in no access key is needed, so its reminder is only shown for key sign-in
@@ -506,6 +522,8 @@ export default function TaskPane() {
       // Hosszú finomításnál az első és a legutóbbi körök mennek el (a szerver is így vág)
       const sentRounds = trimHistory(rounds);
 
+      // A playbook check, or its refinement: the same playbook goes with every round
+      const playbook = requestMode === 'review' ? options.playbook ?? (refining ? current!.playbook : undefined) : undefined;
       const request: AIRequestBody = {
         mode: requestMode,
         instruction,
@@ -516,6 +534,7 @@ export default function TaskPane() {
         wholeDocument: !!snapshot.wholeDocument,
         depth: settings.depth,
         ...(party ? { party } : {}),
+        ...(playbook ? { playbook } : {}),
       };
       // Names and identifiers are replaced by placeholders before the request leaves the machine
       const prepared = await prepareSend(request, refining
@@ -612,12 +631,26 @@ export default function TaskPane() {
       }
 
       let findings: ReviewFinding[] | undefined;
+      let playbookResult: Message['playbook'];
       let explanation = '';
       if (requestMode === 'edit') {
         ({ text: result, explanation } = splitExplanation(result));
         explanation = unmask(explanation);
       }
-      if (requestMode === 'review') {
+      if (requestMode === 'review' && playbook) {
+        // One check per rule; the ones that need action become findings, decided one by one like any review
+        const checks = parsePlaybookChecks(result, playbook)?.map(c => ({ ...c, quote: unmask(c.quote), comment: unmask(c.comment), suggestion: unmask(c.suggestion) }));
+        if (!checks) {
+          finishLoadingMessage({ role: 'system', content: 'A playbook-ellenőrzés eredményét nem tudtam értelmezni. Kérlek próbáld újra.' });
+          return;
+        }
+        playbookResult = { name: playbook.name, checks };
+        findings = playbookFindings(checks);
+        if (findings.length === 0) {
+          finishLoadingMessage({ content: 'Minden vizsgált pont megfelel a playbook standard pozíciójának, nincs teendő.', playbook: playbookResult });
+          return;
+        }
+      } else if (requestMode === 'review') {
         // The JSON is parsed with the placeholders in it, then each field is unmasked
         const parsed = parseFindings(result)?.map(f => ({ ...f, quote: unmask(f.quote), comment: unmask(f.comment), suggestion: unmask(f.suggestion) }));
         if (!parsed) {
@@ -645,7 +678,7 @@ export default function TaskPane() {
         }));
       }
       unclaimedRange = null;
-      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result, explanation, masker, sources });
+      setPending({ messageId: loadingId, mode: requestMode, snapshot, rounds: [...rounds, { instruction, result }], result, explanation, masker, sources, playbook });
       // A placeholder left after unmasking (made up or mangled beyond recognition) has no real value behind it:
       // such an answer, or such a finding, can't be written into the document
       const blocked = requestMode === 'review' ? [] : unresolvedPlaceholders([result, explanation], sources);
@@ -659,6 +692,7 @@ export default function TaskPane() {
       finishLoadingMessage({
         content: requestMode === 'review' ? '' : result,
         proposal: { state: 'pending', findings: findingViews, explanation, addExplanation, blocked: blocked.length ? blocked : undefined },
+        playbook: playbookResult,
         status: heldFindings
           ? { text: `⛔ ${heldFindings} észrevételben fel nem oldott helyettesítő maradt, ezeket nem lehet beszúrni (lásd fent). A többi rendben van.`, tone: 'neutral' }
           : undefined,
@@ -831,6 +865,68 @@ export default function TaskPane() {
   };
 
   /** After a partial acceptance: a review of the result, told what was taken and what was left out */
+  /**
+   * The cover letter to the counterparty about what a playbook check wrote into the contract. It is shown here to
+   * copy out, never written into the document; it goes through the same masking and preview as any request.
+   */
+  const writeCoverLetter = async (messageId: string) => {
+    const findings = messagesRef.current.find(m => m.id === messageId)?.proposal?.findings ?? [];
+    const applied = findings.filter(f => f.done === 'applied' && !f.notFound);
+    if (!applied.length || !tryLock()) return;
+    setIsSending(true);
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      addMessage({ role: 'user', content: `[${modeLabel('letter')}] A beírt ${applied.length} módosítás a partnernek` });
+      const request: AIRequestBody = {
+        mode: 'letter',
+        instruction: 'Írj rövid kísérőlevelet a partner jogi képviselőjének a módosított szerződéshez.',
+        originalText: coverLetterChanges(applied.map(f => ({ comment: f.comment, suggestion: f.suggestion, topic: f.topic, fixApplied: f.fix && !f.fixFailed && !f.fixProtected }))),
+        documentContext: '',
+        styleProfile: settings.styleProfile,
+        ...(party ? { party } : {}),
+      };
+      const prepared = await prepareSend(request, settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null);
+      if (!prepared) return;
+      const { sent, masker } = prepared;
+      const unmask = (text: string, streaming = false) => (masker ? masker.unmask(text, streaming) : text);
+      const id = newMessageId();
+      setMessages(prev => [...prev, { id, role: 'assistant', content: '', isLoading: true }]);
+      let streamed = '';
+      let answer: string;
+      try {
+        answer = await streamAIResponse(sent, {
+          onText: chunk => {
+            streamed += chunk;
+            updateMessage(id, m => ({ ...m, content: unmask(streamed, true), isLoading: false }));
+          },
+          onRateLimit: setRateLimit,
+        }, { accessKey: settings.accessKey, userId: settings.userId, signal: controller.signal });
+      } catch (error) {
+        updateMessage(id, m => (controller.signal.aborted
+          ? { ...m, isLoading: false, status: { text: '⏹️ Leállítottad.', tone: 'neutral' } }
+          : { ...m, isLoading: false, role: 'system', content: describeRequestError(error), showSettingsLink: needsSettings(error) }));
+        return;
+      }
+      const letter = unmask(answer).trim();
+      // A placeholder the AI made up has no real value behind it: such a letter is not offered for copying
+      const held = unresolvedPlaceholders([letter], [request.originalText, request.instruction]);
+      updateMessage(id, m => ({
+        ...m,
+        isLoading: false,
+        content: letter,
+        copyText: held.length ? undefined : letter,
+        status: held.length
+          ? { text: `⛔ A levélben fel nem oldott helyettesítő maradt (${held.join(', ')}), ezért nem ajánlom kimásolásra.`, tone: 'neutral' }
+          : { text: 'A dokumentumba nem írtam semmit. Átnézés után másold ki a levelet.', tone: 'neutral' },
+      }));
+    } finally {
+      abortRef.current = null;
+      setIsSending(false);
+      unlock();
+    }
+  };
+
   const runRecheck = (findings: FindingView[]) => {
     const applied = findings.filter(f => f.done === 'applied');
     const dismissed = findings.filter(f => f.done === 'dismissed');
@@ -979,6 +1075,12 @@ export default function TaskPane() {
         </div>
       )}
 
+      {view === 'playbooks' && (
+        <div className="fixed inset-0 z-30">
+          <PlaybookPanel accessKey={settings.accessKey} onClose={() => { setView('chat'); setPlaybookVersion(v => v + 1); }} />
+        </div>
+      )}
+
       {sendPreview && (
         <SendPreview
           request={sendPreview.request}
@@ -1112,6 +1214,7 @@ export default function TaskPane() {
               )}
               {msg.role === 'system' && <AlertCircle className="w-4 h-4 inline-block mr-1.5 -mt-0.5" />}
               {msg.isLoading && <Loader2 className="w-4 h-4 inline-block mr-2 animate-spin text-blue-600" />}
+              {msg.playbook && !msg.isLoading && <PlaybookSummary name={msg.playbook.name} checks={msg.playbook.checks} />}
               {msg.isLoading && !msg.content ? (
                 <span className="text-neutral-500">{msg.details?.mode === 'review' ? 'Átvizsgálom a dokumentumot…' : 'Gondolkodom…'}</span>
               ) : msg.proposal && msg.details ? (
@@ -1161,6 +1264,16 @@ export default function TaskPane() {
                 />
               ) : (
                 <span className="whitespace-pre-wrap">{msg.content}</span>
+              )}
+              {msg.copyText && <CopyButton text={msg.copyText} />}
+              {msg.playbook && msg.proposal?.findings?.some(f => f.done === 'applied') && (
+                <button
+                  onClick={() => writeCoverLetter(msg.id)}
+                  disabled={isBusy}
+                  className="mt-2 flex items-center text-xs font-medium text-indigo-800 hover:text-indigo-950 underline disabled:opacity-50"
+                >
+                  ✉️ Kísérőlevél a partnernek a beírt módosításokról
+                </button>
               )}
               {msg.status && (
                 <p className={`mt-2 text-xs font-medium ${msg.status.tone === 'success' ? 'text-green-700' : 'text-neutral-500'}`}>{msg.status.text}</p>
@@ -1243,6 +1356,16 @@ export default function TaskPane() {
             </button>
           ))}
         </div>
+
+        {mode === 'review' && (
+          <PlaybookBar
+            accessKey={settings.accessKey}
+            version={playbookVersion}
+            disabled={isBusy}
+            onManage={() => setView('playbooks')}
+            onRun={playbook => handleSend('Ellenőrizd a szerződést a playbook szerint.', 'review', `📋 Playbook-ellenőrzés: ${playbook.name}`, { forceNew: true, playbook })}
+          />
+        )}
 
         {/* Presets */}
         <div className="flex flex-wrap gap-2 mb-3">

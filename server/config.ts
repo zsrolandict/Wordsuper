@@ -131,5 +131,18 @@ export function readOfficeStyles(path: string | undefined, read: (path: string) 
   }
 }
 
+/** The firm's playbooks (PLAYBOOKS_FILE: the file the pane's playbook export saves); checked again in the pane */
+export function readOfficePlaybooks(path: string | undefined, read: (path: string) => string): { playbooks: unknown[]; problem?: string } {
+  if (!path?.trim()) return { playbooks: [] };
+  try {
+    const data = JSON.parse(read(path.trim()));
+    const playbooks = Array.isArray(data) ? data : Array.isArray(data?.playbooks) ? data.playbooks : null;
+    if (!playbooks) return { playbooks: [], problem: `PLAYBOOKS_FILE (${path}) has no "playbooks" list.` };
+    return { playbooks: playbooks.slice(0, 30) };
+  } catch (error) {
+    return { playbooks: [], problem: `PLAYBOOKS_FILE (${path}) cannot be read: ${(error as Error).message}` };
+  }
+}
+
 /** OFFICE_STYLES_LOCKED=true: only the firm's styles can be used, and their values can't be changed in the pane */
 export const parseStylesLocked = (value: string | undefined) => /^(1|true|yes|igen)$/i.test(value?.trim() ?? '');

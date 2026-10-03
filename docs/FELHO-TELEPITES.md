@@ -87,6 +87,7 @@ gombja lesz.
 | Mit | Hogyan |
 |---|---|
 | Irodai stílusok | `gcloud secrets create office-styles --data-file=office-styles.json --replication-policy=user-managed --locations=europe-west1`, majd a telepítő újra; zároláshoz `OFFICE_STYLES_LOCKED=true` |
+| Irodai playbookok | `gcloud secrets create playbooks --data-file=playbookok.json --replication-policy=user-managed --locations=europe-west1`, majd a telepítő újra |
 | Személyes hozzáférési kulcsok | `app-access-keys` titok „Név:kulcs, Név2:kulcs2” tartalommal, majd a telepítő újra |
 | Gemini API a Vertex AI helyett | `gemini-api-key` titok (a szkript kiírja a parancsot), majd `AI_PROVIDER=gemini` |
 | Hidegindítás nélkül | `MIN_INSTANCES=1` (mindig fut egy példány, kis havi fix díj) |

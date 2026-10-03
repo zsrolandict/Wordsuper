@@ -131,3 +131,33 @@ test('translate mode needs the items and answers with one translation per id', (
   assert.match(built.prompt, /\[\[2\]\] Zárás\./);
   assert.ok(built.responseJsonSchema);
 });
+
+test('a review against a playbook: checked playbook, one check per rule, the rules in the prompt', () => {
+  const playbook = { id: 'p', name: 'NDA', contractType: 'NDA', side: 'Megbízó', rules: [{ id: 'r1', topic: 'Titoktartás', standard: 'Öt év.', fallback1: 'Három év.', fallback2: '', walkAway: 'Egy év alatt.', clause: '' }] };
+  const parsed = parseRequest({ mode: 'review', instruction: 'Ellenőrizd', documentContext: 'A titoktartás két évig tart.', playbook });
+  assert.ok('value' in parsed);
+  const built = buildPrompt(parsed.value);
+  assert.match(built.prompt, /^PLAYBOOK: NDA[\s\S]*\[r1\] Titoktartás\n {2}Standard: Öt év\.[\s\S]*DOCUMENT TO CHECK:\nA titoktartás két évig tart\./);
+  assert.match(built.systemInstruction, /every rule id exactly once/);
+  assert.match(built.systemInstruction, /never mention it, its fallbacks or its walk-away in a suggestion/);
+  const schema = built.responseJsonSchema as { properties: { checks: { items: { properties: { position: { enum: string[] } } } } } };
+  assert.deepEqual(schema.properties.checks.items.properties.position.enum, ['standard', 'fallback1', 'fallback2', 'walkaway', 'missing']);
+  // A broken playbook is refused, not quietly turned into a free review
+  assert.deepEqual(parseRequest({ mode: 'review', instruction: 'x', documentContext: 'y', playbook: { name: 'Üres', rules: [] } }), { error: 'Invalid playbook' });
+  // Only a review takes a playbook
+  const edit = parseRequest({ mode: 'edit', instruction: 'x', originalText: 'y', playbook });
+  assert.ok('value' in edit && !edit.value.playbook);
+  // Without a playbook the review is the usual list of findings
+  const plain = parseRequest({ mode: 'review', instruction: 'x', documentContext: 'y' });
+  assert.ok('value' in plain && (buildPrompt(plain.value).responseJsonSchema as { type: string }).type === 'array');
+});
+
+test('a cover letter needs the list of changes and is plain text that adds nothing', () => {
+  assert.deepEqual(parseRequest({ mode: 'letter', instruction: 'Írj levelet' }), { error: 'Missing originalText' });
+  const parsed = parseRequest({ mode: 'letter', instruction: 'Írj levelet', originalText: '1. Foglaló: 10%-ra csökkentettük.' });
+  assert.ok('value' in parsed);
+  const built = buildPrompt(parsed.value);
+  assert.equal(built.responseJsonSchema, undefined);
+  assert.match(built.prompt, /^CHANGES WE MADE \(in the marked-up contract\):\n1\. Foglaló/);
+  assert.match(built.systemInstruction, /never add new demands, concessions or facts/);
+});

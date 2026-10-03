@@ -327,3 +327,15 @@ export async function fetchOfficeStyles(accessKey: string): Promise<{ styles: un
     return null;
   }
 }
+
+/** The firm's playbooks from the server (PLAYBOOKS_FILE), unchecked; null when unreachable */
+export async function fetchOfficePlaybooks(accessKey: string): Promise<unknown[] | null> {
+  try {
+    const response = await fetch('/api/playbooks', { headers: await requestHeaders(accessKey, '', { interactive: false }) });
+    if (!response.ok) return null;
+    const data = await response.json();
+    return Array.isArray(data?.playbooks) ? data.playbooks : [];
+  } catch {
+    return null;
+  }
+}

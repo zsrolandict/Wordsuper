@@ -7,6 +7,7 @@ export const MODE_LABELS: Record<Mode, { icon: string; label: string }> = {
   review: { icon: '🔍', label: 'Átvizsgálás' },
   compare: { icon: '⇄', label: 'Összevetés' },
   translate: { icon: '🌐', label: 'Fordítás' },
+  letter: { icon: '✉️', label: 'Kísérőlevél' },
 };
 
 export const modeLabel = (mode: Mode) => `${MODE_LABELS[mode].icon} ${MODE_LABELS[mode].label}`;
@@ -18,6 +19,7 @@ export const DEFAULT_PRESETS: Record<Mode, string[]> = {
   review: ['Kockázatok és hiányosságok', 'Ellentmondások keresése', 'Jogszabályi hivatkozások', 'Kereszthivatkozások és számozás', 'Helyesírás és stílus'],
   compare: ['Mit módosított a partner, és mi a kockázata?', 'Csak a kockázatos változások', 'Rövid összefoglaló az ügyfélnek'],
   translate: [],
+  letter: [],
 };
 
 /** Built-in quick buttons whose short label stands for a longer instruction */
@@ -44,6 +46,7 @@ export const PLACEHOLDERS: Record<Mode, string> = {
   review: 'Mire figyeljek a teljes dokumentumban?',
   compare: 'Mire figyeljek a változásokban?',
   translate: '',
+  letter: '',
 };
 
 /**

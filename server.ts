@@ -9,7 +9,7 @@ import rateLimit from "express-rate-limit";
 import { ACCESS_KEY_HEADER, RATE_LIMIT_PER_MINUTE, USER_ID_HEADER } from "./src/shared/aiConfig";
 import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
-import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficeStyles, type AccessKeys } from "./server/config";
+import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficePlaybooks, readOfficeStyles, type AccessKeys } from "./server/config";
 import { readVersion } from "./server/version";
 import { generateManifest } from "./src/manifest";
 import { bearerToken, createMicrosoftVerifier, parseAuthConfig, type MicrosoftAuthConfig, type MicrosoftVerifier } from "./server/msAuth";
@@ -152,7 +152,7 @@ async function startServer() {
   });
 
   // Rate limit and authenticate before parsing the body, so unauthenticated requests stay cheap
-  app.use("/api/", (req, res, next) => (["/info", "/office-styles", "/auth-mode"].includes(req.path) ? infoLimiter : apiLimiter)(req, res, next), requireAuth(accessKeys, microsoftAuth, verifyMicrosoft));
+  app.use("/api/", (req, res, next) => (["/info", "/office-styles", "/playbooks", "/auth-mode"].includes(req.path) ? infoLimiter : apiLimiter)(req, res, next), requireAuth(accessKeys, microsoftAuth, verifyMicrosoft));
   
   // 2. Payload size limiter (Prevents massive 50MB texts from crashing server; the text limits above fit well within it)
   app.use(express.json({ limit: "8mb" }));
@@ -193,6 +193,14 @@ async function startServer() {
   app.get("/api/office-styles", (req, res) => {
     const { styles } = readOfficeStyles(process.env.OFFICE_STYLES_FILE, path => fs.readFileSync(path, "utf8"));
     res.json({ styles, locked: stylesLocked && styles.length > 0 });
+  });
+
+  // The firm's playbooks (PLAYBOOKS_FILE), read on each request so an updated file needs no restart
+  const firstPlaybooks = readOfficePlaybooks(process.env.PLAYBOOKS_FILE, path => fs.readFileSync(path, "utf8"));
+  if (firstPlaybooks.problem) console.warn(firstPlaybooks.problem);
+  else if (firstPlaybooks.playbooks.length) console.log(`Office playbooks: ${firstPlaybooks.playbooks.length}`);
+  app.get("/api/playbooks", (req, res) => {
+    res.json({ playbooks: readOfficePlaybooks(process.env.PLAYBOOKS_FILE, path => fs.readFileSync(path, "utf8")).playbooks });
   });
 
   app.post("/api/edit-stream", async (req, res) => {

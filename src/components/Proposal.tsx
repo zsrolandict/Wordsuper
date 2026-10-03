@@ -25,6 +25,8 @@ export interface FindingView extends ReviewFinding {
   notShown?: boolean;
   /** Placeholders the finding still has after unmasking: it can't be inserted */
   blocked?: string[];
+  /** A playbook check: the rule's topic (for the cover letter) */
+  topic?: string;
 }
 
 export interface FindingActions {
@@ -274,6 +276,7 @@ const APPLY_LABELS: Record<Mode, string> = {
   review: 'Beszúrás',
   compare: 'Megjegyzések beszúrása',
   translate: 'Beszúrás',
+  letter: 'Másolás',
 };
 
 export default function Proposal({
