@@ -125,6 +125,7 @@ Szerver (Node.js + Express)
   - **tulajdoni hányadok**, amelyek összege nem 1 („1/2 és 1/3 arányban”);
   - **felek elnevezése:** egyes számban definiált fél többes számban („Vevő” → „Vevők”), vagy fordítva;
   - **számozás:** kimaradt vagy kétszer szereplő pontszám, kihagyott szint, kézzel beírt szám automatikus számozás mellett (mellékletnél újraindul).
+- **Jogszabályok lista:** a szerződés jogszabály- és bírósági hivatkozásai csoportosítva, megnyitással (njt.hu, EUR-Lex); a nem hatályos törvényekre, a régi Ptk.-számozásra és a nem létező Ptk.-könyvre a Problémák között figyelmeztet. Adatbázis nélkül, kulcs nélkül.
 - **Kiküldés előtti ellenőrzés** (külön gomb a fül tetején, magától nem jelez): el nem fogadott korrektúrák szerzővel, megoldatlan megjegyzések, kitöltetlen helyek ([●], XX, ____, TBD; az aláírásvonal és a [Ptk.] nem), kiemelt és rejtett szöveg, szerzői adatok a dokumentum tulajdonságaiban. Mindegyik mellett Ugrás; a szerzői adatok egy gombbal törölhetők.
 
 ### 3.3 Összevetés fül

@@ -71,6 +71,8 @@ Egészítsd ki a bekezdést úgy, hogy itt, az első előfordulásnál legyen de
     case 'amount-words':
     case 'shares':
     case 'numbering':
+    // Which act is meant is the lawyer's call; the reference opens on njt.hu
+    case 'legal-ref':
       return null;
   }
 }

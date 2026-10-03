@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus, Eraser, Banknote, PieChart, Users, ListOrdered } from 'lucide-react';
+import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus, Eraser, Banknote, PieChart, Users, ListOrdered, Scale, ExternalLink } from 'lucide-react';
 import { requestForDefinitionsSection, requestForIssue, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo, type StructureIssue } from '../services/structure';
 import { UserFacingError, deleteTextsInParagraphs, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
 import { formatNumber } from '../services/format';
 import PreSendCheck from './PreSendCheck';
+import { groupLegalRefs } from '../services/legalRefs';
+import { openExternal } from '../services/links';
 
 interface Loaded {
   paragraphs: ParagraphInfo[];
@@ -22,7 +24,10 @@ const ISSUE_ICONS: Record<IssueKind, React.ReactNode> = {
   shares: <PieChart className="w-3.5 h-3.5 text-red-600" />,
   'party-name': <Users className="w-3.5 h-3.5 text-amber-600" />,
   numbering: <ListOrdered className="w-3.5 h-3.5 text-amber-600" />,
+  'legal-ref': <Scale className="w-3.5 h-3.5 text-amber-600" />,
 };
+
+const LEGAL_KIND_LABELS = { act: 'Jogszabály', decree: 'Rendelet', court: 'Bírósági / AB döntés', eu: 'Uniós jogszabály' } as const;
 
 function JumpButton({ onClick, label = 'Ugrás' }: { onClick: () => void; label?: string }) {
   return (
@@ -54,7 +59,7 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
   const [notice, setNotice] = useState<string | null>(null);
   const [atCursor, setAtCursor] = useState<FoundAt | null>(null);
   const [cursorOutdated, setCursorOutdated] = useState(false);
-  const [list, setList] = useState<'issues' | 'terms'>('issues');
+  const [list, setList] = useState<'issues' | 'terms' | 'laws'>('issues');
   // Where the user was before the first jump; "Vissza" returns there
   const [back, setBack] = useState<Word.Range | null>(null);
   const backRef = useRef<Word.Range | null>(null);
@@ -215,13 +220,13 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
         </button>
       </div>
       <div className="px-3 pt-2 flex space-x-1 text-xs">
-        {(['issues', 'terms'] as const).map(key => (
+        {(['issues', 'terms', 'laws'] as const).map(key => (
           <button
             key={key}
             onClick={() => setList(key)}
             className={`px-2.5 py-1 rounded-full border ${list === key ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}
           >
-            {key === 'issues' ? `Problémák (${graph?.issues.length ?? 0})` : `Fogalmak (${graph?.terms.length ?? 0})`}
+            {key === 'issues' ? `Problémák (${graph?.issues.length ?? 0})` : key === 'terms' ? `Fogalmak (${graph?.terms.length ?? 0})` : `Jogszabályok (${graph ? groupLegalRefs(graph.legalRefs).length : 0})`}
           </button>
         ))}
       </div>
@@ -275,6 +280,39 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
             </span>
           </div>
         )))}
+
+        {graph && list === 'laws' && (graph.legalRefs.length === 0 ? (
+          <p className="text-xs text-neutral-500">Nem találtam jogszabályra vagy bírósági döntésre utaló hivatkozást (pl. „2013. évi V. törvény”, „Ptk. 6:98. §”, „BH 2019.123”).</p>
+        ) : (
+          <>
+            <p className="text-[11px] text-neutral-500">
+              A „Megnyitás” a jogszabályt a Nemzeti Jogszabálytárban (njt.hu), az uniós jogot az EUR-Lexen nyitja meg; bírósági döntésnél és rendeletnél a pontos hivatkozásra keres. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
+              A hatályosságot és a bekezdés létezését nem ellenőrzöm (ehhez jogtár-hozzáférés kellene); a régi, már nem hatályos törvényekre és a régi Ptk.-számozásra a Problémák között figyelmeztetek.
+            </p>
+            {groupLegalRefs(graph.legalRefs).map(group => (
+              <div key={group.group} className="bg-white border border-neutral-200 rounded-lg p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0">
+                    <span className="block text-xs font-semibold text-neutral-800 break-words">{group.group}</span>
+                    <span className="text-[10px] text-neutral-500">{LEGAL_KIND_LABELS[group.kind]} · {group.refs.length} hivatkozás</span>
+                  </span>
+                  <button onClick={() => openExternal(group.url)} className="flex items-center shrink-0 text-[11px] font-medium text-blue-700 hover:text-blue-900" aria-label={`${group.group} megnyitása`}>
+                    Megnyitás<ExternalLink className="w-3 h-3 ml-0.5" />
+                  </button>
+                </div>
+                <ul className="mt-1 space-y-0.5">
+                  {group.refs.slice(0, 12).map((ref, i) => (
+                    <li key={i} className="flex items-center justify-between gap-2 text-[11px]">
+                      <span className="truncate text-neutral-700">„{ref.text}”</span>
+                      <JumpButton onClick={() => jump(ref.paragraph)} />
+                    </li>
+                  ))}
+                  {group.refs.length > 12 && <li className="text-[10px] text-neutral-400">és még {group.refs.length - 12}</li>}
+                </ul>
+              </div>
+            ))}
+          </>
+        ))}
 
         {graph && data && list === 'terms' && (
           <button

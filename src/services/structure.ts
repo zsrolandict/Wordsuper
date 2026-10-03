@@ -5,6 +5,7 @@
  */
 
 import { amountIssues, numberingIssues, partyNameIssues, shareIssues } from './consistency';
+import { findLegalRefs, legalRefIssues, type LegalRef } from './legalRefs';
 
 export interface ParagraphInfo {
   text: string;
@@ -54,7 +55,9 @@ export interface CrossReference extends Occurrence {
  */
 export type IssueKind = 'unused' | 'duplicate' | 'duplicate-inline' | 'broken-reference' | 'missing-annex' | 'undefined-quoted'
   /** Content checks (consistency.ts) */
-  | 'amount-words' | 'shares' | 'party-name' | 'numbering';
+  | 'amount-words' | 'shares' | 'party-name' | 'numbering'
+  /** Law references (legalRefs.ts): a repealed act, the old Ptk. numbering, a Ptk. book that does not exist */
+  | 'legal-ref';
 
 export interface StructureIssue {
   kind: IssueKind;
@@ -71,6 +74,8 @@ export interface DocumentGraph {
   sections: Section[];
   references: CrossReference[];
   issues: StructureIssue[];
+  /** Acts, decrees, court decisions and EU acts the document cites */
+  legalRefs: LegalRef[];
 }
 
 const UPPER = 'A-ZÁÉÍÓÖŐÚÜŰ';
@@ -340,8 +345,12 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
     ...numberingIssues(paragraphs, labels, text => ANNEX_HEADING.test(text)),
   );
 
+  // 7. Law and case references: what can be checked without a law database
+  const legalRefs = findLegalRefs(paragraphs);
+  issues.push(...legalRefIssues(legalRefs));
+
   issues.sort((a, b) => a.at.paragraph - b.at.paragraph || a.at.start - b.at.start);
-  return { terms, sections, references, issues };
+  return { terms, sections, references, issues, legalRefs };
 }
 
 /**

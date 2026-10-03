@@ -344,7 +344,7 @@ export default function ComparePanel({
           Mit módosított a másik fél? Ha <strong>korrektúrával</strong> küldte vissza, a dokumentum korrektúráit vizsgálom.
           Ha korrektúra nélkül, töltsd fel a <strong>korábbi</strong> változatot (amit neki küldtél), és ahhoz hasonlítom.
         </p>
-        <input ref={fileInput} type="file" accept=".docx" className="hidden" onChange={e => e.target.files?.[0] && loadEarlierVersion(e.target.files[0])} />
+        <input ref={fileInput} type="file" accept=".docx" className="hidden" aria-label="Összevetendő korábbi változat" onChange={e => e.target.files?.[0] && loadEarlierVersion(e.target.files[0])} />
         <button
           onClick={() => loadTrackedChanges()}
           disabled={busy}

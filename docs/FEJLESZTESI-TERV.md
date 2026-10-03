@@ -14,9 +14,9 @@ lehet rájuk hivatkozni.
 |---|---|---|---|
 | `felho` | Felhős szerver (Cloud Run, EU) és központi kiadás a Microsoft 365-ben | kód kész, élesben nem kipróbálva | [FELHO-TELEPITES.md](FELHO-TELEPITES.md) |
 | `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | **kód kész**, valódi Wordben nem kipróbálva | a tartalmát jogász írja (van minta); Autopilot (beavatkozás nélküli beírás) nem lesz |
-| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | **következik** | kulcs és licenc nélkül |
+| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | **kód kész**, valódi Wordben nem kipróbálva | kulcs és licenc nélkül |
 | `tobbagens` | Többágensű átvizsgálás: öt szakértő párhuzamosan, majd összegzés | **kód kész**, valódi Wordben nem kipróbálva | alapból ki; Beállításokban: ki / csak „Alapos”-nál / mindig; használatkor kb. 5–7-szeres tokenköltség |
-| `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | tervezett | előbb: ki gondozza, mi kerülhet bele |
+| `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | **következik** | előbb: ki gondozza, mi kerülhet bele |
 | `apijog` | Automatikus „létezik-e, hatályos-e” ellenőrzés kereskedelmi jogtár API-jával | **félretéve** | lásd lent |
 | `benchmark` | Piaci statisztikai összevetés | **elvetve** | magyar piacra nincs adat |
 
@@ -47,6 +47,22 @@ lehet rájuk hivatkozni.
 - **Mindig egy kéréssel megy:** a playbook-ellenőrzés és a finomítás.
 - **Költség:** 6 kérés (5 szakértő + összegzés), mind a teljes dokumentummal. Az auditnapló jelzi, hány szakértő
   válaszolt; a tokenszám az összesített.
+
+## `jogref` – így működik
+
+- **Hol:** Szerkezet fül → „Jogszabályok” lista. Jogszabályonként (vagy döntésenként) csoportosítva, minden
+  előforduláshoz Ugrás gombbal.
+- **Mit ismer fel:** törvények („2013. évi V. törvény”, „tv.”), a gyakori rövidítések szakaszokkal (Ptk., Pp., Btk.,
+  Mt., Ctv., Inytv., Ákr., Infotv., Ütv., Vht., Cstv., Tpvt., Áfa tv., Szja tv., Gt.), kormányrendeletek, AB-határozatok,
+  jogegységi határozatok, BH/EBH/BDT/KGD, Kúria-ügyszámok, uniós rendeletek és irányelvek (GDPR is).
+- **Megnyitás:** törvény az njt.hu-n, uniós jog az EUR-Lexen; rendeletnél és bírósági döntésnél keresés a pontos
+  hivatkozásra. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
+- **Ellenőrzés adatbázis nélkül** (a Problémák között): nem hatályos törvény (régi Ptk., Gt., Pp., Btk., Mt., Ket., Be.,
+  adatvédelmi és ügyvédi törvény, a hatályvesztés dátumával és az utóddal), a régi Ptk.-számozás az új Ptk.-ra
+  hivatkozva („Ptk. 318. §”), nem létező Ptk.-könyv („Ptk. 9:12. §”).
+- **Amit nem tud:** hogy egy bekezdés létezik-e és hatályos-e a szerződés dátumán: ez az `apijog`.
+- Valódi Wordben ellenőrizendő: az njt.hu-cím formája (`njt.hu/jogszabaly/2013-5-00-00`) és a megnyitás az asztali
+  Wordből (alapértelmezett böngészőben).
 
 ## `apijog` – félretéve
 
