@@ -1,0 +1,10 @@
+# What `gcloud run deploy --source .` uploads: the same as the Docker build context
+.env*
+!.env.example
+*.log
+audit*.jsonl
+node_modules
+dist
+.git
+manifest.local.xml
+docs/teszt

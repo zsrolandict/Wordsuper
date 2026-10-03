@@ -1,10 +1,17 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { generateManifest } from '../manifest';
 import { Copy, Check, FileDown } from 'lucide-react';
 
 export default function SetupInstructions() {
   const [copied, setCopied] = useState(false);
-  const manifestXml = generateManifest(window.location.origin);
+  // The server's manifest also carries the Microsoft sign-in settings; without a server answer it is made here
+  const [manifestXml, setManifestXml] = useState(() => generateManifest(window.location.origin));
+  useEffect(() => {
+    fetch('/manifest.xml')
+      .then(r => (r.ok ? r.text() : Promise.reject()))
+      .then(xml => { if (xml.includes('<OfficeApp')) setManifestXml(xml); })
+      .catch(() => {});
+  }, []);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(manifestXml);

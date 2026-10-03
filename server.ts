@@ -11,6 +11,7 @@ import { createAuditLogger, readUserId, type AuditEntry } from "./server/audit";
 import { buildPrompt, parseRequest, parseTranscribeRequest } from "./server/prompts";
 import { contentSecurityPolicy, parseAccessKeys, parseDictationPolicy, parseMaskingPolicy, parseStylesLocked, parseTrustProxy, readOfficeStyles, type AccessKeys } from "./server/config";
 import { readVersion } from "./server/version";
+import { generateManifest } from "./src/manifest";
 import { bearerToken, createMicrosoftVerifier, parseAuthConfig, type MicrosoftAuthConfig, type MicrosoftVerifier } from "./server/msAuth";
 import { providerFromEnv } from "./server/ai";
 
@@ -80,7 +81,8 @@ const HEARTBEAT_MS = 20 * 1000;
 
 async function startServer() {
   const app = express();
-  const PORT = 3000;
+  // Cloud Run (and most hosts) say which port to listen on
+  const PORT = Number(process.env.PORT) || 3000;
 
   app.disable("x-powered-by");
 
@@ -348,6 +350,16 @@ async function startServer() {
       console.error("Transcription error:", error);
       res.status(502).json({ error: "Failed to transcribe the recording.", code: "SERVER_ERROR" });
     }
+  });
+
+  // The add-in's manifest for this server, for central deployment (Microsoft 365 admin center) or sideloading.
+  // The address comes from PUBLIC_URL, or else from the request (behind Cloud Run's proxy: https and its host).
+  // With Microsoft sign-in it carries the app registration, so Word can sign the user in.
+  app.get("/manifest.xml", (req, res) => {
+    const base = (process.env.PUBLIC_URL?.trim() || `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+    const ssoClientId = microsoftAuth.mode !== "key" && !microsoftAuth.problem ? microsoftAuth.clientId : undefined;
+    res.type("application/xml").setHeader("Content-Disposition", 'inline; filename="manifest.xml"');
+    res.send(generateManifest(base, ssoClientId));
   });
 
   if (process.env.NODE_ENV !== "production") {

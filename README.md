@@ -12,7 +12,7 @@ A projekt a `word-add-in` repó `v1.1.0` zárványából indult (commit `8a18363
 - **Átláthatóság:** minden válasznál látszik, mit kapott az AI, hogyan gondolkodott, melyik modell válaszolt és hol; élő korlátjelző.
 - **Adatvédelem:** nevek és azonosítók maszkolása küldés előtt; helyi diktálás (a hang nem hagyja el a gépet); auditnapló tartalom nélkül.
 
-Részletes leírás: [docs/RENDSZERLEIRAS.md](docs/RENDSZERLEIRAS.md).
+Részletes leírás: [docs/RENDSZERLEIRAS.md](docs/RENDSZERLEIRAS.md). Felhős telepítés és központi kiadás: [docs/FELHO-TELEPITES.md](docs/FELHO-TELEPITES.md). Fejlesztési terv: [docs/FEJLESZTESI-TERV.md](docs/FEJLESZTESI-TERV.md).
 
 ## Indítás
 

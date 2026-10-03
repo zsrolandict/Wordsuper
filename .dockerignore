@@ -1,0 +1,10 @@
+# Never into the image: secrets, local logs, local builds
+.env*
+!.env.example
+*.log
+audit*.jsonl
+node_modules
+dist
+.git
+manifest.local.xml
+docs/teszt

@@ -303,7 +303,8 @@ Beállítások → Hibajelentés: a felhasználó leírja, mi történt, és a j
   - A Beállítások alján látszik a felület és a szerver verziója (git commit); eltérésnél figyelmeztet.
 - **Arculat:** ICT Europa Legal logó a fejlécben (a végleges logófájl még hiányzik).
 - **Kipróbálás valódi Wordben:** tesztdokumentum minden új funkció szándékos hibáival és lépésenkénti ellenőrzőlista: [TESZT-WORDBEN.md](TESZT-WORDBEN.md).
-- **Következő fázis (II.):** költségkövetés ügyfélcímkénként. (A Microsoft-fiókos belépés elkészült, lásd 5/C.)
+- **Felhős telepítés:** Cloud Run az EU-ban, a szerver a `/manifest.xml` címen adja a manifestet a Microsoft 365 központi kiadásához: [FELHO-TELEPITES.md](FELHO-TELEPITES.md).
+- **Következő fázis (II.):** [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md) (playbook, jogszabály-hivatkozások, többágensű átvizsgálás, mintazáradék-tár; az `apijog` félretéve).
 
 ## 8. Kérdések, amiket érdemes megbeszélni
 
