@@ -1,12 +1,19 @@
 # Fejlesztési terv (II. fázis)
 
+*Frissítve: 2026. október 3. Ez a fájl az állapotjelző: minden lépés után frissül.*
+
+**Az I. fázis és a 14 pontos fejlesztési lista** (kiküldés előtti ellenőrzés, szám–betű egyezés, hányadok, felek
+elnevezése, számozás, definiált fogalmak, élőfej/élőláb, aláírási blokk, tartalomjegyzék, irodai stílusok, kétnyelvű
+szinkron frissítés, Microsoft-belépés, hibajelentés): **kész**. A kód tesztelve van, de valódi Wordben még nem
+próbáltuk ki; ehhez: [TESZT-WORDBEN.md](TESZT-WORDBEN.md).
+
 A piacvezetőkkel való összevetés után (2026. október) ezek a tételek maradtak. Mindegyiknek rövid kódneve van, így
 lehet rájuk hivatkozni.
 
 | Kód | Mit | Állapot | Megjegyzés |
 |---|---|---|---|
 | `felho` | Felhős szerver (Cloud Run, EU) és központi kiadás a Microsoft 365-ben | kód kész, élesben nem kipróbálva | [FELHO-TELEPITES.md](FELHO-TELEPITES.md) |
-| `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | tervezett | a tartalmát jogász írja; Autopilot (beavatkozás nélküli beírás) nem lesz |
+| `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | **folyamatban** | a tartalmát jogász írja; Autopilot (beavatkozás nélküli beírás) nem lesz |
 | `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | tervezett | kulcs és licenc nélkül |
 | `tobbagens` | Többágensű „Alapos” átvizsgálás: szakterületi kérések párhuzamosan, majd összegzés | tervezett | használatkor kb. 5–7-szeres tokenköltség |
 | `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | tervezett | előbb: ki gondozza, mi kerülhet bele |
