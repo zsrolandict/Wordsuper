@@ -1755,6 +1755,32 @@ export async function applyHeaderFooter(headerPackage: string | null, footerPack
   });
 }
 
+/**
+ * Puts an OOXML package (the signature row) at the top of every section's footer, keeping what is there (page
+ * number, BIZALMAS line). Without Track Changes, like the header and footer; Word's own setting is put back.
+ */
+export async function addToFooters(ooxmlPackageText: string): Promise<number> {
+  return Word.run(async (context) => {
+    const doc = context.document;
+    doc.load('changeTrackingMode');
+    const sections = doc.sections;
+    sections.load('items');
+    await context.sync();
+    const previous = doc.changeTrackingMode;
+    try {
+      if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+      sections.items.forEach(section => section.getFooter('Primary').insertOoxml(ooxmlPackageText, 'Start'));
+      await context.sync();
+      return sections.items.length;
+    } finally {
+      if (previous !== 'Off') {
+        doc.changeTrackingMode = previous;
+        await context.sync().catch(() => {});
+      }
+    }
+  });
+}
+
 /** Inserts an OOXML package at the cursor (a signature block, a table of contents), by the usual Track Changes rule */
 export async function insertPackageAtCursor(ooxmlPackageText: string): Promise<WriteMode> {
   return Word.run(async (context) => {

@@ -102,19 +102,24 @@ export interface SignatureOptions {
   /** A "képviseli: …" line under the name (companies) */
   representative: boolean;
   font: string;
+  /**
+   * For the footer (on every page, e.g. for initialling each page): smaller, little room above the line, no place
+   * and date line
+   */
+  compact?: boolean;
 }
 
 const DOTS = '……………………………';
 
 /** Two signature columns side by side, without borders; room left above the signature line */
 export function signatureBlockXml(o: SignatureOptions): string {
-  const style: RunStyle = { font: o.font };
+  const style: RunStyle = o.compact ? { font: o.font, size: 8 } : { font: o.font };
   const p = (inner: string, pPr = '') => `<w:p><w:pPr>${pPr}<w:spacing w:after="0"/></w:pPr>${inner}</w:p>`;
   const column = (party: SignatureParty) =>
     `<w:tc><w:tcPr><w:tcW w:w="2500" w:type="pct"/></w:tcPr>`
-    + p(run(`${o.place || DOTS}, ${o.date || DOTS}`, style))
+    + (o.compact ? '' : p(run(`${o.place || DOTS}, ${o.date || DOTS}`, style)))
     // Room to sign, then the line
-    + p(run('______________________________', style), '<w:spacing w:before="1200"/>')
+    + p(run(o.compact ? '____________________' : '______________________________', style), `<w:spacing w:before="${o.compact ? 360 : 1200}"/>`)
     + p(run(party.name || DOTS, { ...style, bold: true }), '<w:jc w:val="left"/>')
     + p(run(party.role, style))
     + (o.representative ? p(run(`képviseli: ${DOTS}`, style)) : '')
@@ -123,7 +128,8 @@ export function signatureBlockXml(o: SignatureOptions): string {
   return `<w:tbl><w:tblPr><w:tblW w:w="5000" w:type="pct"/><w:tblBorders>${none}</w:tblBorders><w:tblLayout w:type="fixed"/></w:tblPr>`
     + `<w:tblGrid><w:gridCol w:w="4536"/><w:gridCol w:w="4536"/></w:tblGrid>`
     + `<w:tr><w:trPr><w:cantSplit/></w:trPr>${column(o.left)}${column(o.right)}</w:tr></w:tbl>`
-    + '<w:p/>';
+    // In the footer a small gap before the page line; in the text an empty paragraph after the table
+    + (o.compact ? '<w:p><w:pPr><w:spacing w:after="60"/></w:pPr></w:p>' : '<w:p/>');
 }
 
 /** Our own chapter style is listed too (headings without a heading style get it in the Formázás tab) */

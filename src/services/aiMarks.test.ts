@@ -25,6 +25,26 @@ test('AI traces are found and placed, never in plain legal wording', () => {
     ['phrase', 1, 'kulcsfontosságú'],
     ['invisible', 2, 'A Vevő​ fizet ✅'],
     ['emoji', 2, '✅'],
-    ['bold', 3, `${'x'.repeat(60)}…`],
   ]);
+});
+
+test('capitals in titles: a spelling hint, not for names, institutions, defined terms or numbered labels', () => {
+  const heading = (text: string) => para(text, { styleBuiltIn: 'Heading1' });
+  const marks = findAiMarks({
+    footnotes: null,
+    paragraphs: [
+      heading('Szavatossági Nyilatkozatok'),
+      heading('Dr. Jákfalvi Ágnes Ügyvédi Iroda'),
+      heading('Vevő1 Vevő2'),
+      heading('Pest Megyei Kormányhivatal'),
+      // The defined term may stay capitalized; "Utolsó" in the middle may not
+      heading('Az Utolsó Vételárrészlet'),
+      // First word and a defined term: fine
+      heading('Utolsó Vételárrészlet'),
+      heading('Utolsó vételárrészlet'),
+      // A long bold paragraph is no longer pointed out: lawyers bold whole clauses on purpose
+      para('y'.repeat(250), { bold: true }),
+    ],
+  }, ['Vételárrészlet']);
+  assert.deepEqual(marks.map(m => [m.kind, m.paragraph]), [['titleCase', 0], ['titleCase', 4]]);
 });

@@ -5,7 +5,7 @@ import {
   type AuditSummary, type Category, type FormatAudit, type FormatOptions, type FormatProfile,
 } from '../services/formatting';
 import { UserFacingError, applyFormatPlan, canOpenNewDocument, jumpToParagraph, openNewDocument, readDocumentFile, readFormatAudit, readSelectionFormat } from '../services/wordDocument';
-import { AI_MARK_LABELS, findAiMarks, type AiMarkKind } from '../services/aiMarks';
+import { AI_MARK_LABELS, AI_TRACE_KINDS, findAiMarks, type AiMarkKind } from '../services/aiMarks';
 import { MAX_STYLE_NAME, loadCustomStyles, newStyleId, readStylesFile, saveCustomStyles, stylesFile, type CustomStyle } from '../services/customStyles';
 import { fetchOfficeStyles } from '../services/aiService';
 import { toBase64 } from '../services/docxWriter';
@@ -465,7 +465,10 @@ export default function FormatPanel({ active, accessKey, onDocumentChanged }: { 
   const fonts = summary ? [...new Set([...summary.fonts.map(([f]) => f).filter(Boolean), ...COMMON_FONTS])] : COMMON_FONTS;
   const footnotesKnown = !!audit?.footnotes?.length;
   const marginsKnown = !!audit?.margins?.length;
-  const aiMarks = audit ? findAiMarks(audit) : [];
+  const allMarks = audit ? findAiMarks(audit, definedTerms) : [];
+  // AI traces and the spelling hint (capitals in titles) are shown apart
+  const aiMarks = allMarks.filter(m => AI_TRACE_KINDS.includes(m.kind));
+  const spellingMarks = allMarks.filter(m => !AI_TRACE_KINDS.includes(m.kind));
   const textCounts: Partial<Record<Category, number>> = summary
     ? {
       terms: summary.terms, dashes: summary.dashes, markdown: summary.markdown, quotes: summary.straightQuotes, nbsp: summary.nbsp, ranges: summary.ranges,
@@ -504,9 +507,30 @@ export default function FormatPanel({ active, accessKey, onDocumentChanged }: { 
     { id: 'scope', label: 'Kategóriák' },
   ];
 
-  const marksByKind = (Object.keys(AI_MARK_LABELS) as AiMarkKind[])
-    .map(kind => ({ kind, items: aiMarks.filter(m => m.kind === kind) }))
+  const groupMarks = (marks: typeof allMarks) => (Object.keys(AI_MARK_LABELS) as AiMarkKind[])
+    .map(kind => ({ kind, items: marks.filter(m => m.kind === kind) }))
     .filter(group => group.items.length);
+  const marksByKind = groupMarks(aiMarks);
+  const renderMarkGroups = (groups: ReturnType<typeof groupMarks>) => groups.map(group => (
+    <details key={group.kind} className="border-t border-neutral-100 pt-1">
+      <summary className="cursor-pointer select-none" title={AI_MARK_LABELS[group.kind].hint}>
+        <span className="font-medium">{AI_MARK_LABELS[group.kind].label}</span> <span className="text-neutral-500">({group.items.length})</span>
+      </summary>
+      <p className="text-neutral-500 mt-0.5">{AI_MARK_LABELS[group.kind].hint}</p>
+      <ul className="mt-1 space-y-0.5">
+        {group.items.slice(0, 30).map((mark, i) => (
+          <li key={i} className="flex items-center justify-between space-x-2">
+            <span className="truncate text-neutral-800">„{mark.found}”</span>
+            <button onClick={() => jump(mark.paragraph)} className="shrink-0 text-[11px] font-medium text-blue-700 hover:text-blue-900">Ugrás →</button>
+          </li>
+        ))}
+      </ul>
+    </details>
+  ));
+  // The cleanup options that have something to do, and whether all of them are on
+  const CLEANUP: Category[] = ['terms', 'dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'doubleSpaces'];
+  const cleanupAvailable = CLEANUP.filter(c => textCounts[c]);
+  const cleanupAllOn = cleanupAvailable.length > 0 && cleanupAvailable.every(c => options.categories[c]);
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-3 space-y-3 text-xs">
@@ -743,8 +767,17 @@ export default function FormatPanel({ active, accessKey, onDocumentChanged }: { 
           {view === 'text' && (
             <>
               <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
-                <p className="font-semibold text-neutral-800">Szövegtisztítás <span className="font-normal text-neutral-500">– a szöveget is módosítja, korrektúrával</span></p>
-                {(['terms', 'dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'doubleSpaces'] as Category[]).map(c => (
+                <div className="flex items-start justify-between gap-2">
+                  <p className="font-semibold text-neutral-800">Szövegtisztítás <span className="font-normal text-neutral-500">– a szöveget is módosítja, korrektúrával</span></p>
+                  <button
+                    onClick={() => cleanupAvailable.forEach(c => setCategory(c, !cleanupAllOn))}
+                    disabled={busy || !cleanupAvailable.length}
+                    className="shrink-0 text-[11px] font-medium text-blue-700 hover:text-blue-900 disabled:opacity-40"
+                  >
+                    {cleanupAllOn ? 'Egyiket sem' : 'Mindet kijelöl'}
+                  </button>
+                </div>
+                {CLEANUP.map(c => (
                   <label key={c} className={`flex items-center justify-between ${textCounts[c] ? 'cursor-pointer' : 'opacity-50'}`} title={CATEGORY_LABELS[c].title}>
                     <span className="flex items-center space-x-2">
                       <input type="checkbox" checked={options.categories[c]} disabled={busy || !textCounts[c]} onChange={e => setCategory(c, e.target.checked)} />
@@ -758,25 +791,16 @@ export default function FormatPanel({ active, accessKey, onDocumentChanged }: { 
 
               <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
                 <p className="font-semibold text-neutral-800">AI-nyomok <span className="font-normal text-neutral-500">– csak jelzés, a szöveget nem írom át</span></p>
-                {marksByKind.length === 0 ? (
-                  <p className="text-green-700">Nem találtam AI-ra utaló nyomot.</p>
-                ) : marksByKind.map(group => (
-                  <details key={group.kind} className="border-t border-neutral-100 pt-1">
-                    <summary className="cursor-pointer select-none" title={AI_MARK_LABELS[group.kind].hint}>
-                      <span className="font-medium">{AI_MARK_LABELS[group.kind].label}</span> <span className="text-neutral-500">({group.items.length})</span>
-                    </summary>
-                    <p className="text-neutral-500 mt-0.5">{AI_MARK_LABELS[group.kind].hint}</p>
-                    <ul className="mt-1 space-y-0.5">
-                      {group.items.slice(0, 30).map((mark, i) => (
-                        <li key={i} className="flex items-center justify-between space-x-2">
-                          <span className="truncate text-neutral-800">„{mark.found}”</span>
-                          <button onClick={() => jump(mark.paragraph)} className="shrink-0 text-[11px] font-medium text-blue-700 hover:text-blue-900">Ugrás →</button>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ))}
+                {marksByKind.length === 0 && <p className="text-green-700">Nem találtam AI-ra utaló nyomot.</p>}
+                {renderMarkGroups(marksByKind)}
               </div>
+
+              {spellingMarks.length > 0 && (
+                <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
+                  <p className="font-semibold text-neutral-800">Helyesírási jelzés <span className="font-normal text-neutral-500">– csak jelzés, nem AI-nyom</span></p>
+                  {renderMarkGroups(groupMarks(spellingMarks))}
+                </div>
+              )}
             </>
           )}
 

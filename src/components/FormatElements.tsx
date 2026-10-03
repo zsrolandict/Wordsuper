@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BookOpenText, FileSignature, Loader2, PanelTop, RefreshCw } from 'lucide-react';
 import { footerXml, guessParties, headerXml, hungarianDate, ooxmlPackage, signatureBlockXml, tableOfContentsXml } from '../services/documentElements';
-import { applyHeaderFooter, insertPackageAtCursor, readHeaderFooter, updateTablesOfContents } from '../services/wordDocument';
+import { addToFooters, applyHeaderFooter, insertPackageAtCursor, readHeaderFooter, updateTablesOfContents } from '../services/wordDocument';
 import type { FormatProfile } from '../services/formatting';
 
 const FIRM = 'ICT Europa Legal';
@@ -49,6 +49,8 @@ export default function FormatElements({ profile, terms, documentName, margins, 
   const [leftName, setLeftName] = useState('');
   const [rightName, setRightName] = useState('');
   const [representative, setRepresentative] = useState(false);
+  // The header/footer setting puts the signature row into the new footer too (it replaces the footer)
+  const [footerSignature, setFooterSignature] = useState(false);
 
   useEffect(() => {
     readHeaderFooter().then(setExisting).catch(() => setExisting(null));
@@ -81,14 +83,25 @@ export default function FormatElements({ profile, terms, documentName, margins, 
   const setHeaderFooter = () => run('hf', async () => {
     if (!(await takeSnapshot())) return 'Megszakítva: az előző állapotot nem sikerült elmenteni.';
     const o = { width, font, accent, header, firm: FIRM, title: documentName, pageNumbers, confidential, documentId, version, date: withDate ? date : '' };
-    const sections = await applyHeaderFooter(header ? ooxmlPackage(headerXml(o)) : null, ooxmlPackage(footerXml(o)));
+    const footer = (footerSignature ? signatureXml(true) : '') + footerXml(o);
+    const sections = await applyHeaderFooter(header ? ooxmlPackage(headerXml(o)) : null, ooxmlPackage(footer));
     setExisting(await readHeaderFooter().catch(() => null));
     setReplaceOk(false);
-    return `✅ Élőfej és élőláb beállítva (${sections} szakasz). Az oldalszám Word-mező, magától frissül.`;
+    return `✅ Élőfej és élőláb beállítva (${sections} szakasz)${footerSignature ? ', az élőlábban aláírási sorral' : ''}. Az oldalszám Word-mező, magától frissül.`;
+  });
+
+  const signatureXml = (compact: boolean) => signatureBlockXml({ place, date: today ? date : '', left: { role: leftRole, name: leftName }, right: { role: rightRole, name: rightName }, representative, font: profile.font, compact });
+
+  // Into the existing footer, above what is there: every page gets the signature row (e.g. to initial each page)
+  const signatureToFooter = () => run('sigf', async () => {
+    if (!(await takeSnapshot())) return 'Megszakítva: az előző állapotot nem sikerült elmenteni.';
+    const sections = await addToFooters(ooxmlPackage(signatureXml(true)));
+    setExisting(await readHeaderFooter().catch(() => null));
+    return `✅ Aláírási sor az élőlábba került (${sections} szakasz), minden oldal alján megjelenik. Korrektúra nélkül, mint az élőláb; a meglévő élőláb megmaradt alatta.`;
   });
 
   const insertSignature = () => run('sig', async () => {
-    const xml = signatureBlockXml({ place, date: today ? date : '', left: { role: leftRole, name: leftName }, right: { role: rightRole, name: rightName }, representative, font: profile.font });
+    const xml = signatureXml(false);
     const write = await insertPackageAtCursor(ooxmlPackage(xml));
     return `✅ Aláírási blokk beszúrva a kurzorhoz ${write.tracked ? 'korrektúrával' : 'korrektúra nélkül'}.`;
   });
@@ -116,6 +129,7 @@ export default function FormatElements({ profile, terms, documentName, margins, 
         <label className="flex items-center space-x-2"><input type="checkbox" checked={pageNumbers} onChange={e => setPageNumbers(e.target.checked)} disabled={disabled} /><span>Oldalszám: „Oldal 3 / 12”</span></label>
         <label className="flex items-center space-x-2"><input type="checkbox" checked={confidential} onChange={e => setConfidential(e.target.checked)} disabled={disabled} /><span>„BIZALMAS” felirat</span></label>
         <label className="flex items-center space-x-2"><input type="checkbox" checked={withDate} onChange={e => setWithDate(e.target.checked)} disabled={disabled} /><span>Dátum ({date})</span></label>
+        <label className="flex items-center space-x-2"><input type="checkbox" checked={footerSignature} onChange={e => setFooterSignature(e.target.checked)} disabled={disabled || !leftRole.trim() || !rightRole.trim()} /><span>Aláírási sor is az élőlábba ({leftRole || '…'} / {rightRole || '…'}, lent beállítható)</span></label>
         <div className="grid grid-cols-2 gap-1.5">
           <label className="space-y-0.5"><span className="text-neutral-500">Dokumentumazonosító</span><input value={documentId} onChange={e => setDocumentId(e.target.value)} maxLength={60} aria-label="Dokumentumazonosító" className={field} disabled={disabled} /></label>
           <label className="space-y-0.5"><span className="text-neutral-500">Verzió</span><input value={version} onChange={e => setVersion(e.target.value)} maxLength={20} placeholder="pl. v3, tervezet" aria-label="Verzió" className={field} disabled={disabled} /></label>
@@ -145,10 +159,15 @@ export default function FormatElements({ profile, terms, documentName, margins, 
           <label className="space-y-0.5"><span className="text-neutral-500">Neve (üres: kipontozva)</span><input value={rightName} onChange={e => setRightName(e.target.value)} maxLength={80} aria-label="Jobb oldali fél neve" className={field} disabled={disabled} /></label>
         </div>
         <label className="flex items-center space-x-2"><input type="checkbox" checked={representative} onChange={e => setRepresentative(e.target.checked)} disabled={disabled} /><span>„képviseli: …” sor (cég esetén)</span></label>
-        <button onClick={insertSignature} disabled={disabled || !leftRole.trim() || !rightRole.trim()} className="w-full flex items-center justify-center py-1.5 font-medium border border-blue-600 text-blue-700 hover:bg-blue-50 rounded-lg disabled:opacity-40">
-          {spinner('sig')}Beszúrás a kurzorhoz
-        </button>
-        <p className="text-neutral-400">Két oszlop keret nélkül, aláírásnyi hellyel; a szokásos korrektúraszabály szerint.</p>
+        <div className="flex space-x-2">
+          <button onClick={insertSignature} disabled={disabled || !leftRole.trim() || !rightRole.trim()} className="flex-1 flex items-center justify-center py-1.5 font-medium border border-blue-600 text-blue-700 hover:bg-blue-50 rounded-lg disabled:opacity-40">
+            {spinner('sig')}Beszúrás a kurzorhoz
+          </button>
+          <button onClick={signatureToFooter} disabled={disabled || !leftRole.trim() || !rightRole.trim()} className="flex-1 flex items-center justify-center py-1.5 font-medium border border-blue-600 text-blue-700 hover:bg-blue-50 rounded-lg disabled:opacity-40">
+            {spinner('sigf')}Az élőlábba (minden oldal)
+          </button>
+        </div>
+        <p className="text-neutral-400">Két oszlop keret nélkül. A kurzorhoz aláírásnyi hellyel, a szokásos korrektúraszabály szerint. Az élőlábba kisebb, hely és dátum nélkül, minden oldal aljára (pl. oldalankénti kézjegyhez), korrektúra nélkül; a meglévő élőláb megmarad alatta.</p>
       </div>
 
       {/* Table of contents */}

@@ -5,7 +5,9 @@ import { roleOf, type FormatAudit } from './formatting';
  * lawyer's decision. Rule-based, on the paragraphs read for the Formázás tab.
  */
 
-export type AiMarkKind = 'phrase' | 'titleCase' | 'bold' | 'invisible' | 'emoji';
+export type AiMarkKind = 'phrase' | 'titleCase' | 'invisible' | 'emoji';
+/** Real traces of AI text; the title-case hint is a spelling matter, shown apart from them */
+export const AI_TRACE_KINDS: AiMarkKind[] = ['phrase', 'invisible', 'emoji'];
 
 export interface AiMark {
   kind: AiMarkKind;
@@ -17,8 +19,7 @@ export interface AiMark {
 
 export const AI_MARK_LABELS: Record<AiMarkKind, { label: string; hint: string }> = {
   phrase: { label: 'Tipikus AI-fordulat', hint: 'Töltelék vagy túlzó kifejezés; érdemes egyszerűbben, konkrétabban megfogalmazni.' },
-  titleCase: { label: 'Angolos nagybetűs cím', hint: 'Magyarul a címben csak az első szó (és a tulajdonnév, definiált fogalom) nagy kezdőbetűs.' },
-  bold: { label: 'Hosszú félkövér bekezdés', hint: 'Az AI gyakran egész bekezdéseket emel ki; a jogi szövegben a kiemelés ritka és célzott.' },
+  titleCase: { label: 'Nagybetűs szavak a címben', hint: 'A magyar helyesírás szerint a címben csak az első szó és a tulajdonnév nagy kezdőbetűs (pl. „Szavatossági nyilatkozatok”). A definiált fogalmakat, a neveket és a cégneveket nem jelzem. Ez helyesírási jelzés, nem feltétlenül AI-nyom.' },
   invisible: { label: 'Láthatatlan karakter', hint: 'Nulla szélességű szóköz vagy feltételes elválasztó: bemásolt (AI-, web-) szöveg nyoma, a keresést is megzavarja.' },
   emoji: { label: 'Emoji vagy díszjel', hint: 'Szerződésbe nem illik; törölni vagy rendes felsorolásra cserélni.' },
 };
@@ -34,25 +35,31 @@ const PHRASES = [
 const PHRASE = new RegExp(`(?<![\\p{L}])(${PHRASES.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}])`, 'giu');
 const INVISIBLE = /[​-‍⁠﻿­]/;
 const EMOJI = /\p{Extended_Pictographic}|[✅❌➡⭐]/u;
-const LONG_BOLD_CHARS = 200;
+/** A name or an institution: its capitals are right (Dr. Kiss Anna Ügyvédi Iroda, Pest Megyei Kormányhivatal) */
+const PROPER_NAME = /(?<![\p{L}])(dr|ifj|id|özv|prof)\.|(?<![\p{L}])(Kft|Zrt|Nyrt|Bt|Kkt|Iroda|Társaság|Alapítvány|Egyesület|Hivatal|Kormányhivatal|Bíróság|Törvényszék|Önkormányzat|Minisztérium|Kamara|Bank)(?![\p{L}])/iu;
 
-/** "A Szerződés Tárgya": two or more longer words, all capitalized, the whole not in capitals */
-function isTitleCase(text: string): boolean {
+/**
+ * "A Szerződés Tárgya": after the first word, every longer word capitalized, the whole not in capitals. Names,
+ * institutions, defined terms (they are capitalized on purpose) and labels with numbers ("Vevő1 Vevő2") are fine.
+ */
+function isTitleCase(text: string, terms: string[]): boolean {
+  if (text === text.toLocaleUpperCase('hu') || /\d/.test(text) || PROPER_NAME.test(text)) return false;
   const words: string[] = text.match(/\p{L}+/gu) ?? [];
-  const long = words.filter(w => w.length > 3);
-  if (long.length < 2 || text === text.toLocaleUpperCase('hu')) return false;
-  return long.every(w => w[0] === w[0].toLocaleUpperCase('hu') && w.slice(1) === w.slice(1).toLocaleLowerCase('hu'));
+  const isTerm = (w: string) => terms.some(t => !t.includes(' ') && w.startsWith(t));
+  const rest = words.slice(1).filter(w => w.length > 3 && !isTerm(w));
+  if (!rest.length) return false;
+  return rest.every(w => w[0] === w[0].toLocaleUpperCase('hu') && w.slice(1) === w.slice(1).toLocaleLowerCase('hu'));
 }
 
-export function findAiMarks(audit: FormatAudit): AiMark[] {
+/** terms: the document's defined terms, capitalized on purpose */
+export function findAiMarks(audit: FormatAudit, terms: string[] = []): AiMark[] {
   const marks: AiMark[] = [];
   audit.paragraphs.forEach((p, paragraph) => {
     const text = p.text;
     if (!text.trim()) return;
     for (const match of text.matchAll(PHRASE)) marks.push({ kind: 'phrase', paragraph, found: match[0] });
     const role = roleOf(p).kind;
-    if ((role === 'heading' || role === 'fake-heading' || role === 'title') && isTitleCase(text.trim())) marks.push({ kind: 'titleCase', paragraph, found: text.trim() });
-    if (role === 'body' && p.bold === true && text.length > LONG_BOLD_CHARS) marks.push({ kind: 'bold', paragraph, found: `${text.slice(0, 60)}…` });
+    if ((role === 'heading' || role === 'fake-heading' || role === 'title') && isTitleCase(text.trim(), terms)) marks.push({ kind: 'titleCase', paragraph, found: text.trim() });
     if (INVISIBLE.test(text)) marks.push({ kind: 'invisible', paragraph, found: text.trim().slice(0, 60) });
     const emoji = EMOJI.exec(text);
     if (emoji) marks.push({ kind: 'emoji', paragraph, found: emoji[0] });

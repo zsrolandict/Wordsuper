@@ -52,3 +52,15 @@ test('table of contents lists the heading styles and our chapter style; parties 
   assert.deepEqual(guessParties([]), ['Eladó', 'Vevő']);
   assert.equal(hungarianDate(new Date(2026, 9, 3)), '2026. október 3.');
 });
+
+test('signature row for the footer: smaller, little room, no place and date line', () => {
+  const o = { place: 'Budapest', date: '2026. október 3.', left: { role: 'Eladó', name: '' }, right: { role: 'Vevő', name: '' }, representative: false, font: 'Cambria' };
+  const full = signatureBlockXml(o);
+  const compact = signatureBlockXml({ ...o, compact: true });
+  assert.match(full, /Budapest, 2026\. október 3\./);
+  assert.doesNotMatch(compact, /Budapest/);
+  assert.match(full, /w:before="1200"/);
+  assert.match(compact, /w:before="360"/);
+  assert.match(compact, /<w:sz w:val="16"\/>/);
+  assert.match(compact, /Eladó[\s\S]*Vevő/);
+});

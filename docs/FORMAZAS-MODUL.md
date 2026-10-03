@@ -169,6 +169,7 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 
 - Definiált fogalmak egységesen: a definíció helyén félkövér és idézőjeles, a használatban sima (`planTermEmphasis`).
 - Elemek fül: élőfej és élőláb (oldalszám „Oldal X / Y” mezőkkel, BIZALMAS, azonosító, verzió; minden szakaszba, korrektúra nélkül, a meglévő felülírása előtt kérdez), aláírási blokk (két oszlop keret nélkül, a felek a definíciókból), tartalomjegyzék (`TOC \o "1-3"` és az „ICT Fejezetcím” stílus 1. szintként) frissítés gombbal.
+- Valódi Wordes visszajelzés után: aláírási sor az élőlábba is (minden oldal alján, kisebb, hely és dátum nélkül, a meglévő élőláb fölé; vagy az élőláb beállításával együtt); „Mindet kijelöl / Egyiket sem” a szövegtisztításnál; az AI-nyomok közül a hosszú félkövér bekezdés kikerült (a jogászok szándékosan emelnek ki), a nagybetűs cím külön „Helyesírási jelzés” lett, és nem jelzi a neveket, cégneveket, intézményeket, definiált fogalmakat és a számozott címkéket („Vevő1 Vevő2”).
 - Irodai stílusok: export/import (.json), a szerverről betöltött irodai stílusok (`OFFICE_STYLES_FILE`), zárolható (`OFFICE_STYLES_LOCKED`).
 
 Mind kategóriánként kapcsolható, és ugyanazt a védelmet kapja, mint a többi (átvilágítás, terv, mentés előtte, korrektúra nélküli írás, a Word-beállítás visszaállítása).
