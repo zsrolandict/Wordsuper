@@ -18,9 +18,14 @@ set "NEED_INSTALL="
 where git >nul 2>nul
 if not errorlevel 1 if exist .git (
   for /f %%h in ('git rev-parse HEAD 2^>nul') do set "OLDHEAD=%%h"
-  echo Frissites keresese...
-  git pull --ff-only
-  if errorlevel 1 echo Nem sikerult frissiteni ^(nincs internet, vagy helyi modositas van^). A mostani valtozattal megyek tovabb.
+  git symbolic-ref -q HEAD >nul 2>nul
+  if errorlevel 1 (
+    echo Rogzitett ^(visszaallitott^) valtozat fut, nem frissitek. A legfrissebbre a VISSZAALLITAS.bat visz vissza.
+  ) else (
+    echo Frissites keresese...
+    git pull --ff-only
+    if errorlevel 1 echo Nem sikerult frissiteni ^(nincs internet, vagy helyi modositas van^). A mostani valtozattal megyek tovabb.
+  )
   for /f %%h in ('git rev-parse HEAD 2^>nul') do set "NEWHEAD=%%h"
 )
 if not "%OLDHEAD%"=="%NEWHEAD%" (

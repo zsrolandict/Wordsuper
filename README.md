@@ -33,6 +33,8 @@ Kattints duplán az **`INDITAS.bat`**-ra. Az első indításkor:
 
 Utána elindítja a szervert a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel. Eltávolítás: `npm run word:remove`.
 
+**Visszaállás:** ha egy új változat nem válik be, a **`VISSZAALLITAS.bat`** 1-es pontja visszaállítja a rögzített stabil változatot (`stabil-2026-10-03`, a formázás-egységesítés és a kétnyelvű fordítás előtti állapot), a 2-es pontja visszavisz a legfrissebbre. Utána az `INDITAS.bat`; stabil változaton nem frissít magától.
+
 | Parancs | Mit csinál |
 |---|---|
 | `npm run lint` | TypeScript-ellenőrzés |
