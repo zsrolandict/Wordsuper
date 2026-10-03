@@ -111,7 +111,7 @@ export function shareIssues(paragraphs: ParagraphInfo[]): StructureIssue[] {
       const group = groups[groups.length - 1];
       const previous = group?.[group.length - 1];
       const between = previous ? text.slice(previous.end, f.at) : '';
-      if (previous && between.length <= 40 && /^[\s\p{L}\d,.–-]*$/u.test(between) && /(\bés\b|,|-|–|valamint)/u.test(between)) group.push(f);
+      if (previous && between.length <= 40 && /^[\s\p{L}\d,.–-]*$/u.test(between) && /((?<!\p{L})és(?!\p{L})|,|-|–|valamint)/u.test(between)) group.push(f);
       else groups.push([f]);
     }
     for (const group of groups) {

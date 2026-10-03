@@ -4,6 +4,7 @@ import { requestForDefinitionsSection, requestForIssue, type StructureRequest } 
 import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo, type StructureIssue } from '../services/structure';
 import { UserFacingError, deleteTextsInParagraphs, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
 import { formatNumber } from '../services/format';
+import PreSendCheck from './PreSendCheck';
 
 interface Loaded {
   paragraphs: ParagraphInfo[];
@@ -162,6 +163,7 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
     <div className="flex-1 min-h-0 flex flex-col text-sm">
       {/* A kurzornál */}
       <div className="p-3 border-b border-neutral-200 bg-white space-y-2">
+        <PreSendCheck />
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 min-h-[76px]">
           {!data ? (
             <p className="text-xs text-neutral-500 flex items-center"><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" />Beolvasom a dokumentumot…</p>

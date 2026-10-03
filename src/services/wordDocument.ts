@@ -6,6 +6,7 @@ import { planDocumentEdits, summarizeDocumentEdits, type DocumentEditOp } from '
 import { formatNumber } from './format';
 import { withAutoNumbers, type ParagraphInfo } from './structure';
 import { isBlank, type FormatAudit, type FormatPlan, type PageMargins } from './formatting';
+import type { DocumentPropertiesInfo } from './presend';
 
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
@@ -1560,5 +1561,98 @@ export function readDocumentFile(): Promise<Uint8Array> {
       });
       next(0);
     });
+  });
+}
+
+/** What the pre-send check needs to know about the document, read in one go; a part this Word can't give is null */
+export interface PreSendFacts {
+  texts: string[];
+  /** Pending tracked changes one by one (WordApi 1.6); null when only their presence can be told */
+  tracked: { author: string; type: string; text: string }[] | null;
+  /** The text differs before and after the pending tracked changes */
+  hasTracked: boolean;
+  comments: { author: string; text: string; resolved: boolean }[] | null;
+  ooxml: string | null;
+  properties: DocumentPropertiesInfo | null;
+}
+
+export async function readPreSendFacts(): Promise<PreSendFacts> {
+  const facts = await Word.run(async (context) => {
+    const body = context.document.body;
+    const paragraphs = body.paragraphs;
+    paragraphs.load('items/text');
+    const original = body.getReviewedText('Original');
+    const current = body.getReviewedText('Current');
+    const tracked = canResolveRevisions() ? body.getTrackedChanges() : null;
+    tracked?.load('items/author,items/type,items/text');
+    const comments = isSupported('1.4') ? body.getComments() : null;
+    comments?.load('items/authorName,items/content,items/resolved');
+    const properties = isSupported('1.3') ? context.document.properties : null;
+    properties?.load('author,lastAuthor,company,manager,title,subject,keywords,comments,category,template');
+    await context.sync();
+    return {
+      texts: paragraphs.items.map(p => p.text),
+      tracked: tracked ? tracked.items.map(t => ({ author: t.author || 'ismeretlen', type: String(t.type), text: t.text || '' })) : null,
+      hasTracked: (original.value || '') !== (current.value || '') || !!tracked?.items.length,
+      comments: comments ? comments.items.map(c => ({ author: c.authorName || 'ismeretlen', text: c.content || '', resolved: !!c.resolved })) : null,
+      properties: properties
+        ? {
+          author: properties.author || '', lastAuthor: properties.lastAuthor || '', company: properties.company || '', manager: properties.manager || '',
+          title: properties.title || '', subject: properties.subject || '', keywords: properties.keywords || '', comments: properties.comments || '',
+          category: properties.category || '', template: properties.template || '',
+        }
+        : null,
+    };
+  });
+  // The OOXML (highlights, hidden text) apart: a very large document must not fail the rest
+  let ooxml: string | null = null;
+  try {
+    ooxml = await Word.run(async (context) => {
+      const result = context.document.body.getOoxml();
+      await context.sync();
+      return result.value;
+    });
+  } catch (e) {
+    console.error(e);
+  }
+  return { ...facts, ooxml };
+}
+
+/** Selects the first place where this text stands (a gap, a highlighted or hidden piece) */
+export async function selectText(text: string): Promise<boolean> {
+  return Word.run(async (context) => {
+    const found = context.document.body.search(wordSearchText(text.slice(0, 200)), { matchCase: true });
+    found.load('items');
+    await context.sync();
+    if (!found.items.length) return false;
+    found.items[0].select();
+    await context.sync();
+    return true;
+  });
+}
+
+/** Selects a pending tracked change or a comment by its place in the list read before */
+export async function selectReviewItem(kind: 'tracked' | 'comment', index: number): Promise<boolean> {
+  return Word.run(async (context) => {
+    const body = context.document.body;
+    const list = kind === 'tracked' ? body.getTrackedChanges() : body.getComments();
+    list.load('items');
+    await context.sync();
+    const item = list.items[index];
+    if (!item) return false;
+    item.getRange().select();
+    await context.sync();
+    return true;
+  });
+}
+
+/** Clears the document properties that tell who worked on it (only those Word lets change) */
+export async function clearDocumentProperties(keys: (keyof DocumentPropertiesInfo)[]) {
+  await Word.run(async (context) => {
+    const properties = context.document.properties as unknown as Record<string, string>;
+    keys.forEach(key => {
+      properties[key] = '';
+    });
+    await context.sync();
   });
 }

@@ -37,6 +37,7 @@ test('shares listed together must add up to one; a lone 1/1 and a hrsz are no li
     'A tulajdoni hányadok összege 5/6, nem 1 (1/2 + 1/3).',
   ]);
   assert.deepEqual(shareIssues(paras('EP/3118-13/2022 számú határozat, tulajdoni lap')), []);
+  assert.equal(shareIssues(paras('az Ingatlant 7/10 és 2/10 arányban')).length, 1, 'joined by a plain "és"');
 });
 
 test('party names: a defined singular used in the plural', () => {
