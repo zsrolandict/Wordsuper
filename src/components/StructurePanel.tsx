@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus, Eraser } from 'lucide-react';
+import { RefreshCw, BookOpen, Link2, AlertTriangle, CornerUpLeft, Loader2, ArrowRight, Unlink, Copy, CircleSlash, Quote, Info, Wand2, ListPlus, Eraser, Banknote, PieChart, Users, ListOrdered } from 'lucide-react';
 import { requestForDefinitionsSection, requestForIssue, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, findAt, sectionPreview, type DocumentGraph, type FoundAt, type IssueKind, type ParagraphInfo, type StructureIssue } from '../services/structure';
 import { UserFacingError, deleteTextsInParagraphs, jumpBack, jumpToParagraph, onSelectionChanged, readCursor, readParagraphs, releaseRange } from '../services/wordDocument';
@@ -17,6 +17,10 @@ const ISSUE_ICONS: Record<IssueKind, React.ReactNode> = {
   'duplicate-inline': <Copy className="w-3.5 h-3.5 text-amber-600" />,
   unused: <CircleSlash className="w-3.5 h-3.5 text-amber-600" />,
   'undefined-quoted': <Quote className="w-3.5 h-3.5 text-amber-600" />,
+  'amount-words': <Banknote className="w-3.5 h-3.5 text-red-600" />,
+  shares: <PieChart className="w-3.5 h-3.5 text-red-600" />,
+  'party-name': <Users className="w-3.5 h-3.5 text-amber-600" />,
+  numbering: <ListOrdered className="w-3.5 h-3.5 text-amber-600" />,
 };
 
 function JumpButton({ onClick, label = 'Ugrás' }: { onClick: () => void; label?: string }) {

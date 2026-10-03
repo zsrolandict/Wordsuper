@@ -53,7 +53,8 @@ test('cross-references resolve; missing targets and external law are handled', (
 
 test('issues: unused term, broken reference (a quotation used only once is not an issue)', () => {
   const kinds = graph.issues.map(i => `${i.kind}@${i.at.paragraph}`);
-  assert.deepEqual(kinds, ['unused@2', 'unused@5', 'broken-reference@8']);
+  // The fixture also skips section 4 and 5.1: the numbering check reports them
+  assert.deepEqual(kinds, ['unused@2', 'unused@5', 'broken-reference@8', 'numbering@11', 'numbering@12']);
   assert.match(graph.issues[0].message, /Fél/);
   assert.match(graph.issues[1].message, /Titoktartási Időszak/);
 });

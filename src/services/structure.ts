@@ -4,6 +4,8 @@
  * patterns too). Offsets are positions inside Word's paragraph.text.
  */
 
+import { amountIssues, numberingIssues, partyNameIssues, shareIssues } from './consistency';
+
 export interface ParagraphInfo {
   text: string;
   /** Automatic numbering as Word shows it (ListItem.listString), e.g. "5.2." — some hosts give only "2." */
@@ -50,7 +52,9 @@ export interface CrossReference extends Occurrence {
  * duplicate-inline: defined in the definitions list and again in the text "(a továbbiakban: …)", typically after a
  * definitions section was added; the inline one can be removed without AI.
  */
-export type IssueKind = 'unused' | 'duplicate' | 'duplicate-inline' | 'broken-reference' | 'missing-annex' | 'undefined-quoted';
+export type IssueKind = 'unused' | 'duplicate' | 'duplicate-inline' | 'broken-reference' | 'missing-annex' | 'undefined-quoted'
+  /** Content checks (consistency.ts) */
+  | 'amount-words' | 'shares' | 'party-name' | 'numbering';
 
 export interface StructureIssue {
   kind: IssueKind;
@@ -129,7 +133,7 @@ function sentenceBefore(text: string, end: number): string {
  * Section labels of all paragraphs. Word's listString is "5.2." on desktop but can be just "2." for a level-2
  * item; then the label is rebuilt from the numbers of the parent levels.
  */
-function sectionLabels(paragraphs: ParagraphInfo[]): (string | null)[] {
+export function sectionLabels(paragraphs: ParagraphInfo[]): (string | null)[] {
   const levels: string[] = [];
   return paragraphs.map(p => {
     const fromList = p.listString?.trim().replace(/\.+$/, '');
@@ -327,6 +331,14 @@ export function buildDocumentGraph(paragraphs: ParagraphInfo[]): DocumentGraph {
       issues.push({ kind: 'undefined-quoted', message: `„${term}” idézőjelben szerepel, mintha definiált fogalom lenne, de nincs definiálva.`, at: occurrence, subject: term });
     }
   });
+
+  // 6. Content: amounts in figures and words, shares, party names, numbering
+  issues.push(
+    ...amountIssues(paragraphs),
+    ...shareIssues(paragraphs),
+    ...partyNameIssues(paragraphs, terms),
+    ...numberingIssues(paragraphs, labels, text => ANNEX_HEADING.test(text)),
+  );
 
   issues.sort((a, b) => a.at.paragraph - b.at.paragraph || a.at.start - b.at.start);
   return { terms, sections, references, issues };

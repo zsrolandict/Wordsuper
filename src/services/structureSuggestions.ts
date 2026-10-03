@@ -58,9 +58,19 @@ Ha a szerződés más szóval hivatkozik ugyanarra, igazítsd hozzá a definíci
         instruction: `A „${issue.subject}” kifejezés idézőjelben, fogalomként szerepel ebben a bekezdésben, de a dokumentum nem definiálja.
 Egészítsd ki a bekezdést úgy, hogy itt, az első előfordulásnál legyen definiálva, a dokumentum tartalma alapján (pl. „… (a továbbiakban: ${issue.subject})”). A bekezdés többi részét ne változtasd meg.`,
       };
+    case 'party-name':
+      return {
+        ...base,
+        label: `Fél elnevezésének egységesítése: „${issue.subject}”`,
+        instruction: `A szerződés definiált fogalma „${issue.subject}”, de ebben a bekezdésben (és máshol is) más számban szerepel (egyes/többes). Ahol a definiált félre utal, használd pontosan a definiált alakot („${issue.subject}”), a mondat egyeztetését (ige, névelő) ehhez igazítva. Ha a szöveg szándékosan több személyt jelöl, és a definíció a hibás, ne javítsd, hanem a magyarázatban jelezd. A bekezdés többi részét ne változtasd meg.`,
+      };
     case 'missing-annex':
     // Removed without AI, straight from the structure view
     case 'duplicate-inline':
+    // Which of the two is right is the lawyer's call: only pointed out
+    case 'amount-words':
+    case 'shares':
+    case 'numbering':
       return null;
   }
 }
