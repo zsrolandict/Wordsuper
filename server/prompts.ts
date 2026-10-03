@@ -51,7 +51,7 @@ export function parseRequest(body: unknown): ParseResult {
   }
 
   const documentContext = toLineFeeds(asString(raw.documentContext)).substring(0, contextLimitFor(mode));
-  if ((mode === "review" || mode === "compare") && !documentContext.trim()) {
+  if ((mode === "review" || mode === "compare" || mode === "translate") && !documentContext.trim()) {
     return { error: "Missing documentContext" };
   }
 
@@ -115,6 +115,26 @@ const COMPARE_SCHEMA = {
   },
   required: ["overview", "changes"],
   propertyOrdering: ["overview", "changes"],
+};
+
+// One translation per item, by its id: the bilingual table pairs them back row by row
+const TRANSLATE_SCHEMA = {
+  type: "object",
+  properties: {
+    translations: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer", description: "The id of the item, the number in [[…]]." },
+          text: { type: "string", description: "The translation of exactly that item." },
+        },
+        required: ["id", "text"],
+        propertyOrdering: ["id", "text"],
+      },
+    },
+  },
+  required: ["translations"],
 };
 
 // Edit, comment and generate answer in plain text, so they can ask back; review and compare must return JSON
@@ -205,6 +225,22 @@ RULES:
 - Keep it concise, professional, and directly address the instruction.
 - Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler.${CLARIFY_RULE}${style}`,
       prompt: `${contextBlock("for your reference only")}${whole ? "WHOLE DOCUMENT TO ANALYZE" : "SELECTED TEXT TO ANALYZE"}:\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
+    };
+  }
+
+  if (mode === "translate") {
+    return {
+      systemInstruction: `You are a professional legal translator working on contracts within Microsoft Word.
+Your task is to translate the items of the document as the user's instruction says.
+RULES:
+- Each item starts with its id in double brackets, e.g. [[12]]. Return exactly one translation per item, with the same id, every id exactly once, in the same order. Never merge, split, skip or reorder items, even if a sentence seems to continue in the next item.
+- Translate only the item's text; never copy the [[id]] marker into the translation.
+- Use precise legal language and the conventions of contracts in the target language, keeping the meaning exactly, including obligations, conditions, deadlines and amounts.
+- Keep numbers, dates, amounts, section numbers and cross-references (e.g. "5.2. pont" → "Clause 5.2") consistent and correct.
+- GLOSSARY: when a glossary is given, translate those defined terms exactly as listed, everywhere, with the same capitalisation.
+- An item that is a name, a number or a title stays a short item in the translation too.${style}`,
+      prompt: `${originalText ? `GLOSSARY (defined terms and their fixed translations):\n${originalText}\n\n` : ""}ITEMS TO TRANSLATE:\n${documentContext}\n\n${instructionBlock}`,
+      responseJsonSchema: TRANSLATE_SCHEMA,
     };
   }
 

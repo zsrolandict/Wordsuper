@@ -122,3 +122,12 @@ test('the represented party is one short line and sets the point of view', () =>
   assert.match(buildPrompt({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', party: 'Vevő' }).systemInstruction, /protect its interests/);
   assert.doesNotMatch(buildPrompt({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '' }).systemInstruction, /REPRESENTS/);
 });
+
+test('translate mode needs the items and answers with one translation per id', () => {
+  assert.ok('error' in parseRequest({ mode: 'translate', instruction: 'Fordítsd', originalText: '', documentContext: '' }));
+  const built = buildPrompt({ mode: 'translate', instruction: 'Fordítsd magyarról angolra', originalText: 'Vevő → Buyer', documentContext: '[[1]] A Vevő fizet.\n[[2]] Zárás.' });
+  assert.match(built.systemInstruction, /every id exactly once/);
+  assert.match(built.prompt, /GLOSSARY[\s\S]*Vevő → Buyer/);
+  assert.match(built.prompt, /\[\[2\]\] Zárás\./);
+  assert.ok(built.responseJsonSchema);
+});

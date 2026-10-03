@@ -25,6 +25,8 @@
 4. **AI-szolgáltató:** feldolgozza a kérést, és folyamatosan visszaküldi a választ.
 5. **Vissza a gépre:** visszacseréljük a helyettesítőket, megmutatjuk a javaslatot, és a felhasználó dönt.
 
+A **Kétnyelvű** fül (fordítás) ugyanezt az utat járja, csak a teljes dokumentumot küldi, kb. 12 000 karakteres részekben, egy futáson belül végig ugyanazokkal a helyettesítőkkel. A kész kétnyelvű dokumentum a gépen áll össze, és egy új, mentetlen Word-ablakban nyílik meg; a szerver nem tárolja.
+
 A munkaablak **„Részletek”** paneljén minden válasznál látszik:
 - pontosan mit kapott az AI (kijelölés vagy részlet, méret, korlátok);
 - mit takartunk ki (táblázat: helyettesítő → eredeti érték);

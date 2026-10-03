@@ -273,6 +273,7 @@ const APPLY_LABELS: Record<Mode, string> = {
   comment: 'Megjegyzés beszúrása',
   review: 'Beszúrás',
   compare: 'Megjegyzések beszúrása',
+  translate: 'Beszúrás',
 };
 
 export default function Proposal({

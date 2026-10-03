@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react';
 import { LOCAL_MODELS, type LocalModel } from './localSpeech';
 import { DEPTH_VALUES, type Depth } from '../shared/aiConfig';
-import { ADDRESSING_VALUES, MODES, TONE_VALUES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
+import { ADDRESSING_VALUES, PRESET_MODES as MODES, TONE_VALUES, type Addressing, type Mode, type StyleProfile, type Tone } from '../shared/aiConfig';
 
 export interface CustomPreset {
   id: string;

@@ -882,9 +882,9 @@ export async function readParagraphs(): Promise<ParagraphInfo[]> {
   return Word.run(context => loadParagraphs(context));
 }
 
-async function loadParagraphs(context: Word.RequestContext, reviewedText = false): Promise<ParagraphInfo[]> {
+async function loadParagraphs(context: Word.RequestContext, reviewedText = false, headings = false): Promise<(ParagraphInfo & { heading?: boolean })[]> {
   const paragraphs = context.document.body.paragraphs;
-  paragraphs.load('items/text,items/isListItem');
+  paragraphs.load(headings ? 'items/text,items/isListItem,items/styleBuiltIn' : 'items/text,items/isListItem');
   await context.sync();
   // The number Word shows ("5.2.") is not part of paragraph.text
   const listItems = paragraphs.items.map(p => (p.isListItem ? p.listItemOrNullObject : null));
@@ -894,7 +894,31 @@ async function loadParagraphs(context: Word.RequestContext, reviewedText = false
   return paragraphs.items.map((p, i) => {
     const item = listItems[i];
     const text = texts ? readable(texts[i].value || '').replace(/\r$/, '') : p.text;
-    return item && !item.isNullObject ? { text, listString: item.listString, listLevel: item.level } : { text };
+    const info: ParagraphInfo & { heading?: boolean } = item && !item.isNullObject ? { text, listString: item.listString, listLevel: item.level } : { text };
+    if (headings && HEADING_STYLE.test(String(p.styleBuiltIn))) info.heading = true;
+    return info;
+  });
+}
+
+/** Word's built-in heading styles (Címsor 1–9, Cím), whatever the language of Word */
+const HEADING_STYLE = /^(Heading\d|Title)$/;
+
+/**
+ * The paragraphs to translate: the text as it reads with the pending tracked changes accepted, Word's automatic
+ * number, and whether it is a heading
+ */
+export async function readParagraphsForTranslation(): Promise<(ParagraphInfo & { heading?: boolean })[]> {
+  return Word.run(context => loadParagraphs(context, true, true));
+}
+
+/** Opening a new document from the add-in needs WordApi 1.3 */
+export const canOpenNewDocument = () => isSupported('1.3');
+
+/** Opens a .docx (base64) as a new, unsaved document in a window of its own; the open document is not touched */
+export async function openNewDocument(base64: string) {
+  await Word.run(async (context) => {
+    context.application.createDocument(base64).open();
+    await context.sync();
   });
 }
 

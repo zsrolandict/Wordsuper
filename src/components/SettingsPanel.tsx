@@ -3,7 +3,7 @@ import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2, Rotat
 import { playSound } from '../services/sound';
 import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
-import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
+import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, PRESET_MODES as MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
 import type { Settings } from '../services/settings';
 import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
 import { MODE_LABELS, modeLabel, presetNeedsInstruction } from './modes';

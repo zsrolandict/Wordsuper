@@ -3,8 +3,10 @@
 /** Modes of the assistant tab */
 export const ASSISTANT_MODES = ['edit', 'comment', 'generate', 'review'] as const;
 export type AssistantMode = typeof ASSISTANT_MODES[number];
-/** Every request mode the server accepts; "compare" comes from the version comparison tab */
-export const MODES = [...ASSISTANT_MODES, 'compare'] as const;
+/** Modes a custom quick button can belong to; "compare" comes from the version comparison tab */
+export const PRESET_MODES = [...ASSISTANT_MODES, 'compare'] as const;
+/** Every request mode the server accepts; "translate" comes from the bilingual tab */
+export const MODES = [...PRESET_MODES, 'translate'] as const;
 export type Mode = typeof MODES[number];
 
 // Our own limits (not the model's: it takes about a million tokens). They keep answers fast and costs

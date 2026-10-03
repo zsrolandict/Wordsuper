@@ -1,6 +1,6 @@
 # Word Writer – rendszerleírás
 
-*Állapot: 2026. szeptember, `phase-1` ág. A dokumentum egy másik AI-val (pl. Gemini) vagy fejlesztővel való egyeztetéshez készült: mit tud a rendszer, hogyan működik, hol vannak a korlátai, és mik a nyitott kérdések.*
+*Állapot: 2026. október, `phase-1` ág. A dokumentum egy másik AI-val (pl. Gemini) vagy fejlesztővel való egyeztetéshez készült: mit tud a rendszer, hogyan működik, hol vannak a korlátai, és mik a nyitott kérdések.*
 
 ## 1. Mi ez és kinek szól
 
@@ -131,7 +131,19 @@ Mindkét esetben:
 - az AI változásonként kockázati értékelést és javaslatot ad, a képviselt fél szemszögéből;
 - ezek megjegyzésként beszúrhatók a megváltozott bekezdésekhez.
 
-### 3.4 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
+### 3.4 Kétnyelvű fül (fordítás két oszlopban)
+
+- A megnyitott dokumentumot bekezdésenként lefordítja (most: magyar ↔ angol), és **új dokumentumba** teszi: fekvő A4, kétoszlopos táblázat, balra az eredeti, jobbra a fordítás. A megnyitott dokumentumhoz nem nyúl.
+- **A két oldal nem csúszhat el:** minden bekezdés egy sor. Az AI bekezdésenként, azonosítóval kapja a szöveget, és minden azonosítóra pontosan egy fordítást kell adnia. Amit kihagy, azt a program egyszer külön újra kéri; ami ezután is hiányzik, ott a jobb oldalon piros „Nem sikerült lefordítani – fordítsd kézzel” áll, a sor sosem üres.
+- Word automatikus számozása („5.2.”) mindkét oldalon megjelenik, a címsorok félkövérek, a fejléc minden oldalon ismétlődik, egy sor nem törik két oldalra.
+- **Egységes szakszavak:** a definiált fogalmakat (a Szerkezet fül elemzőjével) előbb külön lefordítja, és ezt a fogalomtárat a teljes szövegben kötelezően használja (Vevő → Buyer).
+- **Hosszú dokumentum:** kb. 12 000 karakteres részekben fordít, folyamatjelzővel („3/12 rész”) és Leállítás gombbal. Ha egy válasz túl hosszúra nyúlna, a részt kettéosztja; percenkénti kéréskorlátnál fél percet vár. Legfeljebb 400 000 karakter.
+- **Adatvédelem:** ugyanaz a maszkolás, mint máshol; egy futáson belül minden részben ugyanaz az érték ugyanazt a helyettesítőt kapja. A küldés előtti ellenőrzés az első kérésnél jelenik meg. A fordításba a valódi adat kerül vissza; fel nem oldott helyettesítő nem kerülhet a kész dokumentumba (az a sor figyelmeztetést kap).
+- Az el nem fogadott korrektúrákat elfogadott állapotukban fordítja.
+- A kész dokumentum új, mentetlen Word-ablakban nyílik meg (WordApi 1.3); ha ez nem megy, letölthető .docx-ként.
+- Az irányt a program a szöveg alapján kitalálja, egy gombbal megfordítható.
+
+### 3.5 Biztonsági háló: semmi nem vész el, minden látszik, minden visszavonható
 
 - **Részleges elfogadás mindenhol:**
   - Szerkesztésnél a javaslat minden változása kattintható. A kihagyott változásnál az eredeti szöveg marad, és csak a kiválasztottak kerülnek be.
@@ -217,6 +229,7 @@ Mindkét esetben:
 | Háttérszöveg (kontextus) | 200 000 karakter | Hosszabb dokumentumnál: eleje + címsorok + a kijelölés környéke |
 | Átvizsgálás | 400 000 karakter | Ezen túl csak a dokumentum elejét nézi |
 | Összevetés | 200 000 karakter | Változáslista |
+| Kétnyelvű fordítás | 400 000 karakter | Kb. 12 000 karakteres részekben |
 | Észrevételek száma | 15 / átvizsgálás | |
 | Kérések | 20 / perc | A szerver védelme |
 

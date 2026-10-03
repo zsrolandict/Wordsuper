@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Zap, Undo2 } from 'lucide-react';
+import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, fetchServerInfo, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
@@ -44,6 +44,7 @@ import LimitsBar from './LimitsBar';
 import SettingsPanel, { isOtherVersion } from './SettingsPanel';
 import StructurePanel from './StructurePanel';
 import ComparePanel from './ComparePanel';
+import TranslatePanel from './TranslatePanel';
 import DictationButton from './DictationButton';
 import Logo from './Logo';
 import PartyBar from './PartyBar';
@@ -109,11 +110,14 @@ const WELCOME_MESSAGE: Message = {
 
 const ALTERNATIVE_INSTRUCTION = 'Kérek egy másik változatot.';
 
-type Tab = 'assistant' | 'structure' | 'compare';
+type Tab = 'assistant' | 'structure' | 'compare' | 'translate';
+// The icons give way first when the pane is narrow, so every label stays readable
+const TAB_ICON = 'w-3.5 h-3.5 mr-1 shrink-0 hidden min-[440px]:block';
 const TABS: { id: Tab; label: string; icon: React.ReactNode }[] = [
-  { id: 'assistant', label: 'Asszisztens', icon: <MessageSquare className="w-3.5 h-3.5 mr-1" /> },
-  { id: 'structure', label: 'Szerkezet', icon: <ListTree className="w-3.5 h-3.5 mr-1" /> },
-  { id: 'compare', label: 'Összevetés', icon: <GitCompare className="w-3.5 h-3.5 mr-1" /> },
+  { id: 'assistant', label: 'Asszisztens', icon: <MessageSquare className={TAB_ICON} /> },
+  { id: 'structure', label: 'Szerkezet', icon: <ListTree className={TAB_ICON} /> },
+  { id: 'compare', label: 'Összevetés', icon: <GitCompare className={TAB_ICON} /> },
+  { id: 'translate', label: 'Kétnyelvű', icon: <Languages className={TAB_ICON} /> },
 ];
 
 /**
@@ -240,7 +244,7 @@ export default function TaskPane() {
    * Masks a request and, when the settings ask for it, shows what the AI will get before it is sent. The user may
    * name one more thing to hide: it joins the "always hide" list and the request is masked again. null: cancelled.
    */
-  const prepareSend = async (request: AIRequestBody, masker: Masker | null): Promise<{ sent: AIRequestBody; masker: Masker | null } | null> => {
+  const prepareSend = async (request: AIRequestBody, masker: Masker | null, reserve: string[] = []): Promise<{ sent: AIRequestBody; masker: Masker | null } | null> => {
     let current = masker;
     let extraTerms = parseExtraTerms(settings.masking.extraTerms);
     for (;;) {
@@ -253,6 +257,8 @@ export default function TaskPane() {
       extraTerms = [...extraTerms, decision.term];
       updateSettings(s => ({ ...s, masking: { ...s.masking, extraTerms: [s.masking.extraTerms.trim(), decision.term].filter(Boolean).join('\n') } }));
       current = new Masker(extraTerms, parseExtraTerms(settings.masking.neverHide));
+      // Text that will go out later in the same run (the other parts of a translation) is reserved again
+      current.reserve(reserve);
     }
   };
 
@@ -1038,7 +1044,7 @@ export default function TaskPane() {
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 flex items-center justify-center py-2 text-xs font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'}`}
+            className={`flex-1 min-w-0 flex items-center justify-center px-0.5 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'}`}
           >
             {t.icon}{t.label}
           </button>
@@ -1052,7 +1058,7 @@ export default function TaskPane() {
         </div>
       )}
 
-      {tab !== 'structure' && <PartyBar party={party} onChange={setParty} />}
+      {(tab === 'assistant' || tab === 'compare') && <PartyBar party={party} onChange={setParty} />}
 
       <div className={tab === 'structure' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
         <StructurePanel active={tab === 'structure'} busy={isBusy} documentVersion={documentVersion} onRequest={runStructureRequest} />
@@ -1065,6 +1071,16 @@ export default function TaskPane() {
           onRateLimit={setRateLimit}
           onOpenSettings={() => setView('settings')}
           onNeverHide={value => updateSettings(s => ({ ...s, masking: { ...s.masking, neverHide: [s.masking.neverHide.trim(), value].filter(Boolean).join('\n') } }))}
+        />
+      </div>
+
+      <div className={tab === 'translate' ? 'flex-1 min-h-0 flex flex-col' : 'hidden'}>
+        <TranslatePanel
+          active={tab === 'translate'}
+          settings={settings}
+          prepareSend={prepareSend}
+          onRateLimit={setRateLimit}
+          onOpenSettings={() => setView('settings')}
         />
       </div>
 
