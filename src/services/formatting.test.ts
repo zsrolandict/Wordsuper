@@ -88,7 +88,7 @@ test('categories switched off change nothing of theirs', () => {
 });
 
 test('the ready-made styles: a Garamond classic, and all of them usable', () => {
-  assert.deepEqual(STYLE_PRESETS.map(p => p.id), ['classic', 'modern', 'compact']);
+  assert.deepEqual(STYLE_PRESETS.map(p => p.id), ['classic', 'modern', 'compact', 'premium', 'legal']);
   assert.equal(STYLE_PRESETS[0].profile.font, 'Garamond');
   for (const preset of STYLE_PRESETS) {
     assert.ok(preset.profile.headingSize > preset.profile.bodySize && preset.profile.footnoteSize < preset.profile.bodySize, preset.id);

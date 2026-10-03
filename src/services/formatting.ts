@@ -292,4 +292,16 @@ export const STYLE_PRESETS: StylePreset[] = [
     description: 'Arial 10 pt, sorkizárt, szűk térközök: hosszú szerződéshez, kevesebb oldal',
     profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, alignment: 'Justified' },
   },
+  {
+    id: 'premium',
+    name: 'Prémium',
+    description: 'Cambria 11 pt, balra zárt, bőséges térközök és sorköz: tanácsadói jelentések, ajánlatok',
+    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, alignment: 'Left' },
+  },
+  {
+    id: 'legal',
+    name: 'Jogi (angolszász)',
+    description: 'Times New Roman 11 pt, sorkizárt, szűk, egyenletes térközök: nemzetközi szerződések',
+    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, alignment: 'Justified' },
+  },
 ];

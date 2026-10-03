@@ -147,6 +147,7 @@ Mindkét esetben:
 
 - **Átvilágítás:** betűtípusok és -méretek (hány bekezdésben melyik), térközök, címsorok szintenként, stílus nélküli „ál-címek” (rövid, félkövér vagy csupa nagybetűs sor záró írásjel nélkül), lábjegyzetek mérete, többszörös üres sorok, dupla szóközök.
 - **Címsor-kérdés:** ha több címsorszint van (az ál-címek egy további szintnek számítanak), megkérdezi: tudatosan külön szintek-e (a magasabb szint nagyobb), vagy valójában mind egy szint (mind egyforma). Válasz nélkül nem lehet egységesíteni. A számozás és a tartalomjegyzék szintjei mindkét esetben maradnak: csak a megjelenés változik, a stílus nem.
+- **Kész stílusok:** Klasszikus (Garamond), Modern, Kompakt, Prémium (Cambria), Jogi (angolszász, Times New Roman), plusz „Ebből a dokumentumból”.
 - **Egységes stílus:** betűtípus, szövegméret, címsorméret, lábjegyzetméret, bekezdés utáni és címsor előtti térköz, igazítás (sorkizárt / balra zárt). Alapérték a dokumentum leggyakoribb beállítása; a „mint a kijelölt” gombbal egy jól formázott bekezdésről vagy címről is átvehető.
 - **Kategóriánként kapcsolható**, darabszámmal: betűtípus, betűméret, címsorok, lábjegyzetek, térközök, igazítás. A középre és jobbra igazított bekezdéshez (cím, keltezés, aláírás) nem nyúl; táblázatban csak a betűtípust és a méretet állítja. A félkövér, dőlt és aláhúzott kiemelések megmaradnak.
 - **Szöveget módosító lehetőségek** (alapból kikapcsolva): többszörös üres sorok törlése (egy marad; képet tartalmazó bekezdés nem), dupla szóközök cseréje. Ezek a szokásos korrektúraszabály szerint kerülnek be.
