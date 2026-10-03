@@ -182,6 +182,18 @@ const WHOLE_DOCUMENT_EDIT = `
 - Nothing was selected, so the text to modify is the WHOLE DOCUMENT. Return the whole document with the requested change: copy every paragraph you do not need to change exactly as it is, character for character, in the same order.
 - Put new material where it belongs (e.g. a signature block with place and date at the end, a new clause after the related one) as separate paragraphs.`;
 
+/** An edit changes wording, not substance: what a lawyer would never want lost in a style rewrite */
+const KEEP_SUBSTANCE = `
+- Change only what the instruction asks for. A style instruction (more formal, simpler, shorter) changes the wording, never the substance: keep every legal reference (act, section, paragraph, e.g. "a Ptk. 6:186. §-a szerint"), amount, percentage, date, deadline, name, defined term, cross-reference and number exactly, unless the instruction explicitly asks to change it.`;
+
+/** The explanation of a whole-document edit: a summary, then one reason per changed paragraph (shown under it) */
+const WHOLE_DOCUMENT_EXPLANATION = (marker: string) => `
+- After the modified text, add a line containing only ${marker}. Then, in the language of the user's instruction:
+  1. A summary of 3-6 sentences: what kind of changes you made across the document and why, and what you deliberately left unchanged.
+  2. Then one line for EVERY paragraph you changed, added or removed, in document order, in exactly this form:
+     >> first 5-10 words of the paragraph, copied verbatim from your modified text (for a removed paragraph, from the original) :: one sentence on why this paragraph was changed
+  Nothing else after it.`;
+
 const MASKING_NOTE = `\n\nPLACEHOLDERS: some names and identifiers were replaced with placeholders such as [CÉG_1], [SZEMÉLY_2] or [CÍM_1] before the text reached you.
 - Keep every placeholder exactly as written (same brackets, same word, same number) wherever that entity appears in your answer, including quotes.
 - Never guess or invent the real values behind them.`;
@@ -353,8 +365,8 @@ RULES:
 - Do NOT wrap the text in quotes, markdown blocks, or add any conversational filler (e.g. "Here is the text:").
 - Do NOT use markdown formatting (no **bold**, no # headings).
 - Keep the paragraph structure: return one paragraph per original paragraph, separated by line breaks, unless the instruction requires otherwise.
-- Ensure the tone and content align with the DOCUMENT CONTEXT if provided.${whole ? WHOLE_DOCUMENT_EDIT : ""}
-- After the modified text, add a line containing only ${EXPLANATION_MARKER}, then 1-3 short sentences in the language of the user's instruction explaining why the changes were needed (it may become a Word comment next to them; with several changes, one short point each). Nothing else after it.${CLARIFY_RULE}${style}`,
+- Ensure the tone and content align with the DOCUMENT CONTEXT if provided.${KEEP_SUBSTANCE}${whole ? WHOLE_DOCUMENT_EDIT : ""}${whole ? WHOLE_DOCUMENT_EXPLANATION(EXPLANATION_MARKER) : `
+- After the modified text, add a line containing only ${EXPLANATION_MARKER}, then 1-3 short sentences in the language of the user's instruction explaining why the changes were needed (it may become a Word comment next to them; with several changes, one short point each). Nothing else after it.`}${CLARIFY_RULE}${style}`,
     prompt: `${contextBlock("for your reference only to understand the surrounding context. DO NOT output this, only use it to make better decisions for the selection")}ORIGINAL TEXT TO MODIFY (You must rewrite ONLY this part):\n${originalText}\n\n${historyBlock(history)}${instructionBlock}`,
   };
 }

@@ -31,7 +31,7 @@ import {
   type WriteMode,
 } from '../services/wordDocument';
 import { parseFindings } from '../services/review';
-import { applyChosenHunks, composeDocument, planDocumentEdits } from '../services/documentEdit';
+import { applyChosenHunks, composeDocument, parseParagraphReasons, planDocumentEdits } from '../services/documentEdit';
 import { alternativeReviewInstruction, newIssues, recheckInstruction, type StructureRequest } from '../services/structureSuggestions';
 import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, maskRequest, parseExtraTerms, unresolvedMessage, unresolvedPlaceholders } from '../services/masking';
@@ -741,7 +741,8 @@ export default function TaskPane() {
   const applyProposal = async (messageId: string, findingViews?: FindingView[], addExplanation = false) => {
     const current = pendingRef.current;
     if (!current || current.messageId !== messageId) return;
-    const explanation = addExplanation ? current.explanation : '';
+    // A whole-document edit's comment is its summary; the reasons per paragraph are for the pane
+    const explanation = !addExplanation ? '' : current.snapshot.wholeDocument ? parseParagraphReasons(current.explanation).summary : current.explanation;
     updateMessage(messageId, m => ({ ...m, proposal: m.proposal && { ...m.proposal, state: 'applying' } }));
 
     // Remembers what gets inserted, so "Visszavonom" can take it back
@@ -1258,6 +1259,7 @@ export default function TaskPane() {
                   busy={isBusy}
                   wholeDocument={!!msg.details.wholeDocument}
                   excluded={msg.proposal.excluded}
+                  onSetExcluded={ids => updateMessage(msg.id, m => ({ ...m, proposal: m.proposal && { ...m.proposal, excluded: ids } }))}
                   onToggleChange={id => updateMessage(msg.id, m => ({
                     ...m,
                     proposal: m.proposal && {

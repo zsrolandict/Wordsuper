@@ -110,6 +110,6 @@ mehetnek a jogtárhoz, a dokumentum szövege nem.
 | 3 új minta-playbook (NDA, vállalkozási szerződés, üzlethelyiség-bérlet) | **kész** |
 | Fordítás: csak a kijelölt bekezdés(ek); a kétnyelvű táblázatban a kijelölt sor jobb oldalába írja | **kész** |
 | Fordítás: nincs „Magyar / English” fejléc és cím a kétnyelvű dokumentumban | **kész** (a korábbi, fejléces fájlok is beolvashatók) |
-| Egész dokumentum szerkesztése: indoklás bekezdésenként (lenyitható), „Mindet elfogadom”, hivatkozások megtartása | folyamatban |
+| Egész dokumentum szerkesztése: indoklás bekezdésenként (lenyitható „Miért?”), összegzés, „Mindet elfogadom” felül is, Mind / Egyik sem; a stílusutasítás nem nyúlhat jogszabályhelyhez, összeghez, dátumhoz, névhez | **kész** |
 | Jogszabály-hivatkozások egységesítése: első helyen teljes cím „(a továbbiakban: Ptk.)”, utána rövidítés | tervezve |
 | Súgó-asszisztens: kérdezni lehet, mit hol talál a bővítményben | tervezve |

@@ -142,3 +142,43 @@ export function composeDocument(oldParagraphs: string[], ops: DocumentEditOp[], 
   });
   return out.join('\n');
 }
+
+/** A whole-document edit's explanation: a line ">> first words of the paragraph :: why" per changed paragraph */
+export const REASON_LINE = /^\s*>>\s*(.+?)\s*::\s*(.+?)\s*$/;
+
+export interface ParagraphReason {
+  /** The first words of the paragraph as the AI quoted them (new text; for a removed paragraph, the old one) */
+  quote: string;
+  reason: string;
+}
+
+/** Splits the explanation into the summary for the whole edit and the reasons per paragraph */
+export function parseParagraphReasons(explanation: string): { summary: string; reasons: ParagraphReason[] } {
+  const reasons: ParagraphReason[] = [];
+  const summary: string[] = [];
+  for (const line of explanation.split('\n')) {
+    const m = REASON_LINE.exec(line);
+    if (m) reasons.push({ quote: m[1].replace(/^[„"“']+|[”"'…]+$/g, '').trim(), reason: m[2] });
+    else summary.push(line);
+  }
+  return { summary: summary.join('\n').trim(), reasons };
+}
+
+const comparable = (text: string) => normalize(text).toLocaleLowerCase('hu').replace(/[„”"“'’]/g, '');
+
+/**
+ * The reason that belongs to a change: the one whose quote is found in its new text (or, for a removed paragraph,
+ * in the old one). Each reason is used once, in order; a change without one shows none.
+ */
+export function reasonsForOps(ops: DocumentEditOp[], oldParagraphs: string[], reasons: ParagraphReason[]): (string | undefined)[] {
+  const used = new Set<number>();
+  const quotes = reasons.map(r => comparable(r.quote));
+  return ops.map(op => {
+    const texts = op.type === 'edit' ? [op.newText, oldParagraphs[op.paragraph]] : op.type === 'delete' ? [oldParagraphs[op.paragraph]] : op.texts;
+    const haystacks = texts.map(comparable);
+    const at = quotes.findIndex((quote, i) => !used.has(i) && quote.length >= 3 && haystacks.some(h => h.includes(quote)));
+    if (at === -1) return undefined;
+    used.add(at);
+    return reasons[at].reason;
+  });
+}

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyChosenHunks, composeDocument, editHunks, planDocumentEdits, summarizeDocumentEdits } from './documentEdit';
+import { applyChosenHunks, composeDocument, editHunks, parseParagraphReasons, planDocumentEdits, reasonsForOps, summarizeDocumentEdits } from './documentEdit';
 
 const doc = ['Adásvételi szerződés', '', '1. Az Eladó eladja a Vevőnek az ingatlant.', '2. A vételár 45 000 000 Ft.', 'Kelt: Budapest'];
 
@@ -54,4 +54,18 @@ test('a whole-document edit can be taken in part', () => {
   assert.equal(ops.length, 2);
   assert.equal(composeDocument(doc, ops, new Set([1])), 'Cím\nElső.\nMásodik mondat, pontosítva.\nHarmadik.');
   assert.deepEqual(planDocumentEdits(doc, composeDocument(doc, ops, new Set([0]))), [ops[1]]);
+});
+
+test('whole-document reasons: a summary, and one reason per changed paragraph found by its first words', () => {
+  const explanation = 'A szöveget hivatalosabbá tettem.\nA hivatkozásokat megtartottam.\n>> A Vevő a vételárat :: „fizeti” helyett „köteles megfizetni”: kötelezettséget fejez ki.\n>> „Új záró rendelkezés” :: A hivatalos szerződésekben szokásos zárás.\n>> Régi felesleges mondat :: Ismétlés volt.\n>> nem létező mondat :: ez nem tartozik semmihez';
+  const { summary, reasons } = parseParagraphReasons(explanation);
+  assert.equal(summary, 'A szöveget hivatalosabbá tettem.\nA hivatkozásokat megtartottam.');
+  assert.equal(reasons.length, 4);
+  const old = ['A Vevő a vételárat fizeti.', 'Régi felesleges mondat.', 'Zárás.'];
+  const ops = planDocumentEdits(old, 'A Vevő a vételárat köteles megfizetni.\nZárás.\nÚj záró rendelkezés.');
+  const matched = reasonsForOps(ops, old, reasons);
+  assert.deepEqual(ops.map(o => o.type), ['edit', 'delete', 'insert']);
+  assert.match(matched[0]!, /kötelezettséget/);
+  assert.equal(matched[1], 'Ismétlés volt.');
+  assert.match(matched[2]!, /szokásos zárás/);
 });

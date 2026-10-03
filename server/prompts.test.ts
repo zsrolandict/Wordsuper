@@ -78,6 +78,12 @@ test('Word paragraph marks reach the model as line breaks', () => {
 test('without a selection the whole document is edited or commented', () => {
   const edit = buildPrompt({ mode: 'edit', instruction: 'Aláírósor', originalText: 'Szerződés', documentContext: '', wholeDocument: true });
   assert.match(edit.systemInstruction, /WHOLE DOCUMENT/);
+  assert.match(edit.systemInstruction, />> first 5-10 words of the paragraph/, 'a reason per changed paragraph');
+  assert.match(edit.systemInstruction, /keep every legal reference/);
+  const selection = buildPrompt({ mode: 'edit', instruction: 'Hivatalosabban', originalText: 'A Ptk. 6:186. §-a szerint', documentContext: '' });
+  assert.match(selection.systemInstruction, /keep every legal reference/);
+  assert.match(selection.systemInstruction, /1-3 short sentences/);
+  assert.doesNotMatch(selection.systemInstruction, />> first/);
   const comment = buildPrompt({ mode: 'comment', instruction: 'Kockázatok', originalText: 'Szerződés', documentContext: '', wholeDocument: true });
   assert.ok(comment.prompt.includes('WHOLE DOCUMENT TO ANALYZE:\nSzerződés'));
   const parsed = parseRequest({ mode: 'edit', instruction: 'x', originalText: 'y', documentContext: '', wholeDocument: true });

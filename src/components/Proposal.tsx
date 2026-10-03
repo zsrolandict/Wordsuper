@@ -4,7 +4,7 @@ import { unresolvedMessage } from '../services/masking';
 import type { Mode, ReviewFinding } from '../shared/aiConfig';
 import { diffForDisplay } from '../services/textDiff';
 import { SEVERITY_LABELS, cleanQuote } from '../services/review';
-import { editHunks, planDocumentEdits } from '../services/documentEdit';
+import { editHunks, parseParagraphReasons, planDocumentEdits, reasonsForOps, type ParagraphReason } from '../services/documentEdit';
 
 export type ProposalState = 'pending' | 'applying' | 'applied' | 'rejected' | 'superseded';
 
@@ -118,17 +118,31 @@ function SelectableDiff({ original, proposal, excluded, onToggle }: { original: 
 }
 
 /** A rewrite of the whole document: only the paragraphs that change, new or go, not the whole text */
-function DocumentChangesView({ original, proposal, onShowParagraph, excluded = [], onToggle }: {
+function DocumentChangesView({ original, proposal, onShowParagraph, excluded = [], onToggle, onSetExcluded, reasons = [], applyButton }: {
   original: string;
   proposal: string;
   onShowParagraph?: (index: number) => void;
   /** Indexes of the changes left out */
   excluded?: number[];
   onToggle?: (index: number) => void;
+  /** Ticks every change (empty list) or none (every index) at once */
+  onSetExcluded?: (indexes: number[]) => void;
+  /** The AI's reason per changed paragraph, shown under it when opened */
+  reasons?: ParagraphReason[];
+  /** The accept button again on top, so a long list needs no scrolling */
+  applyButton?: React.ReactNode;
 }) {
   const oldParagraphs = useMemo(() => original.split('\n'), [original]);
   const ops = useMemo(() => planDocumentEdits(oldParagraphs, proposal), [oldParagraphs, proposal]);
+  const opReasons = useMemo(() => reasonsForOps(ops, oldParagraphs, reasons), [ops, oldParagraphs, reasons]);
   if (!ops.length) return <span className="text-xs text-neutral-500">Nincs változás a dokumentumhoz képest.</span>;
+  const chosen = ops.length - excluded.filter(i => i < ops.length).length;
+  const why = (i: number) => opReasons[i] && (
+    <details className="mt-0.5 text-[11px] text-amber-900">
+      <summary className="cursor-pointer select-none text-amber-800 hover:text-amber-950">Miért?</summary>
+      <p className="mt-0.5 bg-amber-50 border border-amber-200 rounded px-1.5 py-1 text-neutral-700">{opReasons[i]}</p>
+    </details>
+  );
   // A heading per change, with a jump to the paragraph in the document
   const label = (text: string, paragraph: number, i: number) => (
     <span className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-wide text-neutral-400 mb-0.5">
@@ -147,17 +161,26 @@ function DocumentChangesView({ original, proposal, onShowParagraph, excluded = [
   );
   return (
     <div className="space-y-2">
-      <p className="text-xs text-neutral-500">Csak a változó részeket mutatom, a dokumentum többi része érintetlen marad.</p>
+      <p className="text-xs text-neutral-500">Csak a változó részeket mutatom, a dokumentum többi része érintetlen marad.{opReasons.some(Boolean) ? ' A „Miért?” alatt látod, miért módosult az adott bekezdés.' : ''}</p>
+      {onSetExcluded && ops.length > 1 && (
+        <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 bg-white/95 border border-neutral-200 rounded-lg px-2 py-1.5 text-[11px]">
+          <span className="text-neutral-600">{chosen}/{ops.length} változás kiválasztva</span>
+          <button onClick={() => onSetExcluded([])} disabled={chosen === ops.length} className="font-medium text-blue-700 hover:text-blue-900 disabled:opacity-40">Mind</button>
+          <button onClick={() => onSetExcluded(ops.map((_, i) => i))} disabled={chosen === 0} className="font-medium text-blue-700 hover:text-blue-900 disabled:opacity-40">Egyik sem</button>
+          <span className="ml-auto">{applyButton}</span>
+        </div>
+      )}
       {ops.map((op, i) => (
         <div key={i} className={`border-l-2 border-neutral-200 pl-2 ${excluded.includes(i) ? 'opacity-40' : ''}`}>
           {op.type === 'edit' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – módosul`, op.paragraph, i)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} /></>
+            <>{label(`${op.paragraph + 1}. bekezdés – módosul`, op.paragraph, i)}<DiffView original={oldParagraphs[op.paragraph]} proposal={op.newText} />{why(i)}</>
           ) : op.type === 'delete' ? (
-            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`, op.paragraph, i)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del></>
+            <>{label(`${op.paragraph + 1}. bekezdés – törlődik`, op.paragraph, i)}<del className="bg-red-50 text-red-700 whitespace-pre-wrap">{oldParagraphs[op.paragraph]}</del>{why(i)}</>
           ) : (
             <>
               {label(op.after === -1 ? 'Új bekezdés a dokumentum elején' : `Új bekezdés a(z) ${op.after + 1}. után`, Math.max(op.after, 0), i)}
               {op.texts.map((text, k) => <ins key={k} className="block no-underline bg-green-50 text-green-800 whitespace-pre-wrap">{text}</ins>)}
+              {why(i)}
             </>
           )}
         </div>
@@ -295,6 +318,7 @@ export default function Proposal({
   onShowParagraph,
   excluded = [],
   onToggleChange,
+  onSetExcluded,
   explanation,
   addExplanation,
   onToggleExplanation,
@@ -320,6 +344,8 @@ export default function Proposal({
   /** Edit: the changes left out (word-level places, or paragraphs of a whole-document edit) */
   excluded?: number[];
   onToggleChange?: (id: number) => void;
+  /** Whole-document edit: every change ticked (empty list) or none */
+  onSetExcluded?: (ids: number[]) => void;
   explanation?: string;
   addExplanation?: boolean;
   onToggleExplanation?: () => void;
@@ -341,6 +367,17 @@ export default function Proposal({
   const commentCount = open.filter(f => f.selected).length;
   const fixCount = open.filter(f => f.fix && f.suggestion).length;
   const hasSuggestions = findings?.some(f => f.suggestion) ?? false;
+  // A whole-document edit explains each changed paragraph under it; the box below keeps the summary
+  const { summary, reasons } = useMemo(
+    () => (wholeDocument && explanation ? parseParagraphReasons(explanation) : { summary: explanation ?? '', reasons: [] as ParagraphReason[] }),
+    [wholeDocument, explanation]
+  );
+  const applyDisabled = busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0) || allLeftOut || !!blocked?.length;
+  const applyLabel = mode === 'review'
+    ? `${findings && open.length < findings.length ? 'A többi kijelölt' : 'Az összes kijelölt'} beszúrása (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
+    : mode === 'edit' && wholeDocument && changeCount > 1
+    ? (excluded.length ? `Elfogadom a kiválasztottakat (${changeCount - excluded.length})` : `Mindet elfogadom (${changeCount})`)
+    : excluded.length && mode === 'edit' ? 'Elfogadom a kiválasztottakat' : APPLY_LABELS[mode];
 
   return (
     <div>
@@ -381,12 +418,25 @@ export default function Proposal({
           {!showChanges
             ? <span className="whitespace-pre-wrap">{text}</span>
             : wholeDocument
-            ? <DocumentChangesView original={originalText} proposal={text} onShowParagraph={onShowParagraph} excluded={excluded} onToggle={state === 'pending' ? onToggleChange : undefined} />
+            ? <DocumentChangesView
+                original={originalText}
+                proposal={text}
+                onShowParagraph={onShowParagraph}
+                excluded={excluded}
+                onToggle={state === 'pending' ? onToggleChange : undefined}
+                onSetExcluded={state === 'pending' ? onSetExcluded : undefined}
+                reasons={reasons}
+                applyButton={isOpen && (
+                  <button onClick={onApply} disabled={applyDisabled} className="flex items-center px-2 py-1 font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-md">
+                    <Check className="w-3 h-3 mr-1" />{applyLabel}
+                  </button>
+                )}
+              />
             : <SelectableDiff original={originalText} proposal={text} excluded={excluded} onToggle={state === 'pending' ? onToggleChange : undefined} />}
-          {explanation && (
+          {summary && (
             <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md p-2">
-              <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />Miért?</p>
-              <p className="whitespace-pre-wrap text-neutral-700">{explanation}</p>
+              <p className="flex items-center font-semibold text-amber-900 mb-0.5"><Lightbulb className="w-3.5 h-3.5 mr-1" />{wholeDocument ? 'Miért? – összegzés' : 'Miért?'}</p>
+              <p className="whitespace-pre-wrap text-neutral-700">{summary}</p>
               {state === 'pending' && onToggleExplanation && (
                 <label className="flex items-center mt-1.5 cursor-pointer text-neutral-700">
                   <input type="checkbox" checked={!!addExplanation} onChange={onToggleExplanation} className="mr-1" />
@@ -417,13 +467,11 @@ export default function Proposal({
           <div className="flex flex-wrap gap-2">
             <button
               onClick={onApply}
-              disabled={busy || state === 'applying' || (mode === 'review' && commentCount + fixCount === 0) || allLeftOut || !!blocked?.length}
+              disabled={applyDisabled}
               className="flex items-center px-3 py-1.5 text-xs font-medium bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg transition-colors"
             >
               {state === 'applying' ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1" />}
-              {mode === 'review'
-                ? `${findings && open.length < findings.length ? 'A többi kijelölt' : 'Az összes kijelölt'} beszúrása (${[commentCount && `${commentCount} megjegyzés`, fixCount && `${fixCount} javítás`].filter(Boolean).join(', ') || '0'})`
-                : excluded.length && mode === 'edit' ? 'Elfogadom a kiválasztottakat' : APPLY_LABELS[mode]}
+              {applyLabel}
             </button>
             {onShow && (
               <button
