@@ -328,6 +328,22 @@ export async function fetchOfficeStyles(accessKey: string): Promise<{ styles: un
   }
 }
 
+export interface ClauseItem { id: string; title: string; category: string; text: string }
+export interface ClauseLibrary { clauses: ClauseItem[]; source: 'sharepoint' | 'folder' | 'none'; problem?: string }
+
+/** The firm's model clauses (SharePoint or a folder); opening the library may ask the user to sign in */
+export async function fetchClauses(accessKey: string): Promise<ClauseLibrary | null> {
+  try {
+    const response = await fetch('/api/clauses', { headers: await requestHeaders(accessKey) });
+    if (!response.ok) return null;
+    const data = await response.json();
+    const clauses = Array.isArray(data?.clauses) ? data.clauses.filter((c: ClauseItem) => c && typeof c.title === 'string' && typeof c.text === 'string') : [];
+    return { clauses, source: data?.source === 'sharepoint' || data?.source === 'folder' ? data.source : 'none', ...(typeof data?.problem === 'string' ? { problem: data.problem } : {}) };
+  } catch {
+    return null;
+  }
+}
+
 /** The firm's playbooks from the server (PLAYBOOKS_FILE), unchecked; null when unreachable */
 export async function fetchOfficePlaybooks(accessKey: string): Promise<unknown[] | null> {
   try {

@@ -86,6 +86,14 @@ if secret_exists playbooks; then
   STYLES_ENV="$STYLES_ENV@PLAYBOOKS_FILE=/secrets/playbooks.json"
 fi
 
+# A SharePoint-záradéktár: a mappa címe (CLAUSES_SHAREPOINT_URL) és az alkalmazás titka (ms-client-secret titok)
+if [ -n "${CLAUSES_SHAREPOINT_URL:-}" ]; then
+  secret_exists ms-client-secret || { echo "A SharePoint-záradéktárhoz előbb tedd el az alkalmazás titkát: read -rs K && printf %s \"\$K\" | gcloud secrets create ms-client-secret --data-file=- --replication-policy=user-managed --locations=$REGION"; exit 1; }
+  grant_secret ms-client-secret
+  SECRETS="$SECRETS,MS_CLIENT_SECRET=ms-client-secret:latest"
+  STYLES_ENV="$STYLES_ENV@CLAUSES_SHAREPOINT_URL=$CLAUSES_SHAREPOINT_URL"
+fi
+
 step "Beállítások"
 # A @ az elválasztó (^@^), mert a domainlistában vessző lehet
 ENV_VARS="^@^AI_PROVIDER=$AI_PROVIDER@AUTH_MODE=$AUTH_MODE$STYLES_ENV"

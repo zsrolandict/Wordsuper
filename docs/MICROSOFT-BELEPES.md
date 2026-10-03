@@ -77,6 +77,20 @@ kell megjelennie: „✅ Bejelentkezve: Név (email)”. Ha nem jelenik meg, nyo
 Ha mindenkinél működik, állítsd át: `AUTH_MODE=microsoft`. Ettől kezdve a szerver nem fogad el kulcsot, az
 `APP_ACCESS_KEY` törölhető.
 
+## Záradéktár a SharePointból (nem kötelező)
+
+A Generálás mód záradéktára közvetlenül egy SharePoint-mappából is olvashat. Ilyenkor mindenki a saját jogaival olvas:
+csak azt a záradékot látja, amit a SharePointban is megnyithat. Ehhez a fenti regisztrációban még:
+
+1. **Certificates & secrets → New client secret.** Az értékét tedd a szerverre `MS_CLIENT_SECRET` néven (felhőben
+   titokként). Lejáratkor újat kell készíteni.
+2. **API permissions → Microsoft Graph → Delegated → `Files.Read.All`**, majd újra **Grant admin consent**.
+3. `.env`: `CLAUSES_SHAREPOINT_URL` = a mappa címe a böngészőből (pl.
+   `https://iroda.sharepoint.com/sites/Jog/Shared Documents/Zaradektar`).
+
+A mappában minden .docx egy záradék: a fájlneve a címe, az almappa a kategóriája. Helyi futtatásnál ennél egyszerűbb a
+OneDrive-val szinkronizált mappa (`CLAUSES_DIR`), ehhez nem kell Azure-beállítás.
+
 ## Hibakeresés
 
 | Amit a munkaablak ír | Ok | Teendő |

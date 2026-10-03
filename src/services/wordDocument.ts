@@ -721,6 +721,31 @@ export async function insertGenerated(range: Word.Range, text: string, undo?: Un
   });
 }
 
+/** A model clause at the cursor, as its own paragraph(s), by the usual Track Changes rule */
+export async function insertTextAtCursor(text: string): Promise<WriteMode> {
+  return Word.run(async (context) => {
+    const range = context.document.getSelection();
+    range.load('text');
+    const paragraph = range.paragraphs.getFirst();
+    paragraph.load('text');
+    const before = paragraph.getRange('Start').expandTo(range.getRange('Start'));
+    before.load('text');
+    await context.sync();
+    let insert = text;
+    // In the middle of nothing, a new paragraph: not glued to the text before or after the cursor
+    if (!range.text && paragraph.text.trim()) {
+      const offset = before.text.length;
+      if (offset === 0) insert = `${text}\n`;
+      else if (offset >= paragraph.text.length) insert = `\n${text}`;
+    }
+    const { write } = await withTrackChanges(context, async () => {
+      range.insertText(insert, 'Replace').select();
+      await context.sync();
+    });
+    return write;
+  });
+}
+
 export async function insertCommentAt(range: Word.Range, text: string, undo?: UndoRecord) {
   await Word.run(range, async (context) => {
     range.insertComment(text);

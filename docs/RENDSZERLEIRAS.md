@@ -65,6 +65,8 @@ Szerver (Node.js + Express)
 
 **Többágensű átvizsgálás** (kapcsolható, alapból ki): öt szakértő párhuzamosan, majd egy összegzés egy listába; kb. 5–7-szeres tokenköltség. Részletek: [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md).
 
+**Záradéktár** (Generálás mód): az iroda mintazáradékai egy mappából vagy SharePointból; beszúrás szó szerint (korrektúrával) vagy AI-os illesztés a szerződés fogalmaihoz. Részletek: [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md).
+
 **Gyorsgombok:**
 - Beépített gyorsgombok minden módhoz. Átvizsgálásnál például: Kockázatok és hiányosságok, Ellentmondások keresése, **Jogszabályi hivatkozások**, **Kereszthivatkozások és számozás**, Helyesírás és stílus.
 - A két új gomb egy-egy részletes utasítást küld. A jogszabályinál: létezik-e a hely, jó helyre mutat-e, oda illik-e, hatályos-e; bizonytalanság esetén jelezze, hogy a njt.hu-n ellenőrizni kell.

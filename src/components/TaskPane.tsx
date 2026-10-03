@@ -10,6 +10,7 @@ import {
   applyReviewFindings,
   insertCommentAt,
   insertGenerated,
+  insertTextAtCursor,
   placeAtParagraph,
   readParagraphs,
   readDocumentLength,
@@ -47,6 +48,7 @@ import PlaybookBar from './PlaybookBar';
 import PlaybookPanel from './PlaybookPanel';
 import PlaybookSummary from './PlaybookSummary';
 import CopyButton from './CopyButton';
+import ClausePanel, { fitInstruction } from './ClausePanel';
 import { coverLetterChanges, parsePlaybookChecks, playbookFindings, type PlaybookCheck } from '../services/playbook';
 import type { Playbook } from '../shared/playbook';
 import StructurePanel from './StructurePanel';
@@ -201,7 +203,7 @@ export default function TaskPane() {
   const [isSending, setIsSending] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [mode, setMode] = useState<Mode>('edit');
-  const [view, setView] = useState<'chat' | 'settings' | 'playbooks'>('chat');
+  const [view, setView] = useState<'chat' | 'settings' | 'playbooks' | 'clauses'>('chat');
   // Bumped when the playbooks were edited, so the selector reloads them
   const [playbookVersion, setPlaybookVersion] = useState(0);
   // Multi-agent review switched for the next review only; null: the default from the settings
@@ -1082,6 +1084,26 @@ export default function TaskPane() {
         </div>
       )}
 
+      {view === 'clauses' && (
+        <div className="fixed inset-0 z-30">
+          <ClausePanel
+            accessKey={settings.accessKey}
+            busy={isBusy}
+            onClose={() => setView('chat')}
+            onInsert={async clause => {
+              const write = await insertTextAtCursor(clause.text);
+              setDocumentVersion(v => v + 1);
+              return `✅ „${clause.title}” beszúrva a kurzorhoz ${write.tracked ? 'korrektúrával' : 'korrektúra nélkül'}.`;
+            }}
+            onFit={clause => {
+              setView('chat');
+              setMode('generate');
+              handleSend(fitInstruction(clause), 'generate', `📚 ${clause.title} – illesztés a szerződéshez`, { forceNew: true });
+            }}
+          />
+        </div>
+      )}
+
       {view === 'playbooks' && (
         <div className="fixed inset-0 z-30">
           <PlaybookPanel accessKey={settings.accessKey} onClose={() => { setView('chat'); setPlaybookVersion(v => v + 1); }} />
@@ -1363,6 +1385,16 @@ export default function TaskPane() {
             </button>
           ))}
         </div>
+
+        {mode === 'generate' && (
+          <button
+            onClick={() => setView('clauses')}
+            className="mb-2 w-full flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs text-emerald-900 hover:bg-emerald-100"
+          >
+            <span>📚 Záradéktár: az iroda mintazáradékai</span>
+            <span className="underline">Megnyitás</span>
+          </button>
+        )}
 
         {mode === 'review' && (
           <PlaybookBar

@@ -16,7 +16,7 @@ lehet rájuk hivatkozni.
 | `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | **kód kész**, valódi Wordben nem kipróbálva | a tartalmát jogász írja (van minta); Autopilot (beavatkozás nélküli beírás) nem lesz |
 | `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | **kód kész**, valódi Wordben nem kipróbálva | kulcs és licenc nélkül |
 | `tobbagens` | Többágensű átvizsgálás: öt szakértő párhuzamosan, majd összegzés | **kód kész**, valódi Wordben nem kipróbálva | alapból ki; Beállításokban: ki / csak „Alapos”-nál / mindig; használatkor kb. 5–7-szeres tokenköltség |
-| `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | **következik** | előbb: ki gondozza, mi kerülhet bele |
+| `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | **kód kész**, valódi Wordben és SharePointtal nem kipróbálva | előbb: ki gondozza, mi kerülhet bele |
 | `apijog` | Automatikus „létezik-e, hatályos-e” ellenőrzés kereskedelmi jogtár API-jával | **félretéve** | lásd lent |
 | `benchmark` | Piaci statisztikai összevetés | **elvetve** | magyar piacra nincs adat |
 
@@ -63,6 +63,21 @@ lehet rájuk hivatkozni.
 - **Amit nem tud:** hogy egy bekezdés létezik-e és hatályos-e a szerződés dátumán: ez az `apijog`.
 - Valódi Wordben ellenőrizendő: az njt.hu-cím formája (`njt.hu/jogszabaly/2013-5-00-00`) és a megnyitás az asztali
   Wordből (alapértelmezett böngészőben).
+
+## `zaradektar` – így működik
+
+- **Hol:** Asszisztens → Generálás mód → „📚 Záradéktár” → keresés (címben, kategóriában és szövegben is).
+- **Beszúrás a kurzorhoz:** szó szerint, korrektúrával, AI nélkül.
+- **Illesztés a szerződéshez:** az AI a szerződés definiált fogalmaihoz, feleihez és stílusához igazítja (a tartalmán
+  nem változtat), előnézettel, mint minden generálás. Maszkolva megy.
+- **Forrás 1 – mappa a gépen** (`CLAUSES_DIR`): pl. az iroda SharePoint-mappája OneDrive-val szinkronizálva. Nem kell
+  hozzá Azure-beállítás. Percenként frissül.
+- **Forrás 2 – SharePoint közvetlenül** (`CLAUSES_SHAREPOINT_URL`, felhős szerverhez): Microsoft-belépés kell, és
+  mindenki csak azt látja, amihez a SharePointban joga van. Ehhez `MS_CLIENT_SECRET` és a `Files.Read.All` jogosultság
+  kell (MICROSOFT-BELEPES.md).
+- **Formátum:** minden .docx egy záradék; a fájlneve a címe, az almappa (egy szint) a kategóriája. Legfeljebb 300
+  záradék, egyenként 20 000 karakter.
+- **Ki gondozza:** a mappába az kerüljön, amit az iroda jóváhagyott és anonimizált (ügyfélnév, összeg nélkül).
 
 ## `apijog` – félretéve
 

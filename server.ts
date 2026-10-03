@@ -15,6 +15,7 @@ import { generateManifest } from "./src/manifest";
 import { bearerToken, createMicrosoftVerifier, parseAuthConfig, type MicrosoftAuthConfig, type MicrosoftVerifier } from "./server/msAuth";
 import { providerFromEnv } from "./server/ai";
 import { runMultiAgentReview } from "./server/multiAgent";
+import { graphTokenFor, readClauseFolder, readSharePointClauses } from "./server/clauses";
 
 // Compare digests so neither the length nor the content of the key leaks through timing
 function keysMatch(provided: string, expected: string) {
@@ -202,6 +203,37 @@ async function startServer() {
   else if (firstPlaybooks.playbooks.length) console.log(`Office playbooks: ${firstPlaybooks.playbooks.length}`);
   app.get("/api/playbooks", (req, res) => {
     res.json({ playbooks: readOfficePlaybooks(process.env.PLAYBOOKS_FILE, path => fs.readFileSync(path, "utf8")).playbooks });
+  });
+
+  // The firm's model clauses: a SharePoint folder through Microsoft Graph (each user sees what they may open), or a
+  // folder on this machine (e.g. a SharePoint library synced by OneDrive)
+  const clausesDir = process.env.CLAUSES_DIR?.trim();
+  const clausesSharePoint = process.env.CLAUSES_SHAREPOINT_URL?.trim();
+  const msClientSecret = process.env.MS_CLIENT_SECRET?.trim();
+  if (clausesSharePoint) console.log(`Clause library: SharePoint${msClientSecret ? "" : " (MS_CLIENT_SECRET missing: it will not work)"}`);
+  else if (clausesDir) console.log(`Clause library: ${clausesDir}`);
+  app.get("/api/clauses", async (req, res) => {
+    if (clausesSharePoint) {
+      if (res.locals.authMethod !== "microsoft") {
+        return res.json({ clauses: [], source: "sharepoint", problem: "A SharePoint-záradéktárhoz Microsoft-fiókos belépés kell (Beállítások → Bejelentkezés)." });
+      }
+      if (!msClientSecret) {
+        return res.json({ clauses: [], source: "sharepoint", problem: "A szerveren nincs beállítva az MS_CLIENT_SECRET, ezért nem érem el a SharePointot (üzemeltetői feladat)." });
+      }
+      try {
+        const graphToken = await graphTokenFor(bearerToken(req.get("Authorization")) ?? "", String(res.locals.keyOwner), { tenantId: microsoftAuth.tenantId, clientId: microsoftAuth.clientId, clientSecret: msClientSecret, folderUrl: clausesSharePoint });
+        return res.json({ clauses: await readSharePointClauses(graphToken, clausesSharePoint), source: "sharepoint" });
+      } catch (error) {
+        console.warn(`Clause library: ${(error as Error).message}`);
+        return res.json({ clauses: [], source: "sharepoint", problem: `Nem sikerült a SharePointból olvasni: ${(error as Error).message}` });
+      }
+    }
+    if (clausesDir) {
+      const { clauses, problem } = await readClauseFolder(clausesDir);
+      if (problem) console.warn(problem);
+      return res.json({ clauses, source: "folder", ...(problem ? { problem: "A záradéktár mappája nem olvasható (CLAUSES_DIR); szólj az üzemeltetőnek." } : {}) });
+    }
+    res.json({ clauses: [], source: "none" });
   });
 
   app.post("/api/edit-stream", async (req, res) => {
