@@ -20,7 +20,6 @@ test('AI traces are found and placed, never in plain legal wording', () => {
     ],
   });
   assert.deepEqual(marks.map(m => [m.kind, m.paragraph, m.found]), [
-    ['titleCase', 0, 'A Szerződés Tárgya'],
     ['phrase', 1, 'Fontos megjegyezni'],
     ['phrase', 1, 'kulcsfontosságú'],
     ['invisible', 2, 'A Vevő​ fizet ✅'],
@@ -46,5 +45,5 @@ test('capitals in titles: a spelling hint, not for names, institutions, defined 
       para('y'.repeat(250), { bold: true }),
     ],
   }, ['Vételárrészlet']);
-  assert.deepEqual(marks.map(m => [m.kind, m.paragraph]), [['titleCase', 0], ['titleCase', 4]]);
+  assert.deepEqual(marks, [], 'capitals in titles are not pointed out at all');
 });
