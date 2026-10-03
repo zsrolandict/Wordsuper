@@ -14,8 +14,8 @@ lehet rájuk hivatkozni.
 |---|---|---|---|
 | `felho` | Felhős szerver (Cloud Run, EU) és központi kiadás a Microsoft 365-ben | kód kész, élesben nem kipróbálva | [FELHO-TELEPITES.md](FELHO-TELEPITES.md) |
 | `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | **kód kész**, valódi Wordben nem kipróbálva | a tartalmát jogász írja (van minta); Autopilot (beavatkozás nélküli beírás) nem lesz |
-| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | tervezett | kulcs és licenc nélkül |
-| `tobbagens` | Többágensű „Alapos” átvizsgálás: szakterületi kérések párhuzamosan, majd összegzés | tervezett | használatkor kb. 5–7-szeres tokenköltség |
+| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | **következik** | kulcs és licenc nélkül |
+| `tobbagens` | Többágensű átvizsgálás: öt szakértő párhuzamosan, majd összegzés | **kód kész**, valódi Wordben nem kipróbálva | alapból ki; Beállításokban: ki / csak „Alapos”-nál / mindig; használatkor kb. 5–7-szeres tokenköltség |
 | `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | tervezett | előbb: ki gondozza, mi kerülhet bele |
 | `apijog` | Automatikus „létezik-e, hatályos-e” ellenőrzés kereskedelmi jogtár API-jával | **félretéve** | lásd lent |
 | `benchmark` | Piaci statisztikai összevetés | **elvetve** | magyar piacra nincs adat |
@@ -33,6 +33,20 @@ lehet rájuk hivatkozni.
 - **Irodai playbookok:** az üzemeltető az exportált fájlt a szerverre teszi (`PLAYBOOKS_FILE`; felhőben a
   `playbooks` titok). Mindenkinél „Irodai” csoportban jelennek meg, nem szerkeszthetők, de lemásolhatók.
 - **A minta** („MINTA – Ingatlan-adásvétel, vevői oldal”) csak a formát mutatja; a tartalmát jogásznak kell megírnia.
+
+## `tobbagens` – így működik
+
+- **Szakértők:** felelősség és kockázat; pénzügyi feltételek; hatály és megszűnés; jogok és adatok (szellemi tulajdon,
+  titoktartás, adatvédelem); belső következetesség. Mind az egész dokumentumot kapja, de csak a saját területét nézi.
+- **Összegzés:** egy összegző kérés egy listába rendezi az észrevételeket (legfeljebb 15), kiszűri az ismétléseket, és
+  az ellentmondó javaslatok közül a képviselt félnek megfelelőbbet tartja meg. Új észrevételt nem talál ki.
+- **A felületen** ugyanaz, mint egy átvizsgálás: egyenként Mutasd / Elfogadom / Elvetem, korrektúrával. A Részletekben
+  látszik, melyik szakértő hány észrevételt adott.
+- **Beállítás:** Beállítások → Többágensű átvizsgálás: Ki (alap) / Csak „Alapos” gondolkodásnál / Mindig. Az
+  Átvizsgálás módban a „🧩 Többágensű” kapcsolóval egy-egy futtatásra át is állítható.
+- **Mindig egy kéréssel megy:** a playbook-ellenőrzés és a finomítás.
+- **Költség:** 6 kérés (5 szakértő + összegzés), mind a teljes dokumentummal. Az auditnapló jelzi, hány szakértő
+  válaszolt; a tokenszám az összesített.
 
 ## `apijog` – félretéve
 

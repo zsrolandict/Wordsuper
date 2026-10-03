@@ -14,6 +14,7 @@ import { readVersion } from "./server/version";
 import { generateManifest } from "./src/manifest";
 import { bearerToken, createMicrosoftVerifier, parseAuthConfig, type MicrosoftAuthConfig, type MicrosoftVerifier } from "./server/msAuth";
 import { providerFromEnv } from "./server/ai";
+import { runMultiAgentReview } from "./server/multiAgent";
 
 // Compare digests so neither the length nor the content of the key leaks through timing
 function keysMatch(provided: string, expected: string) {
@@ -270,11 +271,17 @@ async function startServer() {
       // Tells the task pane which model answered and where the text was processed
       res.write(sseEvent({ meta: { model: ai.provider.modelFor(request.depth), location: ai.provider.location } }));
 
-      const finish = await ai.provider.generate(
-        { systemInstruction, prompt, responseJsonSchema, signal: abortController.signal, depth: request.depth },
-        // Thoughts are only shown in the task pane, never written into the document
-        (event) => res.write(sseEvent(event.type === "thought" ? { thought: event.text } : { text: event.text }))
-      );
+      // Thoughts are only shown in the task pane, never written into the document
+      const writeEvent = (event: { type: "text" | "thought"; text: string }) => res.write(sseEvent(event.type === "thought" ? { thought: event.text } : { text: event.text }));
+      const finish = request.multiAgent
+        ? await runMultiAgentReview(ai.provider, request, {
+          signal: abortController.signal,
+          onThought: text => writeEvent({ type: "thought", text }),
+          onText: text => writeEvent({ type: "text", text }),
+        })
+        : await ai.provider.generate({ systemInstruction, prompt, responseJsonSchema, signal: abortController.signal, depth: request.depth }, writeEvent);
+      // The audit log says how many specialists answered (their tokens are in the total)
+      const multiDetail = "specialists" in finish ? `multi-agent: ${finish.specialists} specialists` : undefined;
 
       // A cut-off answer must never look complete: no [DONE], so the task pane won't insert it
       if (finish.reason !== "stop") {
@@ -284,7 +291,7 @@ async function startServer() {
         return res.end();
       }
 
-      logResult("ok", { tokens: finish.usage });
+      logResult("ok", { tokens: finish.usage, ...(multiDetail ? { detail: multiDetail } : {}) });
       res.write('data: [DONE]\n\n');
       res.end();
     } catch (error) {

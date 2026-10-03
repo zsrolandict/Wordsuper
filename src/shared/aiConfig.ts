@@ -76,6 +76,8 @@ export interface AIRequestBody {
   party?: string;
   /** Review against the firm's playbook: one check per rule instead of free findings */
   playbook?: Playbook;
+  /** Review by several specialist reviewers in parallel, then one merged list (several times the tokens) */
+  multiAgent?: boolean;
 }
 
 export interface ReviewFinding {

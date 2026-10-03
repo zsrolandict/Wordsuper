@@ -35,7 +35,7 @@ import { alternativeReviewInstruction, newIssues, recheckInstruction, type Struc
 import { buildDocumentGraph, type StructureIssue } from '../services/structure';
 import { Masker, maskRequest, parseExtraTerms, unresolvedMessage, unresolvedPlaceholders } from '../services/masking';
 import { playSound, primeSound } from '../services/sound';
-import { describeStyle, useSettings } from '../services/settings';
+import { describeStyle, multiAgentByDefault, useSettings } from '../services/settings';
 import { formatNumber } from '../services/format';
 import { useDocumentStats } from '../services/useDocumentStats';
 import RequestDetails, { type RequestDetailsData } from './RequestDetails';
@@ -204,8 +204,11 @@ export default function TaskPane() {
   const [view, setView] = useState<'chat' | 'settings' | 'playbooks'>('chat');
   // Bumped when the playbooks were edited, so the selector reloads them
   const [playbookVersion, setPlaybookVersion] = useState(0);
+  // Multi-agent review switched for the next review only; null: the default from the settings
+  const [multiOverride, setMultiOverride] = useState<boolean | null>(null);
   const [tab, setTab] = useState<Tab>('assistant');
   const [settings, updateSettings] = useSettings();
+  const multiAgentNext = multiOverride ?? multiAgentByDefault(settings);
   // With Microsoft sign-in no access key is needed, so its reminder is only shown for key sign-in
   const authMode = useAuthMode();
   // Whose side we are on in this document; remembered on this machine, never written into the file
@@ -535,7 +538,10 @@ export default function TaskPane() {
         depth: settings.depth,
         ...(party ? { party } : {}),
         ...(playbook ? { playbook } : {}),
+        // Specialists + a merge for a new free review; a refinement goes as one request with its history
+        ...(requestMode === 'review' && !playbook && !refining && multiAgentNext ? { multiAgent: true } : {}),
       };
+      if (requestMode === 'review' && !refining) setMultiOverride(null);
       // Names and identifiers are replaced by placeholders before the request leaves the machine
       const prepared = await prepareSend(request, refining
         ? current!.masker
@@ -567,6 +573,7 @@ export default function TaskPane() {
           startedAt,
           wholeDocument: !!snapshot.wholeDocument,
           depth: settings.depth,
+          multiAgent: !!request.multiAgent,
           party,
           masking: masker ? { summary: masker.summary(), entries: masker.entries() } : null,
         },
@@ -1216,7 +1223,7 @@ export default function TaskPane() {
               {msg.isLoading && <Loader2 className="w-4 h-4 inline-block mr-2 animate-spin text-blue-600" />}
               {msg.playbook && !msg.isLoading && <PlaybookSummary name={msg.playbook.name} checks={msg.playbook.checks} />}
               {msg.isLoading && !msg.content ? (
-                <span className="text-neutral-500">{msg.details?.mode === 'review' ? 'Átvizsgálom a dokumentumot…' : 'Gondolkodom…'}</span>
+                <span className="text-neutral-500">{msg.details?.mode === 'review' ? (msg.details.multiAgent ? 'Szakértők vizsgálják párhuzamosan, utána összegzem… (a Részletekben látszik, hol tart)' : 'Átvizsgálom a dokumentumot…') : 'Gondolkodom…'}</span>
               ) : msg.proposal && msg.details ? (
                 <Proposal
                   mode={msg.details.mode}
@@ -1408,6 +1415,22 @@ export default function TaskPane() {
             </button>
           ))}
         </div>
+
+        {/* Multi-agent review: the settings give the default, this switches it for the next review */}
+        {mode === 'review' && (
+          <div className="mb-2 flex items-center text-[11px] text-neutral-500">
+            <button
+              role="switch"
+              aria-checked={multiAgentNext}
+              onClick={() => setMultiOverride(!multiAgentNext)}
+              title="Öt szakértő (felelősség, pénzügy, hatály és megszűnés, jogok és adatok, következetesség) vizsgálja párhuzamosan, majd egy összegző egy listába rendezi. Alaposabb, lassabb, kb. 5–7-szeres tokenköltség. Az alapértéket a Beállításokban adod meg."
+              className={`px-2 py-0.5 mr-1.5 rounded-full border ${multiAgentNext ? 'bg-indigo-700 text-white border-indigo-700' : 'border-neutral-300 hover:bg-neutral-100'}`}
+            >
+              🧩 Többágensű: {multiAgentNext ? 'be' : 'ki'}
+            </button>
+            <span>{multiOverride !== null ? 'csak a következő átvizsgálásra' : 'a Beállítások szerint'}{multiAgentNext ? ' · kb. 5–7× költség' : ''}</span>
+          </div>
+        )}
 
         {refining && !isBusy && (
           <div className="mb-2 flex items-center justify-between text-[11px] text-blue-800 bg-blue-50 border border-blue-200 rounded-lg px-2.5 py-1.5">

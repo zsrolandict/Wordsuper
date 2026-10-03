@@ -43,7 +43,18 @@ export interface Settings {
    * rule. Even when on, a document with pending tracked changes is still written with Track Changes.
    */
   skipTrackedChanges: boolean;
+  /**
+   * Multi-agent review (several specialist reviewers, then a merge; several times the tokens) by default: off,
+   * only with the "Alapos" thinking, or always. A single review can still be switched in the Átvizsgálás mode.
+   */
+  multiAgent: MultiAgentDefault;
 }
+
+export const MULTI_AGENT_VALUES = ['off', 'deep', 'always'] as const;
+export type MultiAgentDefault = typeof MULTI_AGENT_VALUES[number];
+
+/** Whether a review runs with several specialists when nothing was switched for it */
+export const multiAgentByDefault = (s: Pick<Settings, 'multiAgent' | 'depth'>) => s.multiAgent === 'always' || (s.multiAgent === 'deep' && s.depth === 'deep');
 
 export const DEFAULT_SETTINGS: Settings = {
   accessKey: '',
@@ -57,6 +68,7 @@ export const DEFAULT_SETTINGS: Settings = {
   dictation: { engine: 'local', localModel: 'small', riskAccepted: false },
   depth: 'auto',
   skipTrackedChanges: false,
+  multiAgent: 'off',
 };
 
 const STORAGE_KEY = 'word-writer-settings-v1';
@@ -87,6 +99,7 @@ function sanitize(raw: unknown): Settings {
     sound: value.sound !== false,
     depth: (DEPTH_VALUES as readonly unknown[]).includes(value.depth) ? value.depth as Depth : 'auto',
     skipTrackedChanges: value.skipTrackedChanges === true,
+    multiAgent: (MULTI_AGENT_VALUES as readonly unknown[]).includes(value.multiAgent) ? value.multiAgent as MultiAgentDefault : 'off',
     dictation: {
       engine: value.dictation?.engine === 'cloud' ? 'cloud' : 'local',
       localModel: value.dictation?.localModel && value.dictation.localModel in LOCAL_MODELS ? value.dictation.localModel : 'small',

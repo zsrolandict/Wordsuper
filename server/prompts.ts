@@ -76,11 +76,13 @@ export function parseRequest(body: unknown): ParseResult {
   const party = asString(raw.party).replace(/\s+/g, " ").trim().substring(0, MAX_PARTY_CHARS);
   // Only a review checks against a playbook; what arrives is checked like anything from a file
   const playbook = mode === "review" && raw.playbook !== undefined ? sanitizePlaybook(raw.playbook) : null;
+  // Several specialist reviewers, then a merge: a free review only (a playbook check is one pass per rule anyway)
+  const multiAgent = mode === "review" && !playbook && raw.multiAgent === true;
   if (mode === "review" && raw.playbook !== undefined && !playbook) {
     return { error: "Invalid playbook" };
   }
 
-  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, ...(party ? { party } : {}), ...(playbook ? { playbook } : {}), masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
+  return { value: { mode, instruction, originalText, documentContext, history, styleProfile, ...(party ? { party } : {}), ...(playbook ? { playbook } : {}), ...(multiAgent ? { multiAgent } : {}), masked: raw.masked === true, wholeDocument: raw.wholeDocument === true, depth: (DEPTH_VALUES as readonly unknown[]).includes(raw.depth) ? raw.depth as AIRequestBody["depth"] : undefined, maskedValues: typeof raw.maskedValues === "number" && Number.isInteger(raw.maskedValues) && raw.maskedValues >= 0 ? raw.maskedValues : undefined } };
 }
 
 const QUOTE_DESCRIPTION = "Exact, verbatim excerpt copied character-for-character from the document that pinpoints where the comment belongs: 5-15 words, or up to one whole sentence (at most 250 characters) when the suggestion rewrites it.";
@@ -110,7 +112,7 @@ const PLAYBOOK_SCHEMA = {
 };
 
 // Standard JSON Schema, so any provider that supports structured output can use it
-const REVIEW_SCHEMA = {
+export const REVIEW_SCHEMA = {
   type: "array",
   maxItems: MAX_REVIEW_FINDINGS,
   items: {

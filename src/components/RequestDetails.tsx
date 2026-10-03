@@ -26,6 +26,8 @@ export interface RequestDetailsData {
   wholeDocument?: boolean;
   /** How hard the model was asked to think */
   depth?: 'auto' | 'fast' | 'deep';
+  /** The review was made by several specialist reviewers and merged */
+  multiAgent?: boolean;
   /** The represented party the AI worked for; empty: neutral */
   party?: string;
   /** What was hidden from the AI; null: masking was off */
@@ -161,7 +163,7 @@ export default function RequestDetails({ details, isLoading, onNeverHide }: {
   onNeverHide?: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth, party } = details;
+  const { mode, instruction, selectionText, contextInfo, historyRounds, totalRounds, styleSummary, thoughts, durationMs, model, location, wholeDocument, masking, depth, party, multiAgent } = details;
 
   return (
     <div className="mt-2 pt-2 border-t border-neutral-100">
@@ -228,7 +230,7 @@ export default function RequestDetails({ details, isLoading, onNeverHide }: {
           </Section>
 
           <p className="text-neutral-400">
-            {model ? `${model} · ${location}` : 'A modell még nem jelentkezett'}{depth ? ` · gondolkodás: ${{ auto: 'automatikus', fast: 'gyors', deep: 'alapos' }[depth]}` : ''}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
+            {model ? `${model} · ${location}` : 'A modell még nem jelentkezett'}{depth ? ` · gondolkodás: ${{ auto: 'automatikus', fast: 'gyors', deep: 'alapos' }[depth]}` : ''}{multiAgent ? ' · többágensű (szakértők + összegzés)' : ''}{durationMs !== undefined ? ` · ${(durationMs / 1000).toFixed(1).replace('.', ',')} mp` : ''}
           </p>
         </div>
       )}

@@ -152,6 +152,21 @@ export default function SettingsPanel({
           {keyStatus.state === 'error' && <p className="text-xs text-red-700 whitespace-pre-wrap">{keyStatus.message}</p>}
         </Card>}
 
+        <Card title="Többágensű átvizsgálás">
+          <p className="text-xs text-neutral-500">Öt szakértő (felelősség, pénzügy, hatály és megszűnés, jogok és adatok, belső következetesség) vizsgálja párhuzamosan a dokumentumot, majd egy összegző egy listába rendezi, az ismétléseket és az ellentmondásokat kiszűrve. Alaposabb, de lassabb, és kb. 5–7-szeres a tokenköltsége. Az Átvizsgálás módban egy-egy futtatásra át is kapcsolható.</p>
+          {([
+            ['off', 'Ki', 'egy kéréses átvizsgálás (alapértelmezés)'],
+            ['deep', 'Csak „Alapos” gondolkodásnál', 'ha a küldés fölött az Alapos van kiválasztva'],
+            ['always', 'Mindig', 'minden szabad átvizsgálásnál'],
+          ] as const).map(([value, label, hint]) => (
+            <label key={value} className="flex items-start space-x-2 cursor-pointer">
+              <input type="radio" name="multi-agent" checked={settings.multiAgent === value} onChange={() => onChange(s => ({ ...s, multiAgent: value }))} className="mt-0.5" />
+              <span>{label} <span className="text-xs text-neutral-500">– {hint}</span></span>
+            </label>
+          ))}
+          <p className="text-[11px] text-neutral-400">A playbook-ellenőrzés és a finomítás mindig egy kéréssel megy.</p>
+        </Card>
+
         <Card title="Beszúrás">
           <label className="flex items-start space-x-2 cursor-pointer">
             <input

@@ -63,6 +63,8 @@ Szerver (Node.js + Express)
 
 **Playbook-ellenőrzés:** Átvizsgálás módban az iroda szabálykönyve szerint (standard, Fallback 1–2, elfogadhatatlan, hiányzik), pontonkénti összesítővel. Az eltérések egyenként, korrektúrával fogadhatók el, utána kísérőlevél kérhető a partnernek (csak a munkaablakban, kimásolható). Részletek: [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md).
 
+**Többágensű átvizsgálás** (kapcsolható, alapból ki): öt szakértő párhuzamosan, majd egy összegzés egy listába; kb. 5–7-szeres tokenköltség. Részletek: [FEJLESZTESI-TERV.md](FEJLESZTESI-TERV.md).
+
 **Gyorsgombok:**
 - Beépített gyorsgombok minden módhoz. Átvizsgálásnál például: Kockázatok és hiányosságok, Ellentmondások keresése, **Jogszabályi hivatkozások**, **Kereszthivatkozások és számozás**, Helyesírás és stílus.
 - A két új gomb egy-egy részletes utasítást küld. A jogszabályinál: létezik-e a hely, jó helyre mutat-e, oda illik-e, hatályos-e; bizonytalanság esetén jelezze, hogy a njt.hu-n ellenőrizni kell.
