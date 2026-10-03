@@ -23,6 +23,7 @@ const CATEGORY_LABELS: Record<Category, { label: string; title: string }> = {
   pagination: { label: 'Címsor együtt marad a következővel', title: 'A címsor stílusa: a cím nem maradhat egyedül a lap alján' },
   margins: { label: 'Oldalmargók', title: 'Felső, alsó, bal és jobb margó (csak ha megadsz értéket; asztali Word kell)' },
   styles: { label: 'A Word saját stílusai is', title: 'A Normál és a Címsor stílusok is az új formát kapják, így az utána begépelt szöveg is egységes marad' },
+  terms: { label: 'Definiált fogalmak egységesen', title: 'A meghatározás helyén félkövér és „…” közé kerül; máshol nem félkövér (a nagy kezdőbetű mutatja, hogy fogalom). Címekhez és teljesen félkövér bekezdésekhez nem nyúl.' },
   dashes: { label: 'Gondolatjelek (— és - helyett –)', title: 'Az angolos/AI-s hosszú gondolatjel (—), a dupla kötőjel (--) és a szóközök közötti kötőjel helyett a magyar „ – ”' },
   markdown: { label: 'Markdown-maradványok', title: 'AI-csevegésből bemásolt szöveg: **félkövér**, *dőlt*, # cím, - felsorolás; a jelek eltűnnek, a félkövér/dőlt valódi formázás lesz' },
   quotes: { label: 'Magyar idézőjelek', title: '"…" és “…” helyett „…”' },
@@ -356,6 +357,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
         outcome.footnotes ? `${formatNumber(outcome.footnotes)} lábjegyzet` : '',
         outcome.keepWithNext ? `${outcome.keepWithNext} címsorstílus együtt marad a következő bekezdéssel` : '',
         outcome.margins ? `oldalmargók (${outcome.margins} szakasz)` : '',
+        outcome.terms ? `${outcome.terms} definiált fogalom kiemelve` : '',
         outcome.cleaned ? `${formatNumber(outcome.cleaned)} helyen szövegtisztítás` : '',
         outcome.quotes ? `${formatNumber(outcome.quotes)} idézőjel` : '',
         outcome.deleted ? `${formatNumber(outcome.deleted)} üres sor törölve` : '',
@@ -404,7 +406,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   const aiMarks = audit ? findAiMarks(audit) : [];
   const textCounts: Partial<Record<Category, number>> = summary
     ? {
-      dashes: summary.dashes, markdown: summary.markdown, quotes: summary.straightQuotes, nbsp: summary.nbsp, ranges: summary.ranges,
+      terms: summary.terms, dashes: summary.dashes, markdown: summary.markdown, quotes: summary.straightQuotes, nbsp: summary.nbsp, ranges: summary.ranges,
       punctuation: summary.punctuation, doubleSpaces: summary.doubleSpaces, emptyParagraphs: summary.extraEmpty.length, allEmpty: summary.allEmpty.length,
     }
     : {};
@@ -666,7 +668,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
             <>
               <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
                 <p className="font-semibold text-neutral-800">Szövegtisztítás <span className="font-normal text-neutral-500">– a szöveget is módosítja, korrektúrával</span></p>
-                {(['dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'doubleSpaces'] as Category[]).map(c => (
+                {(['terms', 'dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'doubleSpaces'] as Category[]).map(c => (
                   <label key={c} className={`flex items-center justify-between ${textCounts[c] ? 'cursor-pointer' : 'opacity-50'}`} title={CATEGORY_LABELS[c].title}>
                     <span className="flex items-center space-x-2">
                       <input type="checkbox" checked={options.categories[c]} disabled={busy || !textCounts[c]} onChange={e => setCategory(c, e.target.checked)} />

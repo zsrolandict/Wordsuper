@@ -1,3 +1,4 @@
+import { buildDocumentGraph } from './structure';
 import { countCleanup, countMicrotypography, dashFixes, englishQuoteFixes, markdownFixes, nbspFixes, punctuationFixes, quoteFixes, rangeFixes, type Replacement } from './microtypography';
 
 /**
@@ -115,6 +116,8 @@ export interface AuditSummary {
   /** Straight double quotes and English opening quotes (“) */
   straightQuotes: number;
   /** AI and pasted-text clean-up: em dashes and spaced hyphens, ranges, punctuation spacing, Markdown left-overs */
+  /** Defined terms (their definitions) */
+  terms: number;
   dashes: number;
   ranges: number;
   punctuation: number;
@@ -154,6 +157,7 @@ export function summarize(audit: FormatAudit): AuditSummary {
     doubleSpaces: audit.paragraphs.reduce((n, p, i) => n + (roles[i].kind === 'empty' ? 0 : (p.text.match(/ {2,}/g)?.length ?? 0)), 0),
     nbsp: micro.nbsp,
     straightQuotes: micro.quotes + cleanup.curlyQuotes,
+    terms: buildDocumentGraph(audit.paragraphs.map(p => ({ text: p.text }))).terms.length,
     dashes: cleanup.dashes,
     ranges: cleanup.ranges,
     punctuation: cleanup.punctuation,
@@ -243,7 +247,7 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
   };
 }
 
-export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'styles' | 'emptyParagraphs' | 'allEmpty' | 'doubleSpaces' | 'nbsp' | 'quotes' | 'dashes' | 'ranges' | 'punctuation' | 'markdown';
+export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'styles' | 'emptyParagraphs' | 'allEmpty' | 'doubleSpaces' | 'nbsp' | 'quotes' | 'dashes' | 'ranges' | 'punctuation' | 'markdown' | 'terms';
 
 export interface FormatOptions {
   categories: Record<Category, boolean>;
@@ -256,10 +260,10 @@ export interface FormatOptions {
 /** Changes the formatting only: the text is never touched by these */
 export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment', 'color', 'indent', 'pagination', 'margins', 'styles'];
 /** These change the text (so they go in like any other text change, by the Track Changes rule) */
-export const TEXT_CATEGORIES: Category[] = ['dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'emptyParagraphs', 'allEmpty', 'doubleSpaces'];
+export const TEXT_CATEGORIES: Category[] = ['terms', 'dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'emptyParagraphs', 'allEmpty', 'doubleSpaces'];
 
 export const defaultOptions = (): FormatOptions => ({
-  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, styles: true, emptyParagraphs: false, allEmpty: false, doubleSpaces: false, nbsp: false, quotes: false, dashes: false, ranges: false, punctuation: false, markdown: false },
+  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, styles: true, emptyParagraphs: false, allEmpty: false, doubleSpaces: false, nbsp: false, quotes: false, dashes: false, ranges: false, punctuation: false, markdown: false, terms: false },
   fakeHeadings: true,
   unifyHeadings: false,
 });
@@ -298,6 +302,44 @@ export interface StyleUpdate {
 /** The style made for headings that have no heading style, so they can carry the rule too */
 export const CHAPTER_STYLE = 'ICT Fejezetcím';
 
+export interface TermEmphasis {
+  /** Where each term is defined: the defining text as it will read (quotes added) and the term in it */
+  definitions: { index: number; span: string; term: string }[];
+  /** Paragraphs and terms whose uses are not to be bold */
+  usages: { index: number; term: string }[];
+}
+
+const OPENING_QUOTES = '„"“«';
+
+/**
+ * Defined terms shown the same way everywhere: at the definition bold and in Hungarian quotation marks, elsewhere
+ * plain (the capital letter shows it is a term). Headings and wholly bold paragraphs are left as they are.
+ */
+export function planTermEmphasis(audit: FormatAudit): { emphasis: TermEmphasis; quoteFixes: Map<number, Replacement[]> } {
+  const graph = buildDocumentGraph(audit.paragraphs.map(p => ({ text: p.text })));
+  const definitions: TermEmphasis['definitions'] = [];
+  const quoteFixes = new Map<number, Replacement[]>();
+  for (const term of graph.terms) {
+    const { paragraph, start, end } = term.definedAt;
+    const text = audit.paragraphs[paragraph]?.text ?? '';
+    const span = text.slice(start, end);
+    const at = span.indexOf(term.term);
+    if (at === -1 || span.length > 250) continue;
+    const quoted = at > 0 && OPENING_QUOTES.includes(span[at - 1]);
+    const after = quoted ? span : `${span.slice(0, at)}„${term.term}”${span.slice(at + term.term.length)}`;
+    if (!quoted) quoteFixes.set(paragraph, [...(quoteFixes.get(paragraph) ?? []), { find: span, replace: after }]);
+    definitions.push({ index: paragraph, span: after, term: term.term });
+  }
+  const usages: TermEmphasis['usages'] = [];
+  audit.paragraphs.forEach((p, index) => {
+    const role = roleOf(p).kind;
+    if (role !== 'body' && role !== 'table') return;
+    if (p.bold === true) return;
+    for (const term of graph.terms) if (term.usages.some(u => u.paragraph === index)) usages.push({ index, term: term.term });
+  });
+  return { emphasis: { definitions, usages }, quoteFixes };
+}
+
 export interface TextFix {
   index: number;
   /** Text replacements in this paragraph, the longest first (non-breaking spaces, dashes, ranges, spacing…) */
@@ -319,6 +361,8 @@ export interface FormatPlan {
   styleUpdates: StyleUpdate[];
   /** Microtypography per paragraph (text changes: tracked like any other) */
   textFixes: TextFix[];
+  /** Defined terms: bold where they are defined (in „…”), not bold where they are used */
+  termEmphasis: TermEmphasis;
   /** Localized names of the heading styles that get "keep with next" */
   keepWithNextStyles: string[];
   /** New page margins in points (only the ones to change); null: none */
@@ -485,12 +529,14 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
   const usefulStyles = styleUpdates.filter(u => Object.keys(u.font).length || Object.keys(u.paragraph ?? {}).length || u.border);
   counts.styles = usefulStyles.length;
 
+  const terms = on.terms ? planTermEmphasis(audit) : { emphasis: { definitions: [], usages: [] }, quoteFixes: new Map<number, Replacement[]>() };
   const textFixes: TextFix[] = [];
   if (TEXT_CATEGORIES.some(c => c !== 'emptyParagraphs' && c !== 'allEmpty' && c !== 'doubleSpaces' && on[c])) {
     audit.paragraphs.forEach((p, index) => {
       if (!p.text.trim()) return;
       const md = on.markdown ? markdownFixes(p.text) : { replacements: [], bold: [], italic: [] };
       const replacements = [
+        ...(terms.quoteFixes.get(index) ?? []),
         ...md.replacements,
         ...(on.dashes ? dashFixes(p.text) : []),
         ...(on.ranges ? rangeFixes(p.text) : []),
@@ -508,13 +554,14 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
   counts.ranges = on.ranges ? summary.ranges : 0;
   counts.punctuation = on.punctuation ? summary.punctuation : 0;
   counts.markdown = on.markdown ? summary.markdown : 0;
+  counts.terms = terms.emphasis.definitions.length;
 
   // Every empty line (the spacing takes over), or only the repeated ones
   const deleteEmpty = on.allEmpty ? summary.allEmpty : on.emptyParagraphs ? summary.extraEmpty : [];
   counts.allEmpty = on.allEmpty ? deleteEmpty.length : 0;
   counts.emptyParagraphs = !on.allEmpty && on.emptyParagraphs ? deleteEmpty.length : 0;
   counts.doubleSpaces = on.doubleSpaces ? summary.doubleSpaces : 0;
-  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, styleUpdates: usefulStyles, textFixes, keepWithNextStyles, margins, counts };
+  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, styleUpdates: usefulStyles, textFixes, termEmphasis: terms.emphasis, keepWithNextStyles, margins, counts };
 }
 
 export interface StylePreset {

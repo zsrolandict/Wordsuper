@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultOptions, STYLE_PRESETS, defaultProfile, headingLevelCount, planFormatting, roleOf, summarize, type FormatAudit, type ParagraphFormat } from './formatting';
+import { defaultOptions, planTermEmphasis, STYLE_PRESETS, defaultProfile, headingLevelCount, planFormatting, roleOf, summarize, type FormatAudit, type ParagraphFormat } from './formatting';
 
 const para = (text: string, extra: Partial<ParagraphFormat> = {}): ParagraphFormat => ({
   text, styleBuiltIn: 'Normal', tableLevel: 0, font: 'Calibri', size: 11, bold: false, alignment: 'Justified', spaceBefore: 0, spaceAfter: 6, lineSpacing: 13.8, ...extra,
@@ -171,4 +171,28 @@ test('microtypography only when asked, per paragraph', () => {
   assert.deepEqual([last.index, last.replacements.map(r => r.find), last.quotes], [11, ['§ 5', '100 000 Ft'], ['„', '”']]);
   assert.ok(plan.textFixes.some(f => f.replacements.some(r => r.find === '2026. október 3.')), 'the date in the place line too');
   assert.equal(summarize(texts).straightQuotes, 2);
+});
+
+test('defined terms: quoted and bold where defined, plain where used, headings and bold paragraphs left alone', () => {
+  const termsAudit: FormatAudit = {
+    footnotes: null,
+    paragraphs: [
+      para('ADÁSVÉTEL', { styleBuiltIn: 'Heading1', bold: true }),
+      para('az ABC Kft. (a továbbiakban: Eladó) és Kovács János (a továbbiakban: „Vevő”) között'),
+      para('A Vevő fizet az Eladónak.'),
+      para('Az Eladó kijelenti.', { bold: true }),
+    ],
+  };
+  const { emphasis, quoteFixes } = planTermEmphasis(termsAudit);
+  assert.deepEqual(emphasis.definitions, [
+    { index: 1, span: 'a továbbiakban: „Eladó”', term: 'Eladó' },
+    { index: 1, span: 'a továbbiakban: „Vevő”', term: 'Vevő' },
+  ]);
+  assert.deepEqual([...quoteFixes], [[1, [{ find: 'a továbbiakban: Eladó', replace: 'a továbbiakban: „Eladó”' }]]]);
+  assert.deepEqual(emphasis.usages, [{ index: 2, term: 'Eladó' }, { index: 2, term: 'Vevő' }]);
+  const options = defaultOptions();
+  options.categories.terms = true;
+  const plan = planFormatting(termsAudit, defaultProfile(summarize(termsAudit)), options);
+  assert.equal(plan.termEmphasis.definitions.length, 2);
+  assert.ok(plan.textFixes.some(f => f.replacements.some(r => r.replace === 'a továbbiakban: „Eladó”')));
 });

@@ -1212,6 +1212,8 @@ export async function readSelectionFormat(): Promise<{ font: string | null; size
 export interface FormatOutcome {
   /** Word styles updated (Normal, Címsor 1…) */
   styles: number;
+  /** Defined terms made bold at their definition */
+  terms: number;
   /** Text clean-up places changed (non-breaking spaces, dashes, ranges, spacing, Markdown) and quotation marks */
   cleaned: number;
   quotes: number;
@@ -1522,7 +1524,49 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         }
       }));
     }
-    return { formatted: plan.changes.length, styles, cleaned, quotes, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
+    // Defined terms, after the text clean-up (it put the quotation marks in): plain where used, bold where defined.
+    // Formatting only, so without Track Changes like the rest of the formatting.
+    let terms = 0;
+    const { definitions, usages } = plan.termEmphasis;
+    if (definitions.length || usages.length) {
+      try {
+        if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+        const usageSearches = usages.map(u => {
+          const found = paragraphs.items[u.index].search(wordSearchText(u.term), { matchCase: true });
+          found.load('items');
+          return found;
+        });
+        const spanSearches = definitions.map(d => {
+          const found = paragraphs.items[d.index].search(wordSearchText(d.span), { matchCase: true });
+          found.load('items');
+          return { d, found };
+        });
+        await context.sync();
+        usageSearches.forEach(found => found.items.forEach(range => { range.font.bold = false; }));
+        const termSearches = spanSearches.flatMap(({ d, found }) => found.items.slice(0, 1).map(range => {
+          const quoted = d.span.includes(`„${d.term}”`) ? `„${d.term}”` : d.term;
+          const inner = range.search(wordSearchText(quoted), { matchCase: true });
+          inner.load('items');
+          return inner;
+        }));
+        await context.sync();
+        termSearches.forEach(inner => {
+          if (!inner.items.length) return;
+          inner.items[0].font.bold = true;
+          terms++;
+        });
+        await context.sync();
+      } catch (e) {
+        console.error(e);
+        notes.push('A definiált fogalmak kiemelését nem sikerült végigvinni.');
+      } finally {
+        if (previous !== 'Off') {
+          doc.changeTrackingMode = previous;
+          await context.sync().catch(() => {});
+        }
+      }
+    }
+    return { formatted: plan.changes.length, styles, terms, cleaned, quotes, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
   });
 }
 
