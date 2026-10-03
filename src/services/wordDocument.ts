@@ -1301,8 +1301,15 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
           });
           await context.sync();
           let bordersSkipped = false;
-          for (const { update, style } of found) {
-            if (style.isNullObject) continue;
+          const toApply: { name: string; indices: number[] }[] = [];
+          for (const found1 of found) {
+            const { update } = found1;
+            let style = found1.style;
+            if (style.isNullObject) {
+              if (!update.create) continue;
+              style = doc.addStyle(update.name, 'Paragraph');
+            }
+            if (update.apply?.length) toApply.push({ name: update.name, indices: update.apply });
             const { font, paragraph, border } = update;
             if (font.name !== undefined) style.font.name = font.name;
             if (font.size !== undefined) style.font.size = font.size;
@@ -1326,6 +1333,12 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
             }
             styles++;
           }
+          await context.sync();
+          // Our own heading style goes on its paragraphs (character formatting set above stays)
+          toApply.forEach(({ name, indices }) => indices.forEach(i => {
+            const p = paragraphs.items[i];
+            if (p) p.style = name;
+          }));
           await context.sync();
           if (bordersSkipped) notes.push('A címek díszvonalát ez a Word nem tudja beállítani (asztali Word kell hozzá).');
         } catch (e) {

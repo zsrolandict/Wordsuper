@@ -678,25 +678,6 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                 <p className="text-neutral-400 pl-5">Csak írásjelek és szóközök változnak, a szavak nem. Számokhoz (6:98, 1,5), telefonszámhoz, dátumhoz, e-mail-címhez nem nyúl.</p>
               </div>
 
-              <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5" role="radiogroup" aria-label="Üres sorok">
-                <p className="font-semibold text-neutral-800">Üres sorok <span className="font-normal text-neutral-500">({summary.allEmpty.length}, ebből többszörös {summary.extraEmpty.length})</span></p>
-                {([
-                  ['keep', 'Maradjanak'],
-                  ['repeated', CATEGORY_LABELS.emptyParagraphs.label],
-                  ['all', `${CATEGORY_LABELS.allEmpty.label} – ajánlott`],
-                ] as const).map(([mode, label]) => (
-                  <label key={mode} className="flex items-start space-x-2 cursor-pointer">
-                    <input type="radio" name="empty-lines" className="mt-0.5" checked={emptyMode === mode} disabled={busy} onChange={() => setEmptyMode(mode)} />
-                    <span>{label}</span>
-                  </label>
-                ))}
-                <p className="text-neutral-500 pl-5">
-                  Modern dokumentumban nincs üres sor: a távolságot a bekezdés utáni ({pt(profile.bodySpaceAfter)}) és a címsor előtti ({pt(profile.headingSpaceBefore)}) térköz adja.
-                  Megmarad: a táblázat melletti, az aláírásvonal fölötti, az oldaltörést tartalmazó és a képet tartalmazó sor.
-                </p>
-                {emptyMode === 'all' && !options.categories.spacing && <p className="text-amber-700 pl-5">A Térközök kategória ki van kapcsolva: üres sorok nélkül a szöveg összecsúszhat.</p>}
-              </div>
-
               <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
                 <p className="font-semibold text-neutral-800">AI-nyomok <span className="font-normal text-neutral-500">– csak jelzés, a szöveget nem írom át</span></p>
                 {marksByKind.length === 0 ? (
@@ -733,6 +714,32 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                   <span className="text-neutral-500">{options.categories[c] ? (plan.counts[c] ? `${formatNumber(plan.counts[c])} helyen` : 'rendben') : 'kihagyva'}</span>
                 </label>
               ))}
+            </div>
+          )}
+
+          {/* Empty lines: the one thing that keeps a document from looking even, so it is on every tab */}
+          {summary.allEmpty.length > 0 && (
+            <div className={`border rounded-xl p-3 space-y-1.5 ${emptyMode === 'all' ? 'bg-white border-neutral-200' : 'bg-blue-50/60 border-blue-200'}`} role="radiogroup" aria-label="Üres sorok">
+              <p className="font-semibold text-neutral-900">Üres sorok (Enterek) a bekezdések között: {summary.allEmpty.length}</p>
+              <p className="text-neutral-600">Egységes, modern dokumentumban nincs üres sor: a bekezdések közti távolságot a térköz adja. Amíg az üres sorok maradnak, a térköz nem tud egyformán érvényesülni.</p>
+              {([
+                ['all', `Mind törlöm (${summary.allEmpty.length}) – a távolságot a térköz adja (ajánlott)`],
+                ['repeated', `Csak a dupla üres sorokat törlöm (${summary.extraEmpty.length})`],
+                ['keep', 'Megtartom az üres sorokat'],
+              ] as const).map(([mode, label]) => (
+                <label key={mode} className="flex items-start space-x-2 cursor-pointer">
+                  <input type="radio" name="empty-lines" className="mt-0.5" checked={emptyMode === mode} disabled={busy} onChange={() => setEmptyMode(mode)} />
+                  <span className={mode === 'all' ? 'font-medium' : ''}>{label}</span>
+                </label>
+              ))}
+              {emptyMode !== 'keep' && (
+                <div className="pl-5 space-y-1">
+                  <PointsInput label="Bekezdés utáni térköz" value={profile.bodySpaceAfter} disabled={busy} onChange={n => setProfileValue('bodySpaceAfter', n)} />
+                  <PointsInput label="Címsor előtti térköz" value={profile.headingSpaceBefore} disabled={busy} onChange={n => setProfileValue('headingSpaceBefore', n)} />
+                  <p className="text-neutral-500">A törölt üres sorok helyén ennyi lesz a távolság. Megmarad a táblázat melletti, az aláírásvonal fölötti, az oldaltörést és a képet tartalmazó sor. A törlés korrektúrával kerül be.</p>
+                  {!options.categories.spacing && <p className="text-amber-700">A Térközök kategória ki van kapcsolva: üres sorok nélkül a szöveg összecsúszhat.</p>}
+                </div>
+              )}
             </div>
           )}
 

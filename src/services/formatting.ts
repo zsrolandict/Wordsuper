@@ -289,7 +289,14 @@ export interface StyleUpdate {
   paragraph?: { spaceBefore?: number; spaceAfter?: number; lineSpacing?: number; alignment?: 'Left' | 'Justified' };
   /** A rule under (Heading 1) or a bar left of (Heading 2) the paragraph */
   border?: { location: 'Bottom' | 'Left'; color: string };
+  /** A style of our own, made when missing (for headings without a heading style) */
+  create?: boolean;
+  /** Paragraphs that get this style */
+  apply?: number[];
 }
+
+/** The style made for headings that have no heading style, so they can carry the rule too */
+export const CHAPTER_STYLE = 'ICT Fejezetcím';
 
 export interface TextFix {
   index: number;
@@ -429,6 +436,7 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
 
   // Word's own styles, so what is typed later looks the same; only what the switched-on categories cover
   const styleUpdates: StyleUpdate[] = [];
+  const paragraphs = audit.paragraphs;
   if (on.styles) {
     const localName = (builtIn: string, english: string) => audit.paragraphs.find(p => p.styleBuiltIn === builtIn && p.style)?.style ?? english;
     const font = (name: string) => (on.font ? { name } : {});
@@ -462,6 +470,16 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
       styleUpdates.push(update);
     });
     if (summary.titles) styleUpdates.push(headingStyle('Title', 'Title', profile.headingSize + 2, true));
+    // Headings without a heading style (bold or capital lines, "II. Az adásvétel") can carry the rule or the bar only
+    // through a paragraph style: one of our own, based on Normal, so their outline level and numbering stay
+    const chapterIndices = options.fakeHeadings ? paragraphs.flatMap((p, i) => (roleOf(p).kind === 'fake-heading' ? [i] : [])) : [];
+    const topLevel = levels.length === 0 || options.unifyHeadings;
+    const mark = topLevel && profile.h1Rule ? { location: 'Bottom' as const, color: profile.h1Rule }
+      : !topLevel && levels.length === 1 && profile.h2Bar ? { location: 'Left' as const, color: profile.h2Bar } : null;
+    if (on.headings && mark && chapterIndices.length) {
+      const chapter = headingStyle('Custom', CHAPTER_STYLE, headingSize('fake', profile, options.unifyHeadings, levels), false);
+      styleUpdates.push({ ...chapter, name: CHAPTER_STYLE, create: true, apply: chapterIndices, border: mark });
+    }
   }
   // An update with nothing in it is left out
   const usefulStyles = styleUpdates.filter(u => Object.keys(u.font).length || Object.keys(u.paragraph ?? {}).length || u.border);
