@@ -39,8 +39,8 @@ export function generateManifest(appUrl: string, ssoClientId?: string): string {
   <Version>1.1.0.0</Version>
   <ProviderName>ICT Europa Legal</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Word Writer (ICT Europa Legal)" />
-  <Description DefaultValue="A helpful assistant right inside your Word document."/>
+  <DisplayName DefaultValue="ICT LegalSuite" />
+  <Description DefaultValue="Szerződésszerkesztő és -ellenőrző asszisztens a Wordben (ICT Europa Legal)."/>
   
   <!-- Icons must be PNG (or JPG/GIF/BMP): desktop Word refuses a manifest with SVG icons -->
   <IconUrl DefaultValue="${baseUrl}/assets/icons/icon-32.png"/>
@@ -121,13 +121,13 @@ export function generateManifest(appUrl: string, ssoClientId?: string): string {
         <bt:Url id="Taskpane.Url" DefaultValue="${baseUrl}" />
       </bt:Urls>
       <bt:ShortStrings>
-        <bt:String id="GetStarted.Title" DefaultValue="Get started with Word Writer"/>
-        <bt:String id="CommandsGroup.Label" DefaultValue="Word Writer"/>
-        <bt:String id="TaskpaneButton.Label" DefaultValue="Word Writer"/>
+        <bt:String id="GetStarted.Title" DefaultValue="ICT LegalSuite"/>
+        <bt:String id="CommandsGroup.Label" DefaultValue="ICT LegalSuite"/>
+        <bt:String id="TaskpaneButton.Label" DefaultValue="ICT LegalSuite"/>
       </bt:ShortStrings>
       <bt:LongStrings>
-        <bt:String id="GetStarted.Description" DefaultValue="Your AI assistant inside Word is loaded."/>
-        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Click to open the Word Writer Taskpane"/>
+        <bt:String id="GetStarted.Description" DefaultValue="Az ICT LegalSuite betöltődött."/>
+        <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Az ICT LegalSuite munkaablak megnyitása"/>
       </bt:LongStrings>
     </Resources>${ssoClientId ? webApplicationInfo(baseUrl, ssoClientId) : ''}
   </VersionOverrides>

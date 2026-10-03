@@ -9,3 +9,10 @@ test('manifest: Microsoft sign-in only with a client ID, the resource on the add
   // The last child of VersionOverrides, after Resources (the schema's order)
   assert.match(xml, /<\/Resources>\s*<WebApplicationInfo>[\s\S]*<\/WebApplicationInfo>\s*<\/VersionOverrides>/);
 });
+
+test('manifest: the add-in is called ICT LegalSuite in Word', () => {
+  const xml = generateManifest('https://localhost:3444/');
+  assert.match(xml, /<DisplayName DefaultValue="ICT LegalSuite" \/>/);
+  assert.match(xml, /id="TaskpaneButton.Label" DefaultValue="ICT LegalSuite"/);
+  assert.doesNotMatch(xml, /Word Writer/);
+});
