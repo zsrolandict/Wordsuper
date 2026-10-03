@@ -1,4 +1,4 @@
-import { countMicrotypography, nbspFixes, quoteFixes, type Replacement } from './microtypography';
+import { countCleanup, countMicrotypography, dashFixes, englishQuoteFixes, markdownFixes, nbspFixes, punctuationFixes, quoteFixes, rangeFixes, type Replacement } from './microtypography';
 
 /**
  * The Formázás tab without AI: what the document's formatting looks like (fonts, sizes, spacing, headings), and the
@@ -53,6 +53,8 @@ export interface FormatAudit {
 
 export type Role =
   | { kind: 'empty' }
+  /** Nothing but a page/section break or a manual line break: never deleted, never formatted */
+  | { kind: 'break' }
   | { kind: 'title' }
   | { kind: 'heading'; level: number }
   /** Not a heading style, but looks like one: short, bold or all capitals, no closing punctuation */
@@ -63,9 +65,16 @@ export type Role =
 const HEADING = /^Heading(\d)$/;
 const FAKE_HEADING_MAX_CHARS = 100;
 
+/** Really empty: only spaces. A paragraph holding a page or section break (\f) or a manual line break (\v) is not */
+export const isBlank = (text: string) => /^[ \t\u00A0\u200B\u00AD]*$/.test(text);
+
+/** A line left for a signature ("______", "……………"): the empty lines above it make room for the signature */
+const SIGNATURE_LINE = /^[\s_.…-]*(_{4,}|\.{6,}|…{3,})[\s_.…-]*$/;
+
 export function roleOf(p: ParagraphFormat): Role {
   const text = p.text.trim();
-  if (!text) return { kind: 'empty' };
+  if (isBlank(p.text)) return { kind: 'empty' };
+  if (!text) return { kind: 'break' };
   if (p.styleBuiltIn === 'Title') return { kind: 'title' };
   const heading = HEADING.exec(p.styleBuiltIn);
   if (heading) return { kind: 'heading', level: Number(heading[1]) };
@@ -97,11 +106,19 @@ export interface AuditSummary {
   titles: number;
   /** Empty paragraphs right after another empty one: the extra blank lines */
   extraEmpty: number[];
+  /** Every empty paragraph used only as spacing, which the spacing settings can take over */
+  allEmpty: number[];
   /** Places with two or more spaces in a row */
   doubleSpaces: number;
   /** Places for a non-breaking space (§ 5, dates, laws, amounts) and straight double quotes */
   nbsp: number;
+  /** Straight double quotes and English opening quotes (“) */
   straightQuotes: number;
+  /** AI and pasted-text clean-up: em dashes and spaced hyphens, ranges, punctuation spacing, Markdown left-overs */
+  dashes: number;
+  ranges: number;
+  punctuation: number;
+  markdown: number;
   /** Footnote sizes; null when they can't be read */
   footnoteSizes: [number, number][] | null;
   dominant: { font: string; size: number; lineSpacing: number; spaceBefore: number; spaceAfter: number; alignment: 'Left' | 'Justified' };
@@ -113,11 +130,17 @@ export function summarize(audit: FormatAudit): AuditSummary {
   const text = audit.paragraphs.filter((_, i) => roles[i].kind === 'body' || roles[i].kind === 'table');
   const fonts = tally(text.map(p => p.font ?? ''));
   const sizes = tally(text.map(p => p.size).filter((s): s is number => !!s).map(round));
-  const extraEmpty = audit.paragraphs
-    .map((p, i) => i)
-    .filter(i => i > 0 && i < audit.paragraphs.length - 1 && roles[i].kind === 'empty' && roles[i - 1].kind === 'empty'
-      && !audit.paragraphs[i].tableLevel && !audit.paragraphs[i - 1].tableLevel);
+  // An empty paragraph is kept when it holds the document together: the last one, one in or next to a table (it
+  // keeps two tables apart, and Word needs a paragraph after a table), one right above a signature line
+  const paragraphs = audit.paragraphs;
+  const allEmpty = paragraphs
+    .map((_, i) => i)
+    .filter(i => roles[i].kind === 'empty' && i < paragraphs.length - 1
+      && !paragraphs[i].tableLevel && !paragraphs[i - 1]?.tableLevel && !paragraphs[i + 1]?.tableLevel
+      && !SIGNATURE_LINE.test(paragraphs[i + 1]?.text ?? ''));
+  const extraEmpty = allEmpty.filter(i => i > 0 && roles[i - 1].kind === 'empty');
   const micro = countMicrotypography(audit.paragraphs.map(p => p.text));
+  const cleanup = countCleanup(audit.paragraphs.map(p => p.text));
   const alignments = tally(body.map(p => p.alignment).filter(a => a === 'Left' || a === 'Justified'));
   return {
     fonts,
@@ -127,9 +150,14 @@ export function summarize(audit: FormatAudit): AuditSummary {
     fakeHeadings: audit.paragraphs.filter((_, i) => roles[i].kind === 'fake-heading').map(p => p.text.trim()),
     titles: roles.filter(r => r.kind === 'title').length,
     extraEmpty,
+    allEmpty,
     doubleSpaces: audit.paragraphs.reduce((n, p, i) => n + (roles[i].kind === 'empty' ? 0 : (p.text.match(/ {2,}/g)?.length ?? 0)), 0),
     nbsp: micro.nbsp,
-    straightQuotes: micro.quotes,
+    straightQuotes: micro.quotes + cleanup.curlyQuotes,
+    dashes: cleanup.dashes,
+    ranges: cleanup.ranges,
+    punctuation: cleanup.punctuation,
+    markdown: cleanup.markdown,
     footnoteSizes: audit.footnotes && tally(audit.footnotes.map(f => f.size).filter((s): s is number => !!s).map(round)),
     dominant: {
       font: fonts.find(([f]) => f)?.[0] ?? 'Calibri',
@@ -215,7 +243,7 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
   };
 }
 
-export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'styles' | 'emptyParagraphs' | 'doubleSpaces' | 'nbsp' | 'quotes';
+export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'styles' | 'emptyParagraphs' | 'allEmpty' | 'doubleSpaces' | 'nbsp' | 'quotes' | 'dashes' | 'ranges' | 'punctuation' | 'markdown';
 
 export interface FormatOptions {
   categories: Record<Category, boolean>;
@@ -228,10 +256,10 @@ export interface FormatOptions {
 /** Changes the formatting only: the text is never touched by these */
 export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment', 'color', 'indent', 'pagination', 'margins', 'styles'];
 /** These change the text (so they go in like any other text change, by the Track Changes rule) */
-export const TEXT_CATEGORIES: Category[] = ['nbsp', 'quotes', 'emptyParagraphs', 'doubleSpaces'];
+export const TEXT_CATEGORIES: Category[] = ['dashes', 'markdown', 'quotes', 'nbsp', 'ranges', 'punctuation', 'emptyParagraphs', 'allEmpty', 'doubleSpaces'];
 
 export const defaultOptions = (): FormatOptions => ({
-  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, styles: true, emptyParagraphs: false, doubleSpaces: false, nbsp: false, quotes: false },
+  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, styles: true, emptyParagraphs: false, allEmpty: false, doubleSpaces: false, nbsp: false, quotes: false, dashes: false, ranges: false, punctuation: false, markdown: false },
   fakeHeadings: true,
   unifyHeadings: false,
 });
@@ -265,9 +293,13 @@ export interface StyleUpdate {
 
 export interface TextFix {
   index: number;
-  nbsp: Replacement[];
+  /** Text replacements in this paragraph, the longest first (non-breaking spaces, dashes, ranges, spacing…) */
+  replacements: Replacement[];
   /** The replacement of each straight double quote, in order */
   quotes: ('„' | '”')[];
+  /** Markdown **bold** and *italic*: the texts between the asterisks */
+  bold: string[];
+  italic: string[];
 }
 
 export interface FormatPlan {
@@ -311,7 +343,7 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
   audit.paragraphs.forEach((p, index) => {
     let role = roleOf(p);
     if (role.kind === 'fake-heading' && !options.fakeHeadings) role = { kind: 'body' };
-    if (role.kind === 'empty') return;
+    if (role.kind === 'empty' || role.kind === 'break') return;
     const change: ParagraphChange = { index };
     const counted = new Set<Category>();
     const set = <K extends keyof ParagraphChange>(category: Category, key: K, value: ParagraphChange[K], changed: boolean) => {
@@ -436,18 +468,33 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
   counts.styles = usefulStyles.length;
 
   const textFixes: TextFix[] = [];
-  if (on.nbsp || on.quotes) {
+  if (TEXT_CATEGORIES.some(c => c !== 'emptyParagraphs' && c !== 'allEmpty' && c !== 'doubleSpaces' && on[c])) {
     audit.paragraphs.forEach((p, index) => {
       if (!p.text.trim()) return;
-      const fix: TextFix = { index, nbsp: on.nbsp ? nbspFixes(p.text) : [], quotes: on.quotes ? quoteFixes(p.text) : [] };
-      if (fix.nbsp.length || fix.quotes.length) textFixes.push(fix);
+      const md = on.markdown ? markdownFixes(p.text) : { replacements: [], bold: [], italic: [] };
+      const replacements = [
+        ...md.replacements,
+        ...(on.dashes ? dashFixes(p.text) : []),
+        ...(on.ranges ? rangeFixes(p.text) : []),
+        ...(on.punctuation ? punctuationFixes(p.text) : []),
+        ...(on.quotes ? englishQuoteFixes(p.text) : []),
+        ...(on.nbsp ? nbspFixes(p.text) : []),
+      ];
+      const fix: TextFix = { index, replacements, quotes: on.quotes ? quoteFixes(p.text) : [], bold: md.bold, italic: md.italic };
+      if (replacements.length || fix.quotes.length || fix.bold.length || fix.italic.length) textFixes.push(fix);
     });
   }
   counts.nbsp = on.nbsp ? summary.nbsp : 0;
   counts.quotes = on.quotes ? summary.straightQuotes : 0;
+  counts.dashes = on.dashes ? summary.dashes : 0;
+  counts.ranges = on.ranges ? summary.ranges : 0;
+  counts.punctuation = on.punctuation ? summary.punctuation : 0;
+  counts.markdown = on.markdown ? summary.markdown : 0;
 
-  const deleteEmpty = on.emptyParagraphs ? summary.extraEmpty : [];
-  counts.emptyParagraphs = deleteEmpty.length;
+  // Every empty line (the spacing takes over), or only the repeated ones
+  const deleteEmpty = on.allEmpty ? summary.allEmpty : on.emptyParagraphs ? summary.extraEmpty : [];
+  counts.allEmpty = on.allEmpty ? deleteEmpty.length : 0;
+  counts.emptyParagraphs = !on.allEmpty && on.emptyParagraphs ? deleteEmpty.length : 0;
   counts.doubleSpaces = on.doubleSpaces ? summary.doubleSpaces : 0;
   return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, styleUpdates: usefulStyles, textFixes, keepWithNextStyles, margins, counts };
 }

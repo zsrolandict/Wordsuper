@@ -168,7 +168,7 @@ test('microtypography only when asked, per paragraph', () => {
   options.categories.quotes = true;
   const plan = planFormatting(texts, defaultProfile(summarize(texts)), options);
   const last = plan.textFixes.at(-1)!;
-  assert.deepEqual([last.index, last.nbsp.map(r => r.find), last.quotes], [11, ['§ 5', '100 000 Ft'], ['„', '”']]);
-  assert.ok(plan.textFixes.some(f => f.nbsp.some(r => r.find === '2026. október 3.')), 'the date in the place line too');
+  assert.deepEqual([last.index, last.replacements.map(r => r.find), last.quotes], [11, ['§ 5', '100 000 Ft'], ['„', '”']]);
+  assert.ok(plan.textFixes.some(f => f.replacements.some(r => r.find === '2026. október 3.')), 'the date in the place line too');
   assert.equal(summarize(texts).straightQuotes, 2);
 });

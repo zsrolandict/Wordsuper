@@ -16,7 +16,9 @@ Alapelvek:
 
 | Fájl | Szerep |
 |---|---|
-| `src/services/microtypography.ts` | Magyar jogi mikrotipográfia: nem törő szóközök, magyar idézőjelek (tiszta logika, tesztelve) |
+| `src/services/microtypography.ts` | Szövegtisztítás szabályai: nem törő szóközök, idézőjelek, gondolatjelek, tartományok, írásjel körüli szóközök, Markdown-maradványok (tiszta logika, tesztelve) |
+| `src/services/aiMarks.ts` | AI-nyomok felismerése (csak jelzés) |
+| `src/services/customStyles.ts` | Saját stílusok tárolása és ellenőrzése |
 | `src/services/formatting.ts` | Tiszta logika: átvilágítás, szerepek, összegzés, stílusprofil, kész stílusok, a változtatási terv (nincs benne Word-hívás, ezért tesztelhető) |
 | `src/services/formatting.test.ts` | Egységtesztek a logikára |
 | `src/components/FormatPanel.tsx` | A „Formázás” fül felülete |
@@ -25,14 +27,40 @@ Alapelvek:
 
 ## 3. A felület
 
-- **Állapot-kártya** felül, egy sorban: „Állapot: 2 féle betűtípus, 1 stílus nélküli cím, 6 egyenes idézőjel, 12 hiányzó nem törő szóköz…” (zöld pont, ha minden egységes). A részletes lista a „Részletek” alatt lenyitható.
-- **Stíluskártyák**: kétoszlopos rács, mindegyik a saját betűképével és színével; az **ICT Europa Executive** felül, teljes szélességben, „★ Ajánlott” jelvénnyel. Mellette „Ebből a dokumentumból” és az öt további stílus.
-- **Élő előnézet**: kicsinyített mintaoldal a kiválasztott stílussal (főcím kiskapitálissal és kék vonallal, második szintű cím a kék csíkkal, szövegbekezdés a valódi betűtípussal, mérettel, színnel, sorközzel, igazítással). Ha a betűtípus nincs telepítve, a minta hasonlóval mutatja.
-- **Címsor-kérdés** és **ál-cím pipa** (ha van mire kérdezni).
-- **Szövegfésülés** kártya (csak ha van mit fésülni): nem törő szóközök, magyar idézőjelek, többszörös üres sorok, dupla szóközök, darabszámmal; alapból mind kikapcsolva.
-- **Egy nagy „Egységesítés” gomb** (ICT sötétkék), fölötte egy mondat arról, mi fog történni, alatta a biztonsági ígéret.
-- **„Részletes beállítások és finomhangolás”** lenyitható rész (alapból zárva): betűk, címek (betűtípus, méret, szín, kiskapitális, vonal a főcím alatt, csík a 2. szint mellett, térközök), bekezdések (térközök, sorköz, behúzások, igazítás), oldalmargók, „mint a kijelölt” gombok, és a kategóriák pipái darabszámmal.
-- **Előző állapot** kártya az egységesítés után.
+Felül mindig: **állapotsor** egy mondatban (pl. „1 stílus nélküli cím, 3 üres sor térköznek használva, 6 tisztítandó hely a szövegben, 2 AI-nyom”), a „Részletek” alatt a teljes lista. Alatta négy belső fül, egymás között át lehet kattintani:
+
+- **Stílusok:** stíluskártyák (felül az ICT Europa Executive „★ Ajánlott” jelvénnyel, „Ebből a dokumentumból”, a beépített stílusok és a **saját stílusok** „Saját” jelöléssel), „+ Új stílus” kártya, és az élő előnézet.
+- **Kézi:** élő előnézet, és minden érték kézzel: betűk, címek (betűtípus, méret, szín, kiskapitális, vonal a főcím alatt, csík a 2. szint mellett, térközök), bekezdések (térközök, sorköz, behúzások, igazítás), oldalmargók, „mint a kijelölt” gombok. Alul **Saját stílus**: név megadásával elmenthető, a kiválasztott saját stílus frissíthető vagy törölhető. A saját stílusok ezen a gépen tárolódnak, betöltéskor mezőnként ellenőrizve.
+- **Szöveg:** szövegtisztítás (pipák darabszámmal), üres sorok kezelése, AI-nyomok listája ugrással.
+- **Kategóriák:** mit egységesítsen (pipák darabszámmal).
+
+Mindegyik fül alatt ugyanaz: az ál-cím pipa, a címsor-kérdés (ha van), és az egy nagy **Egységesítés** gomb az összefoglaló mondattal; végül az előző állapot.
+
+### 3.1 Üres sorok – „a térköz veszi át”
+Három lehetőség: *Maradjanak* (alap), *Csak a többszörös üres sorok* (egy marad), *Minden üres sor (a térköz veszi át) – ajánlott*. Az utóbbinál minden csak térközként használt üres bekezdés törlődik, a távolságot a bekezdés utáni és a címsor előtti térköz adja – így lesz a dokumentum valóban egységes. Megmarad:
+- a táblázat előtti/utáni üres sor (két táblázatot választ el, illetve a Word igényli),
+- az aláírásvonal („________”, „………”) fölötti üres sor (hely az aláírásnak),
+- az oldal- vagy szakasztörést, kézi sortörést tartalmazó sor (nem üres, csak üresnek látszik),
+- a képet tartalmazó sor, és a dokumentum utolsó bekezdése.
+Ha a Térközök kategória ki van kapcsolva, a program figyelmeztet, hogy üres sorok nélkül a szöveg összecsúszhat.
+
+### 3.2 Szövegtisztítás (alapból mind kikapcsolva, korrektúrával)
+- **Gondolatjelek:** az angolos/AI-s hosszú gondolatjel (—), a dupla kötőjel (--) és a szóközök közötti kötőjel helyett a magyar „ – ” (a bekezdés elején felsorolásjelként „– ”). A szó belsejében lévő kötőjel (adás-vétel) marad.
+- **Markdown-maradványok** (AI-csevegésből bemásolt szöveg): `**félkövér**` és `*dőlt*` – a csillagok eltűnnek, a szöveg valódi félkövér/dőlt lesz; `# Cím` jelek törlése; a sor eleji `-`/`*` helyett „– ”.
+- **Magyar idézőjelek:** "…" és “…” helyett „…”.
+- **Nem törő szóközök:** § 5, 2013. évi V. törvény, 2026. október 3., 100 000 Ft.
+- **Tartományok:** 2020-2025 → 2020–2025, 5-10. pont → 5–10. pont. Csak két szám, az első kisebb, nincs vezető nulla, és nem egy hosszabb lánc része – a telefonszám, dátum, számlaszám, cégjegyzékszám marad.
+- **Szóközök az írásjeleknél:** nincs szóköz vessző, pont stb. előtt, van utána; számokhoz (6:98, 1,5), rövidítésekhez, e-mail-címhez, linkhez nem nyúl.
+- **Dupla szóközök.**
+Csak írásjelek és szóközök változnak, a szavak nem.
+
+### 3.3 AI-nyomok (csak jelzés, a szöveget nem írja át)
+Csoportonként lenyitható lista, minden találatnál „Ugrás →” (kijelöli a bekezdést):
+- tipikus AI-fordulatok („Fontos megjegyezni”, „kulcsfontosságú”, „átfogó”, „zökkenőmentes”, „nem csupán”, angol megfelelőik; a szokásos jogi szavak, pl. „továbbá”, nincsenek a listán),
+- angolos nagybetűs címek („A Szerződés Tárgya”),
+- hosszú, teljesen félkövér bekezdés,
+- láthatatlan karakterek (nulla szélességű szóköz, feltételes elválasztó),
+- emojik, díszjelek.
 
 ## 3/B. A működés lépései
 
@@ -127,7 +155,8 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 7. **Nem kezeli:** élőfej/élőláb, táblázatstílusok, a szövegtörzs színe, felsorolásjelek, szövegdobozok, szakaszonként eltérő margók (mindegyik szakaszra ugyanazt állítja).
 8. **A „címsor együtt marad” a stílust módosítja,** nem a bekezdéseket: ha a dokumentum a címsorstílusokat más célra is használja, mindenhol érvényes lesz. A mentett előző állapot ezt is visszaadja.
 9. **Kiskapitális, díszvonal, margók:** asztali Word kell hozzájuk (WordApiDesktop); ahol nincs, a többi lefut, és a program megmondja, mi maradt ki.
-10. **Mikrotipográfia:** szabályalapú; ritkább formákat (pl. „Ptk. 6:98. §”, „1.000.000,- Ft”) nem ismer fel.
+10. **Szövegtisztítás:** szabályalapú; ritkább formákat (pl. „Ptk. 6:98. §”, „1.000.000,- Ft”) nem ismer fel; az angol egyes idézőjelet (‘…’) az aposztróf miatt nem cseréli.
+12. **Saját stílusok** csak ezen a gépen tárolódnak; irodán belüli megosztásuk (export/import) még nincs.
 11. **A margók és a stílus szabályai még ellenőrizendők valódi Wordben** (az API-k újabb Word-változatokat igényelnek, és a szimulátor nem azonos a Worddel).
 
 ## 7. Utólag bekerült bővítések

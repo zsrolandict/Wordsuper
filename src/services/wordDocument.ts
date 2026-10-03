@@ -5,7 +5,7 @@ import { reviewCommentText, reviewFix, searchCandidates } from './review';
 import { planDocumentEdits, summarizeDocumentEdits, type DocumentEditOp } from './documentEdit';
 import { formatNumber } from './format';
 import { withAutoNumbers, type ParagraphInfo } from './structure';
-import type { FormatAudit, FormatPlan, PageMargins } from './formatting';
+import { isBlank, type FormatAudit, type FormatPlan, type PageMargins } from './formatting';
 
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
@@ -912,6 +912,9 @@ export async function readParagraphsForTranslation(): Promise<(ParagraphInfo & {
   return Word.run(context => loadParagraphs(context, true, true));
 }
 
+/** Word's search treats ^ as a special character */
+const wordSearchText = (text: string) => text.replace(/\^/g, '^^');
+
 /** Opening a new document from the add-in needs WordApi 1.3 */
 export const canOpenNewDocument = () => isSupported('1.3');
 
@@ -1208,8 +1211,8 @@ export async function readSelectionFormat(): Promise<{ font: string | null; size
 export interface FormatOutcome {
   /** Word styles updated (Normal, Címsor 1…) */
   styles: number;
-  /** Non-breaking spaces and quotation marks put in */
-  nbsp: number;
+  /** Text clean-up places changed (non-breaking spaces, dashes, ranges, spacing, Markdown) and quotation marks */
+  cleaned: number;
   quotes: number;
   formatted: number;
   /** Heading styles that now keep their paragraph with the next one */
@@ -1403,50 +1406,82 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
 
     let deleted = 0;
     let spaces = 0;
-    let nbsp = 0;
+    let cleaned = 0;
     let quotes = 0;
     let write: WriteMode | null = null;
     if (plan.textFixes.length || plan.deleteEmpty.length || plan.doubleSpaces) {
       ({ write } = await withTrackChanges(context, async () => {
-        // Microtypography: only spaces become non-breaking and only straight quotes change
-        const searches = plan.textFixes.map(fix => {
+        // Text clean-up. 1) Markdown **bold** and *italic*: the format comes, the asterisks go
+        const marked = plan.textFixes.flatMap(fix => {
           const paragraph = paragraphs.items[fix.index];
-          const nbspSearches = fix.nbsp.map(r => {
-            const found = paragraph.search(r.find, { matchCase: true });
+          return [...fix.bold.map(text => ({ marker: '**', text, bold: true })), ...fix.italic.map(text => ({ marker: '*', text, bold: false }))].map(m => {
+            const found = paragraph.search(wordSearchText(`${m.marker}${m.text}${m.marker}`), { matchCase: true });
             found.load('items');
-            return { r, found };
+            return { m, found };
           });
-          let quoteMarks: Word.RangeCollection | null = null;
-          if (fix.quotes.length) {
-            quoteMarks = paragraph.search('"', { matchCase: true });
-            quoteMarks.load('items/text');
-          }
-          return { fix, nbspSearches, quoteMarks };
+        });
+        if (marked.length) {
+          await context.sync();
+          const stars = marked.flatMap(({ m, found }) => found.items.map(range => {
+            if (m.bold) range.font.bold = true;
+            else range.font.italic = true;
+            const markers = range.search(m.marker, { matchCase: true });
+            markers.load('items');
+            return markers;
+          }));
+          await context.sync();
+          stars.forEach(markers => {
+            // The text between has no asterisk: the first and the last found are the markers
+            if (markers.items.length < 2) return;
+            markers.items[0].delete();
+            markers.items[markers.items.length - 1].delete();
+            cleaned++;
+          });
+          await context.sync();
+        }
+
+        // 2) Replacements, one round at a time: each search sees the earlier changes, so nothing is replaced twice
+        const ordered = plan.textFixes.map(fix => ({ fix, list: [...fix.replacements].sort((a, b) => b.find.length - a.find.length) }));
+        const rounds = Math.max(0, ...ordered.map(o => o.list.length));
+        for (let round = 0; round < rounds; round++) {
+          const searches = ordered.filter(o => o.list[round]).map(({ fix, list }) => {
+            const replacement = list[round];
+            const found = paragraphs.items[fix.index].search(wordSearchText(replacement.find), { matchCase: true });
+            found.load('items');
+            return { replacement, found };
+          });
+          await context.sync();
+          searches.forEach(({ replacement, found }) => found.items.forEach(range => {
+            range.insertText(replacement.replace, 'Replace');
+            cleaned++;
+          }));
+          await context.sync();
+        }
+
+        // 3) Straight quotes, paired in order
+        const quoteSearches = plan.textFixes.filter(fix => fix.quotes.length).map(fix => {
+          const quoteMarks = paragraphs.items[fix.index].search('"', { matchCase: true });
+          quoteMarks.load('items/text');
+          return { fix, quoteMarks };
         });
         await context.sync();
         let quotesSkipped = 0;
-        for (const { fix, nbspSearches, quoteMarks } of searches) {
-          nbspSearches.forEach(({ r, found }) => found.items.forEach(range => {
-            range.insertText(r.replace, 'Replace');
-            nbsp++;
-          }));
-          if (quoteMarks) {
-            // Word may find curly quotes for a straight one too: only the straight ones count, and only when their
-            // number is the one planned
-            const straight = quoteMarks.items.filter(range => range.text === '"');
-            if (straight.length === fix.quotes.length) {
-              straight.forEach((range, i) => range.insertText(fix.quotes[i], 'Replace'));
-              quotes += straight.length;
-            } else {
-              quotesSkipped++;
-            }
+        for (const { fix, quoteMarks } of quoteSearches) {
+          // Word may find curly quotes for a straight one too: only the straight ones count, and only when their
+          // number is the one planned
+          const straight = quoteMarks.items.filter(range => range.text === '"');
+          if (straight.length === fix.quotes.length) {
+            straight.forEach((range, i) => range.insertText(fix.quotes[i], 'Replace'));
+            quotes += straight.length;
+          } else {
+            quotesSkipped++;
           }
         }
         await context.sync();
         if (quotesSkipped) notes.push(`${quotesSkipped} bekezdésben az idézőjeleket nem cseréltem (nem egyértelmű a párosításuk).`);
 
         // Only paragraphs still empty; one holding a picture is kept
-        const candidates = plan.deleteEmpty.map(i => paragraphs.items[i]).filter(p => p && !p.text.trim());
+        const candidates = plan.deleteEmpty.map(i => paragraphs.items[i]).filter(p => p && isBlank(p.text));
         const pictures = candidates.map(p => {
           const items = p.inlinePictures;
           items.load('items');
@@ -1473,7 +1508,7 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         }
       }));
     }
-    return { formatted: plan.changes.length, styles, nbsp, quotes, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
+    return { formatted: plan.changes.length, styles, cleaned, quotes, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
   });
 }
 
