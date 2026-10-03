@@ -24,6 +24,8 @@ Alapelvek:
 | `src/components/FormatPanel.tsx` | A „Formázás” fül felülete |
 | `src/services/wordDocument.ts` | Word-réteg: `readFormatAudit`, `readSelectionFormat`, `applyFormatPlan`, `readDocumentFile` (Office.js) |
 | `src/services/download.ts` | Letöltés és dokumentumnév (közös a Kétnyelvű füllel) |
+| `src/services/documentElements.ts` | Élőfej/élőláb, aláírási blokk és tartalomjegyzék OOXML-je (tiszta logika, tesztelve) |
+| `src/components/FormatElements.tsx` | Az „Elemek” belső fül |
 
 ## 3. A felület
 
@@ -32,6 +34,7 @@ Felül mindig: **állapotsor** egy mondatban (pl. „1 stílus nélküli cím, 3
 - **Stílusok:** stíluskártyák (felül az ICT Europa Executive „★ Ajánlott” jelvénnyel, „Ebből a dokumentumból”, a beépített stílusok és a **saját stílusok** „Saját” jelöléssel), „+ Új stílus” kártya, és az élő előnézet.
 - **Kézi:** élő előnézet, és minden érték kézzel: betűk, címek (betűtípus, méret, szín, kiskapitális, vonal a főcím alatt, csík a 2. szint mellett, térközök), bekezdések (térközök, sorköz, behúzások, igazítás), oldalmargók, „mint a kijelölt” gombok. Alul **Saját stílus**: név megadásával elmenthető, a kiválasztott saját stílus frissíthető vagy törölhető. A saját stílusok ezen a gépen tárolódnak, betöltéskor mezőnként ellenőrizve.
 - **Szöveg:** szövegtisztítás (pipák darabszámmal), üres sorok kezelése, AI-nyomok listája ugrással.
+- **Elemek:** élőfej és élőláb, aláírási blokk, tartalomjegyzék (lásd 7.).
 - **Kategóriák:** mit egységesítsen (pipák darabszámmal).
 
 Mindegyik fül alatt ugyanaz: az ál-cím pipa, a címsor-kérdés (ha van), és az egy nagy **Egységesítés** gomb az összefoglaló mondattal; végül az előző állapot.
@@ -143,7 +146,7 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 
 - Egységtesztek (`formatting.test.ts`): szerepek, összegzés, terv (címsorlépcső, táblázat, igazítás, lábjegyzet), kategóriák, kész stílusok, címsor-betűtípus, behúzás, szín, listák kihagyása, címsor együtt marad, margók.
 - Böngészős teszt Word-szimulátorral (`ui-format.mjs`): átvilágítás, címsor-kérdés, alkalmazás korrektúra nélkül, a Word-beállítás visszaállítása, szöveg érintetlensége, előző állapot, szöveget módosító opciók, megváltozott dokumentum, mentés nélküli folytatás, profil a kijelölésből.
-- **Valódi Wordben még nem lett kipróbálva.** A szimulátor az Office.js viselkedését modellezi, de nem azonos vele.
+- **Valódi Wordben még nem lett kipróbálva.** A szimulátor az Office.js viselkedését modellezi, de nem azonos vele. A kipróbáláshoz: [TESZT-WORDBEN.md](TESZT-WORDBEN.md) és a `docs/teszt/WordWriter-teszt.docx`.
 
 ## 6. Ismert korlátok és nyitott kérdések
 
@@ -153,22 +156,25 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 4. **Számozott listák:** a lista bal behúzása és függő behúzása a Wordben a számozáshoz tartozik; az első sor behúzásának változtatása listaelemen kerülendő.
 5. **Ál-cím felismerés:** heurisztika (rövid, félkövér vagy csupa nagybetű, nincs záró írásjel); téves találat lehetséges (pl. aláírásnál egy név), ezért ki lehet venni a pipát.
 6. **Vegyes betűtípusú bekezdés:** az egész bekezdés egy betűtípust kap (a kiemelések megmaradnak).
-7. **Nem kezeli:** élőfej/élőláb, táblázatstílusok, a szövegtörzs színe, felsorolásjelek, szövegdobozok, szakaszonként eltérő margók (mindegyik szakaszra ugyanazt állítja).
+7. **Nem kezeli:** táblázatstílusok, a szövegtörzs színe, felsorolásjelek, szövegdobozok, szakaszonként eltérő margók (mindegyik szakaszra ugyanazt állítja).
 8. **A „címsor együtt marad” a stílust módosítja,** nem a bekezdéseket: ha a dokumentum a címsorstílusokat más célra is használja, mindenhol érvényes lesz. A mentett előző állapot ezt is visszaadja.
 9. **Kiskapitális, díszvonal, margók:** asztali Word kell hozzájuk (WordApiDesktop); ahol nincs, a többi lefut, és a program megmondja, mi maradt ki.
 10. **Szövegtisztítás:** szabályalapú; ritkább formákat (pl. „Ptk. 6:98. §”, „1.000.000,- Ft”) nem ismer fel; az angol egyes idézőjelet (‘…’) az aposztróf miatt nem cseréli.
-12. **Saját stílusok** csak ezen a gépen tárolódnak; irodán belüli megosztásuk (export/import) még nincs.
+12. **Saját stílusok** ezen a gépen tárolódnak; megosztás exporttal/importtal vagy a szerverről (irodai stílusok, lásd 7.).
 11. **A margók és a stílus szabályai még ellenőrizendők valódi Wordben** (az API-k újabb Word-változatokat igényelnek, és a szimulátor nem azonos a Worddel).
 
 ## 7. Utólag bekerült bővítések
 - Második kör: címek színe, bal és jobb behúzás, „címsor együtt marad a következő bekezdéssel”, oldalmargók.
 - Prémium átalakítás: ICT Europa Executive stílus, kiskapitális címek, díszvonal és csík, grafit szövegszín, a Word saját stílusainak frissítése, magyar jogi mikrotipográfia, új felület (stíluskártyák, élő előnézet, tömör állapotsor, lenyitható finomhangolás).
 
+- Definiált fogalmak egységesen: a definíció helyén félkövér és idézőjeles, a használatban sima (`planTermEmphasis`).
+- Elemek fül: élőfej és élőláb (oldalszám „Oldal X / Y” mezőkkel, BIZALMAS, azonosító, verzió; minden szakaszba, korrektúra nélkül, a meglévő felülírása előtt kérdez), aláírási blokk (két oszlop keret nélkül, a felek a definíciókból), tartalomjegyzék (`TOC \o "1-3"` és az „ICT Fejezetcím” stílus 1. szintként) frissítés gombbal.
+- Irodai stílusok: export/import (.json), a szerverről betöltött irodai stílusok (`OFFICE_STYLES_FILE`), zárolható (`OFFICE_STYLES_LOCKED`).
+
 Mind kategóriánként kapcsolható, és ugyanazt a védelmet kapja, mint a többi (átvilágítás, terv, mentés előtte, korrektúra nélküli írás, a Word-beállítás visszaállítása).
 
 ## 8. Kérdések, amiket érdemes megbeszélni
 
 - Mi legyen az ál-cím felismerés szabálya, és kell-e a felhasználónak bekezdésenként jóváhagyni?
-- A kész stílusokhoz tartozzanak-e margók, élőfej/élőláb, oldalszámozás?
-- Kell-e a stílusok mentése és megosztása irodán belül (saját „arculat” mentése, importálása)?
+- A kész stílusokhoz tartozzanak-e margók, élőfej/élőláb, oldalszámozás (most az Elemek fülön külön lehet beszúrni)?
 - Hogyan lehetne a végeredményt biztonságosabban ellenőrizni (előnézet a dokumentumban az alkalmazás előtt)?

@@ -116,7 +116,12 @@ Szerver (Node.js + Express)
   - duplikált definíció;
   - definiált, de nem használt fogalom;
   - idézőjeles, de nem definiált kifejezés (csak ha többször is előfordul);
-  - hiányzó melléklet (csak jelzés, mert lehet külön fájl).
+  - hiányzó melléklet (csak jelzés, mert lehet külön fájl);
+  - **szám–betű eltérés** összegeknél („4.500.000 Ft (azaz négymillió-hatszázezer forint)”);
+  - **tulajdoni hányadok**, amelyek összege nem 1 („1/2 és 1/3 arányban”);
+  - **felek elnevezése:** egyes számban definiált fél többes számban („Vevő” → „Vevők”), vagy fordítva;
+  - **számozás:** kimaradt vagy kétszer szereplő pontszám, kihagyott szint, kézzel beírt szám automatikus számozás mellett (mellékletnél újraindul).
+- **Kiküldés előtti ellenőrzés** (külön gomb a fül tetején, magától nem jelez): el nem fogadott korrektúrák szerzővel, megoldatlan megjegyzések, kitöltetlen helyek ([●], XX, ____, TBD; az aláírásvonal és a [Ptk.] nem), kiemelt és rejtett szöveg, szerzői adatok a dokumentum tulajdonságaiban. Mindegyik mellett Ugrás; a szerzői adatok egy gombbal törölhetők.
 
 ### 3.3 Összevetés fül
 
@@ -142,6 +147,7 @@ Mindkét esetben:
 - Az el nem fogadott korrektúrákat elfogadott állapotukban fordítja.
 - A kész dokumentum új, mentetlen Word-ablakban nyílik meg (WordApi 1.3); ha ez nem megy, letölthető .docx-ként.
 - Az irányt a program a szöveg alapján kitalálja, egy gombbal megfordítható.
+- **Frissítés csak a változásokra** (kapcsolható, „Szinkron frissítés”): ha feltöltöd a korábban itt készült kétnyelvű változatot, a szó szerint változatlan bekezdések a korábbi fordítást kapják, csak az új, a módosult és a korábban piros sorok mennek az AI-hoz. Az újrafordított sorok sárga hátteret kapnak. Kikapcsolva minden sor újra fordítódik.
 
 ### 3.5 Formázás fül (AI nélkül)
 
@@ -151,7 +157,10 @@ Mindkét esetben:
 - **Egységes stílus:** betűtípus, szövegméret, címsorméret, lábjegyzetméret, bekezdés utáni és címsor előtti térköz, igazítás (sorkizárt / balra zárt). Alapérték a dokumentum leggyakoribb beállítása; a „mint a kijelölt” gombbal egy jól formázott bekezdésről vagy címről is átvehető.
 - **Felület:** tömör állapotsor, stíluskártyák (kiemelve az **ICT Europa Executive**: Cambria, grafit szöveg, kiskapitális sötétkék címek, kék vonal a főcím alatt, kék csík a második szint mellett), élő előnézet, egy nagy „Egységesítés” gomb; a pontos értékek a lenyitható „Részletes beállítások és finomhangolás” alatt.
 - **A Word saját stílusai is** frissülnek (Normál, Címsor 1…, Cím), így az utána begépelt szöveg is egységes; a táblázatcellák térköze és igazítása ilyenkor rögzítésre kerül.
-- **Belső fülek:** Stílusok (kártyák, saját stílusok, előnézet) | Kézi (minden érték, saját stílus mentése/frissítése/törlése) | Szöveg (szövegtisztítás, üres sorok, AI-nyomok) | Kategóriák.
+- **Belső fülek:** Stílusok (kártyák, saját stílusok, előnézet) | Kézi (minden érték, saját stílus mentése/frissítése/törlése) | Szöveg (szövegtisztítás, üres sorok, AI-nyomok) | Elemek (élőfej/élőláb, aláírási blokk, tartalomjegyzék) | Kategóriák.
+- **Definiált fogalmak egységesen** (kategória): a definíció helyén félkövér és idézőjeles, a használatban sima; korrektúra nélkül, mint a többi formázás.
+- **Elemek:** élőfej és élőláb az iroda arculatában („Oldal 3 / 12”, BIZALMAS, dokumentumazonosító, verzió; a meglévő felülírása előtt rákérdez), aláírási blokk a kurzor helyére (a felek a definíciókból, hely, dátum, „képviseli” sor), tartalomjegyzék a Címsor és az „ICT Fejezetcím” stílusú címekből, frissítés gombbal.
+- **Irodai stílusok:** a saját stílusok exportálhatók és importálhatók (.json); az üzemeltető a szerverre teheti őket (`OFFICE_STYLES_FILE`), ekkor mindenkinél „Irodai” csoportban jelennek meg; `OFFICE_STYLES_LOCKED=true` mellett csak ezek választhatók, és nem szerkeszthetők.
 - **Üres sorok:** „Minden üres sor (a térköz veszi át)” – a térközként használt üres bekezdések törlődnek; a táblázat melletti, az aláírásvonal fölötti, a törést vagy képet tartalmazó sor marad.
 - **Szövegtisztítás** (alapból ki, korrektúrával): gondolatjelek (— és - helyett –), Markdown-maradványok (**félkövér** → valódi félkövér), magyar idézőjelek, nem törő szóközök, tartományok (2020–2025), szóközök az írásjeleknél, dupla szóközök.
 - **AI-nyomok** (csak jelzés, ugrással): tipikus AI-fordulatok, angolos nagybetűs címek, hosszú félkövér bekezdések, láthatatlan karakterek, emojik.
@@ -258,12 +267,25 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
 ## 5/B. Auditnapló
 
 - Minden AI-műveletről egy JSON-sor készül, **tartalom nélkül**:
-  - időpont, felhasználó, IP. Személyes hozzáférési kulccsal (`APP_ACCESS_KEYS`, kollégánként külön, egyenként visszavonható) a kulcs gazdája, ellenőrzötten (`verified: true`); közös kulccsal a Beállításokban beírt név, ellenőrizetlenül (`verified: false`);
+  - időpont, felhasználó, IP és a belépés módja (`auth`). Microsoft-fiókos belépésnél a munkahelyi fiók e-mail-címe, ellenőrzötten (`verified: true`, `auth: "microsoft"`); személyes hozzáférési kulccsal (`APP_ACCESS_KEYS`, kollégánként külön, egyenként visszavonható) a kulcs gazdája, szintén ellenőrzötten; közös kulccsal a Beállításokban beírt név, ellenőrizetlenül (`verified: false`);
   - művelet, méretek, maszkolás be/ki és a kitakart elemek száma;
   - modell, hely, státusz, időtartam, tokenszám.
 - A napló a szerver naplójába (Cloud Logging) kerül, és ha be van állítva, fájlba is (`AUDIT_LOG_FILE`).
 - Az INDITAS.bat figyelmeztet, ha a program mappája a OneDrive-on van: ilyenkor a `.env` (a kulcsokkal) és a naplófájl a felhőbe is szinkronizálódik, és a mappa megosztásával a kulcsok is továbbadódnak.
 - Az adatvédelmi részletek külön dokumentumban vannak: [ADATVEDELMI-TAJEKOZTATO.md](ADATVEDELMI-TAJEKOZTATO.md).
+
+## 5/C. Belépés: hozzáférési kulcs vagy Microsoft-fiók
+
+- `AUTH_MODE=key` (alap): hozzáférési kulcs, mint eddig.
+- `AUTH_MODE=both`: a munkaablak a Wordbe bejelentkezett munkahelyi fiókkal lép be (Office SSO), és ha az nem megy, a kulccsal.
+- `AUTH_MODE=microsoft`: csak Microsoft-fiókkal; nincs közös kulcs.
+- A szerver a tokent a Microsoft nyilvános kulcsaival ellenőrzi: aláírás, lejárat, az iroda könyvtára (`MS_TENANT_ID`), ez a bővítmény (`MS_CLIENT_ID`), `access_as_user` jogosultság, és ha megadják, a domain (`MS_ALLOWED_DOMAINS`). Jelszó nem jut el a szerverhez.
+- A háttérben futó ellenőrzések soha nem dobnak fel bejelentkező ablakot; a Beállításokban látszik, kinek látja a szerver a felhasználót.
+- Beállítás az Azure-ban és hibakeresés: [MICROSOFT-BELEPES.md](MICROSOFT-BELEPES.md).
+
+## 5/D. Hibajelentés
+
+Beállítások → Hibajelentés: a felhasználó leírja, mi történt, és a jelentés másolható vagy letölthető. Benne van a verzió, a Word API-szint, a kapcsolók állása és az utolsó események (kérések módja, mérete, kimenetele, hibakódok). Dokumentumszöveg, név, kulcs és token nincs benne; a hibaüzenetekből a számok és az idézett szövegek ki vannak takarva.
 
 ## 6. Ismert korlátok, kockázatok
 
@@ -280,7 +302,8 @@ Ezek a **saját** korlátaink, nem a modellé; szükség esetén emelhetők. A k
   - Minden indításkor lehúzza a legfrissebb változatot (ha van git), leállítja a régi szervert, törli a Word gyorsítótárát, újat indít a `https://localhost:3444` címen, és megnyitja a Wordöt a bővítménnyel.
   - A Beállítások alján látszik a felület és a szerver verziója (git commit); eltérésnél figyelmeztet.
 - **Arculat:** ICT Europa Legal logó a fejlécben (a végleges logófájl még hiányzik).
-- **Következő fázis (II.):** Microsoft-fiókos belépés (ellenőrzött felhasználó az auditnaplóban), költségkövetés ügyfélcímkénként.
+- **Kipróbálás valódi Wordben:** tesztdokumentum minden új funkció szándékos hibáival és lépésenkénti ellenőrzőlista: [TESZT-WORDBEN.md](TESZT-WORDBEN.md).
+- **Következő fázis (II.):** költségkövetés ügyfélcímkénként. (A Microsoft-fiókos belépés elkészült, lásd 5/C.)
 
 ## 8. Kérdések, amiket érdemes megbeszélni
 
