@@ -33,6 +33,8 @@ if not "%OLDHEAD%"=="%NEWHEAD%" (
   if not errorlevel 1 set "NEED_INSTALL=1"
 )
 if not exist node_modules set "NEED_INSTALL=1"
+rem Felbeszakadt telepites utan hianyozhat a szerver inditoja: ilyenkor ujra telepit
+if not exist node_modules\.bin\tsx.cmd set "NEED_INSTALL=1"
 if defined NEED_INSTALL (
   echo Fuggosegek telepitese ^(par perc^)...
   call npm ci
