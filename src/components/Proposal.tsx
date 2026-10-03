@@ -409,7 +409,7 @@ export default function Proposal({
               <button
                 key={String(changes)}
                 onClick={() => setShowChanges(changes)}
-                className={`px-2 py-0.5 rounded-full border ${showChanges === changes ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}
+                className={`px-2 py-0.5 rounded-full border ${showChanges === changes ? 'bg-navy text-white border-navy' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}
               >
                 {changes ? 'Változások' : 'Új szöveg'}
               </button>

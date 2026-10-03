@@ -63,8 +63,8 @@ export default function PlaybookPanel({ accessKey, onClose }: { accessKey: strin
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
-      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 text-[#0f2350] shrink-0 shadow-sm flex items-center">
-        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-neutral-100" aria-label="Vissza"><ArrowLeft className="w-5 h-5" /></button>
+      <div className="bg-navy border-b-2 border-brass px-4 py-3 text-white shrink-0 shadow-sm flex items-center">
+        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-white/10" aria-label="Vissza"><ArrowLeft className="w-5 h-5" /></button>
         <h1 className="text-lg font-bold">Playbookok</h1>
       </div>
       <div className="flex-1 overflow-y-auto p-3 space-y-3 text-sm">
@@ -171,7 +171,7 @@ function PlaybookEditor({ initial, onSave, onCancel }: { initial: Playbook; onSa
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
-      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 text-[#0f2350] shrink-0 shadow-sm flex items-center">
+      <div className="bg-navy border-b-2 border-brass px-4 py-3 text-white shrink-0 shadow-sm flex items-center">
         <button onClick={onCancel} className="mr-2 p-1 rounded-lg hover:bg-neutral-100" aria-label="Mégse"><ArrowLeft className="w-5 h-5" /></button>
         <h1 className="text-lg font-bold">Playbook szerkesztése</h1>
       </div>

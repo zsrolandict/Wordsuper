@@ -102,8 +102,8 @@ export default function SettingsPanel({
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
-      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 text-[#0f2350] shrink-0 shadow-sm flex items-center">
-        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-neutral-100 transition-colors" aria-label="Vissza">
+      <div className="bg-navy border-b-2 border-brass px-4 py-3 text-white shrink-0 shadow-sm flex items-center">
+        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-white/10 transition-colors" aria-label="Vissza">
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-lg font-bold">Beállítások</h1>
@@ -487,7 +487,7 @@ export default function SettingsPanel({
       <div className="bg-white border-t border-neutral-200 px-3 py-2 shrink-0 flex items-center gap-2">
         <button
           onClick={save}
-          className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-[#0f2350] hover:bg-[#1c3a7a] rounded-lg transition-colors"
+          className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-navy hover:bg-navy-light rounded-lg transition-colors"
         >
           <Save className="w-4 h-4 mr-1.5" />Mentés
         </button>

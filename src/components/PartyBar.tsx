@@ -34,7 +34,7 @@ export default function PartyBar({ party, onChange }: { party: string; onChange:
     return (
       <div className="flex items-center justify-between bg-white border-b border-neutral-200 px-3 py-1 text-[11px] text-neutral-600 shrink-0">
         <span className="flex items-center min-w-0">
-          <UserRound className="w-3.5 h-3.5 mr-1 shrink-0 text-[#29abe2]" />
+          <UserRound className="w-3.5 h-3.5 mr-1 shrink-0 text-brass" />
           <span className="mr-1 shrink-0">Képviselt fél:</span>
           {party ? <strong className="text-neutral-900 truncate">{party}</strong> : <span className="text-neutral-400 truncate">nincs megadva (semleges)</span>}
         </span>
@@ -45,7 +45,7 @@ export default function PartyBar({ party, onChange }: { party: string; onChange:
 
   return (
     <div className="bg-white border-b border-neutral-200 px-3 py-2 text-xs space-y-1.5 shrink-0">
-      <p className="font-medium text-neutral-800 flex items-center"><UserRound className="w-3.5 h-3.5 mr-1 text-[#29abe2]" />Kit képviselünk ebben a dokumentumban?</p>
+      <p className="font-medium text-neutral-800 flex items-center"><UserRound className="w-3.5 h-3.5 mr-1 text-brass" />Kit képviselünk ebben a dokumentumban?</p>
       <div className="flex flex-wrap gap-1.5">
         {suggestions === null && <span className="flex items-center text-neutral-400"><Loader2 className="w-3 h-3 mr-1 animate-spin" />A dokumentum feleit keresem…</span>}
         {suggestions?.map(s => (

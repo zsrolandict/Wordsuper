@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, PenTool, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Paintbrush, Zap, Undo2 } from 'lucide-react';
+import { Send, PenLine, MessageSquareText, FilePlus2, SearchCheck, AlertCircle, Loader2, House, Settings as SettingsIcon, Square, KeyRound, MessageSquare, ListTree, GitCompare, Languages, Paintbrush, Zap, Undo2 } from 'lucide-react';
 import { ASSISTANT_MODES, MAX_INSTRUCTION_CHARS, parseClarification, splitExplanation, trimHistory, type Depth, type AIRequestBody, type HistoryTurn, type Mode, type ReviewFinding } from '../shared/aiConfig';
 import { describeRequestError, fetchServerInfo, needsSettings, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
@@ -62,6 +62,9 @@ import SendPreview, { type PreviewDecision } from './SendPreview';
 import { loadParty, saveParty } from '../services/parties';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, looksLikeReview, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
 import BusyIndicator from './BusyIndicator';
+
+/** Line icons of the four assistant modes */
+const MODE_ICONS = { edit: PenLine, comment: MessageSquareText, generate: FilePlus2, review: SearchCheck };
 
 interface Message {
   id: string;
@@ -1142,15 +1145,8 @@ export default function TaskPane() {
       )}
 
       {/* Header */}
-      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 shrink-0 shadow-sm z-10 flex items-center justify-between">
-        <div className="min-w-0">
-          <Logo className="h-5 max-w-full" />
-          <h1 className="text-xs font-semibold text-[#0f2350] flex items-center mt-1 min-w-0">
-            <PenTool className="w-3.5 h-3.5 mr-1 text-[#29abe2] shrink-0" />
-            <span className="whitespace-nowrap">Word Writer</span>
-            <span className="ml-1.5 font-normal text-neutral-500 truncate">· szerkessz, véleményezz, generálj</span>
-          </h1>
-        </div>
+      <div className="bg-navy px-3 py-2.5 shrink-0 shadow-sm z-10 flex items-center justify-between border-b-2 border-brass">
+        <Logo />
         <div className="flex items-center space-x-1.5 shrink-0">
           <BusyIndicator writing={isApplying} />
           {tab === 'assistant' && messages.length > 1 && (
@@ -1158,7 +1154,7 @@ export default function TaskPane() {
               onClick={() => goToMainMenu()}
               disabled={isBusy}
               title={isBusy ? 'Várd meg, amíg befejeződik a művelet' : 'Vissza a kezdőképernyőre, új beszélgetéssel'}
-              className="flex items-center px-2.5 py-1.5 text-xs font-medium text-[#0f2350] bg-neutral-100 hover:bg-neutral-200 disabled:opacity-50 disabled:hover:bg-neutral-100 rounded-lg transition-colors"
+              className="flex items-center px-2.5 py-1.5 text-xs font-medium text-white bg-white/10 hover:bg-white/20 disabled:opacity-50 disabled:hover:bg-white/10 rounded-lg transition-colors"
             >
               <House className="w-4 h-4 mr-1" />
               Főmenü
@@ -1168,7 +1164,7 @@ export default function TaskPane() {
             onClick={() => setView('settings')}
             title="Beállítások"
             aria-label="Beállítások"
-            className="p-1.5 text-[#0f2350] bg-neutral-100 hover:bg-neutral-200 rounded-lg transition-colors"
+            className="p-1.5 text-white bg-white/10 hover:bg-white/20 rounded-lg transition-colors"
           >
             <SettingsIcon className="w-4 h-4" />
           </button>
@@ -1183,7 +1179,7 @@ export default function TaskPane() {
             role="tab"
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
-            className={`flex-1 min-w-0 flex items-center justify-center px-0.5 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-blue-600 text-blue-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'}`}
+            className={`flex-1 min-w-0 flex items-center justify-center px-0.5 py-2 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${tab === t.id ? 'border-brass text-navy' : 'border-transparent text-neutral-500 hover:text-neutral-800'}`}
           >
             {t.icon}{t.label}
           </button>
@@ -1377,14 +1373,15 @@ export default function TaskPane() {
         )}
 
         {/* Mode Toggle */}
-        <div className="grid grid-cols-4 gap-1 mb-3 bg-neutral-100 p-1 rounded-lg w-full">
+        <div className="grid grid-cols-4 gap-1.5 mb-3 w-full">
           {ASSISTANT_MODES.map(m => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`py-1 text-[11px] leading-tight font-medium rounded-md transition-colors ${mode === m ? 'bg-white shadow text-neutral-900' : 'text-neutral-500 hover:text-neutral-700'}`}
+              aria-pressed={mode === m}
+              className={`py-1.5 text-[11px] leading-tight font-medium rounded-lg border bg-white transition-colors ${mode === m ? 'border-brass ring-1 ring-brass text-navy shadow-sm' : 'border-neutral-200 text-neutral-600 hover:border-neutral-300 hover:text-navy'}`}
             >
-              <span className="block text-sm">{MODE_LABELS[m].icon}</span>
+              {React.createElement(MODE_ICONS[m as keyof typeof MODE_ICONS], { className: 'w-4 h-4 mx-auto mb-0.5', strokeWidth: 1.6 })}
               {MODE_LABELS[m].label}
             </button>
           ))}
@@ -1417,7 +1414,7 @@ export default function TaskPane() {
               key={preset}
               onClick={() => handleSend(preset)}
               disabled={isBusy}
-              className="px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 border border-neutral-200 rounded-full transition-colors whitespace-nowrap disabled:opacity-50"
+              className="px-3 py-1.5 text-xs bg-brass-pale hover:bg-brass-light text-navy border border-brass-light rounded-full transition-colors whitespace-nowrap disabled:opacity-50"
             >
               {preset}
             </button>
@@ -1445,7 +1442,7 @@ export default function TaskPane() {
               aria-checked={settings.depth === depth}
               title={title}
               onClick={() => updateSettings(s => ({ ...s, depth }))}
-              className={`px-2 py-0.5 mr-1 rounded-full border ${settings.depth === depth ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 hover:bg-neutral-100'}`}
+              className={`px-2 py-0.5 mr-1 rounded-full border ${settings.depth === depth ? 'bg-navy text-white border-navy' : 'border-neutral-300 hover:bg-neutral-100'}`}
             >
               {label}
             </button>

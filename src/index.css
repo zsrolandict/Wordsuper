@@ -1,1 +1,29 @@
 @import "tailwindcss";
+
+/*
+ * TRIPART – Legal Contract Intelligence: the add-in's look. The former bright blue is replaced everywhere by a calm
+ * slate-navy scale (the classes stay "blue-*", only their colours change), the greys get a warm off-white base,
+ * and brass marks what is chosen or important.
+ */
+@theme {
+  --color-blue-50: #f2f4f7;
+  --color-blue-100: #e3e8ee;
+  --color-blue-200: #c9d2dd;
+  --color-blue-300: #a3b0c1;
+  --color-blue-400: #7a8aa0;
+  --color-blue-500: #56677f;
+  --color-blue-600: #34455e;
+  --color-blue-700: #283850;
+  --color-blue-800: #1f2d44;
+  --color-blue-900: #172236;
+
+  --color-neutral-50: #f8f7f4;
+  --color-neutral-100: #f0eee9;
+  --color-neutral-200: #e3e0d9;
+
+  --color-navy: #1f2d44;
+  --color-navy-light: #2c3b53;
+  --color-brass: #b08d57;
+  --color-brass-light: #ede3d1;
+  --color-brass-pale: #f7f1e6;
+}

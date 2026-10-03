@@ -10,9 +10,9 @@ test('manifest: Microsoft sign-in only with a client ID, the resource on the add
   assert.match(xml, /<\/Resources>\s*<WebApplicationInfo>[\s\S]*<\/WebApplicationInfo>\s*<\/VersionOverrides>/);
 });
 
-test('manifest: the add-in is called ICT LegalSuite in Word', () => {
+test('manifest: the add-in is called TRIPART in Word', () => {
   const xml = generateManifest('https://localhost:3444/');
-  assert.match(xml, /<DisplayName DefaultValue="ICT LegalSuite" \/>/);
-  assert.match(xml, /id="TaskpaneButton.Label" DefaultValue="ICT LegalSuite"/);
+  assert.match(xml, /<DisplayName DefaultValue="TRIPART" \/>/);
+  assert.match(xml, /id="TaskpaneButton.Label" DefaultValue="TRIPART"/);
   assert.doesNotMatch(xml, /Word Writer/);
 });

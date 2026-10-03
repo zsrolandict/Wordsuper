@@ -1,7 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-title Word Writer - ICT Europa Legal
+title TRIPART - Legal Contract Intelligence
 
 rem --- Node.js ---
 where node >nul 2>nul
@@ -91,11 +91,11 @@ powershell -NoProfile -Command "Remove-Item -Path ($env:LOCALAPPDATA + '\Microso
 
 rem --- Szerver ---
 echo Szerver inditasa: https://localhost:3444
-start "Word Writer szerver" cmd /k "npm run word:server"
+start "TRIPART szerver" cmd /k "npm run word:server"
 echo Varok, amig a szerver elindul...
 powershell -NoProfile -Command "$i=0; while ($i -lt 90) { try { (New-Object Net.Sockets.TcpClient('127.0.0.1', 3444)).Close(); exit 0 } catch { Start-Sleep 1; $i++ } }; exit 1"
 if errorlevel 1 (
-  echo A szerver nem indult el 90 masodperc alatt. Nezd meg a "Word Writer szerver" ablakot.
+  echo A szerver nem indult el 90 masodperc alatt. Nezd meg a "TRIPART szerver" ablakot.
   goto hiba
 )
 
@@ -104,7 +104,7 @@ echo Word megnyitasa a bovitmennyel...
 call npm run word:sideload
 if errorlevel 1 goto hiba
 echo.
-echo Kesz. A Word Kezdolap szalagjan kattints a "Word Writer" gombra.
+echo Kesz. A Word Kezdolap szalagjan kattints a "TRIPART" gombra.
 echo A bovitmeny Beallitasai alatt latszik a verzio: ha a felulet es a szerver verzioja megegyezik, minden friss.
 echo A szerver ablakot hagyd nyitva, amig hasznalod. Eltavolitas: npm run word:remove
 pause

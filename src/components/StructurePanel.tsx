@@ -224,7 +224,7 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
           <button
             key={key}
             onClick={() => setList(key)}
-            className={`px-2.5 py-1 rounded-full border ${list === key ? 'bg-neutral-800 text-white border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}
+            className={`px-2.5 py-1 rounded-full border ${list === key ? 'bg-navy text-white border-navy' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'}`}
           >
             {key === 'issues' ? `Problémák (${graph?.issues.length ?? 0})` : key === 'terms' ? `Fogalmak (${graph?.terms.length ?? 0})` : `Jogszabályok (${graph ? groupLegalRefs(graph.legalRefs).length : 0})`}
           </button>

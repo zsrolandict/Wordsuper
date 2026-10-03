@@ -43,7 +43,7 @@ export default function App() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-neutral-50 p-6 font-sans text-neutral-800">
         <div className="bg-white border border-neutral-200 rounded-2xl p-5 shadow-sm text-sm space-y-2">
-          <h1 className="text-base font-bold">Ez a Word-verzió túl régi a Word Writerhez</h1>
+          <h1 className="text-base font-bold">Ez a Word-verzió túl régi a TRIPART-hoz</h1>
           <p>A beépülő a megjegyzésekhez és a korrektúrához a Word API {REQUIRED_WORD_API_VERSION}-es verzióját használja, amit ez a Word nem ismer.</p>
           <p>Használd a Microsoft 365-ös Wordöt, a Word 2021-et vagy újabbat, illetve a Word Online-t.</p>
         </div>

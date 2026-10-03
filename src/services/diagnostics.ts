@@ -77,7 +77,7 @@ function apiSupport(): Record<string, string> {
 export function buildReport(context: ReportContext): string {
   const diagnostics = typeof Office !== 'undefined' ? Office.context?.diagnostics : undefined;
   return JSON.stringify({
-    report: 'Word Writer hibajelentés',
+    report: 'TRIPART hibajelentés',
     created: new Date().toISOString(),
     description: context.description.slice(0, 2000),
     app: context.appVersion,

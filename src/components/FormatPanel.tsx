@@ -316,7 +316,7 @@ export default function FormatPanel({ active, accessKey, onDocumentChanged }: { 
       setStatus(`📥 ${added.length} stílust vettem át${styles.length - added.length ? `, ${styles.length - added.length} ilyen nevű már volt` : ''}${skipped ? `, ${skipped} hibásat kihagytam` : ''}.`);
     } catch (e) {
       console.error(e);
-      setError('Ez nem Word Writer stílusfájl.');
+      setError('Ez nem TRIPART-stílusfájl.');
     } finally {
       if (importInput.current) importInput.current.value = '';
     }

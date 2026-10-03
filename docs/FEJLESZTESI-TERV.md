@@ -113,3 +113,4 @@ mehetnek a jogtárhoz, a dokumentum szövege nem.
 | Egész dokumentum szerkesztése: indoklás bekezdésenként (lenyitható „Miért?”), összegzés, „Mindet elfogadom” felül is, Mind / Egyik sem; a stílusutasítás nem nyúlhat jogszabályhelyhez, összeghez, dátumhoz, névhez | **kész** |
 | Jogszabály-hivatkozások egységesítése: első helyen teljes cím „(a továbbiakban: Ptk.)”, utána rövidítés | tervezve |
 | Súgó-asszisztens: kérdezni lehet, mit hol talál a bővítményben | tervezve |
+| Új név és arculat: **TRIPART – Legal Contract Intelligence**; sötétkék fejléc, visszafogott palaszürke a kék helyett, sárgaréz kiemelés, vonalas ikonok; a munkajelző a forgó jel | **kész** (a logó helyőrző, a végleges fájlra cserélendő) |

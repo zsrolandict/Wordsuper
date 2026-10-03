@@ -51,8 +51,8 @@ export default function ClausePanel({ accessKey, busy, onClose, onInsert, onFit 
 
   return (
     <div className="h-screen bg-neutral-50 flex flex-col font-sans text-neutral-900">
-      <div className="bg-white border-b-2 border-[#29abe2] px-4 py-3 text-[#0f2350] shrink-0 shadow-sm flex items-center">
-        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-neutral-100" aria-label="Vissza"><ArrowLeft className="w-5 h-5" /></button>
+      <div className="bg-navy border-b-2 border-brass px-4 py-3 text-white shrink-0 shadow-sm flex items-center">
+        <button onClick={onClose} className="mr-2 p-1 rounded-lg hover:bg-white/10" aria-label="Vissza"><ArrowLeft className="w-5 h-5" /></button>
         <h1 className="text-lg font-bold">Záradéktár</h1>
       </div>
       <div className="p-3 border-b border-neutral-200 bg-white space-y-1.5">

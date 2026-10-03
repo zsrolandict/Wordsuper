@@ -37,7 +37,7 @@ export default function SetupInstructions() {
         
         {/* Header */}
         <div className="bg-blue-600 p-8 text-white">
-          <h1 className="text-3xl font-bold mb-2">Word Writer Add-in</h1>
+          <h1 className="text-3xl font-bold mb-2">TRIPART</h1>
           <p className="text-blue-100 text-lg">
             This application is designed to run directly inside Microsoft Word as a Taskpane Add-in.
           </p>
@@ -97,7 +97,7 @@ export default function SetupInstructions() {
                   <li>Nyisd meg a Wordöt, majd hozz létre egy új üres dokumentumot.</li>
                   <li>Menj a <strong>Fájl</strong> &gt; <strong>Beállítások</strong> &gt; <strong>Adatvédelmi központ</strong> &gt; <strong>Adatvédelmi központ beállításai...</strong> &gt; <strong>Megbízható bővítménykatalógusok</strong> menüpontra.</li>
                   <li>Írd be a megosztott mappa hálózati elérési útját (pl. <code>\\SzamitogepNeved\WordAddins</code>) a Katalógus URL-címéhez, kattints a <strong>Katalógus felvétele</strong> gombra, majd pipáld be a "Megjelenítés a menüben" opciót. Kattints az OK-ra, majd indítsd újra a Wordöt.</li>
-                  <li>A Wordben menj a <strong>Beszúrás</strong> &gt; <strong>Saját bővítmények</strong> menüpontra, válaszd a <strong>Megosztott mappa</strong> fület, és ott lesz a Word Writer Add-in!</li>
+                  <li>A Wordben menj a <strong>Beszúrás</strong> &gt; <strong>Saját bővítmények</strong> menüpontra, válaszd a <strong>Megosztott mappa</strong> fület, és ott lesz a TRIPART!</li>
                 </ul>
               </div>
 
