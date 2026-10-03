@@ -1,10 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2, RotateCw } from 'lucide-react';
+import { ArrowLeft, Eye, EyeOff, Plus, Trash2, KeyRound, Loader2, Volume2, RotateCw, Save } from 'lucide-react';
 import { playSound } from '../services/sound';
 import { LOCAL_MODELS, type LocalModel } from '../services/localSpeech';
 import { ENTITY_LABELS } from '../services/masking';
 import { MAX_INSTRUCTION_CHARS, MAX_STYLE_NOTES_CHARS, PRESET_MODES as MODES, type Addressing, type Mode, type Tone } from '../shared/aiConfig';
-import type { Settings } from '../services/settings';
+import { saveSettings, type Settings } from '../services/settings';
 import ErrorReport from './ErrorReport';
 import MicrosoftSignIn, { useAuthMode } from './MicrosoftSignIn';
 import { checkAccessKey, describeRequestError, fetchServerInfo, type RateLimitInfo, type ServerInfo } from '../services/aiService';
@@ -52,6 +52,10 @@ export default function SettingsPanel({
   const [presetMode, setPresetMode] = useState<Mode>(currentMode);
   const [presetLabel, setPresetLabel] = useState('');
   const [presetInstruction, setPresetInstruction] = useState('');
+  // Every change is stored at once; the button stores again, checks it and says so
+  const [saved, setSaved] = useState<'ok' | 'failed' | null>(null);
+  useEffect(() => { setSaved(null); }, [settings]);
+  const save = () => setSaved(saveSettings(settings) ? 'ok' : 'failed');
   // What the server runs: its version, where it processes data (for dictation and the version line below)
   const [serverInfo, setServerInfo] = useState<ServerInfo | null | undefined>(undefined);
   const authMode = useAuthMode();
@@ -478,6 +482,21 @@ export default function SettingsPanel({
             <RotateCw className="w-3 h-3 mr-1" />Bővítmény újratöltése
           </button>
         </div>
+      </div>
+
+      <div className="bg-white border-t border-neutral-200 px-3 py-2 shrink-0 flex items-center gap-2">
+        <button
+          onClick={save}
+          className="flex items-center px-3 py-1.5 text-sm font-medium text-white bg-[#0f2350] hover:bg-[#1c3a7a] rounded-lg transition-colors"
+        >
+          <Save className="w-4 h-4 mr-1.5" />Mentés
+        </button>
+        <span role="status" className="text-xs">
+          {saved === 'ok' && <span className="text-green-700">✅ Elmentve ezen a gépen</span>}
+          {saved === 'failed' && <span className="text-red-700">Nem sikerült menteni: a Word nem enged tárolni. Ebben a munkamenetben így is érvényesek.</span>}
+          {saved === null && <span className="text-neutral-500">A változások azonnal érvényesek.</span>}
+        </span>
+        <button onClick={onClose} className="ml-auto text-xs text-neutral-600 hover:text-neutral-900">Bezárás</button>
       </div>
     </div>
   );

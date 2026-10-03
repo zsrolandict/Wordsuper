@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { ArrowDown, ArrowLeft, ArrowUp, Copy, Download, FileUp, Pencil, Plus, Trash2 } from 'lucide-react';
 import { downloadFile } from '../services/download';
-import { emptyRule, loadOwnPlaybooks, newPlaybookId, SAMPLE_PLAYBOOK, saveOwnPlaybooks } from '../services/playbook';
+import { emptyRule, loadOwnPlaybooks, newPlaybookId, SAMPLE_PLAYBOOKS, saveOwnPlaybooks } from '../services/playbook';
 import { MAX_PLAYBOOK_NAME, MAX_PLAYBOOK_RULES, playbooksFile, readPlaybooksFile, sanitizePlaybook, type Playbook, type PlaybookRule } from '../shared/playbook';
 import { usePlaybooks } from './PlaybookBar';
 
@@ -21,6 +21,7 @@ export default function PlaybookPanel({ accessKey, onClose }: { accessKey: strin
   const { office, own } = usePlaybooks(accessKey, version);
   const [editing, setEditing] = useState<Playbook | null>(null);
   const [message, setMessage] = useState('');
+  const [showSamples, setShowSamples] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const store = (playbooks: Playbook[], note: string) => {
@@ -108,7 +109,7 @@ export default function PlaybookPanel({ accessKey, onClose }: { accessKey: strin
               onClick={() => setEditing({ id: newPlaybookId(), name: '', contractType: '', side: '', rules: [emptyRule([])] })}
               className="flex items-center px-2.5 py-1.5 text-xs font-medium bg-indigo-700 text-white rounded-lg hover:bg-indigo-800"
             ><Plus className="w-3.5 h-3.5 mr-1" />Új playbook</button>
-            <button onClick={() => addCopy(SAMPLE_PLAYBOOK)} className="px-2.5 py-1.5 text-xs border border-neutral-300 rounded-lg hover:bg-neutral-100">Minta betöltése</button>
+            <button onClick={() => setShowSamples(v => !v)} aria-expanded={showSamples} className="px-2.5 py-1.5 text-xs border border-neutral-300 rounded-lg hover:bg-neutral-100">Minta betöltése…</button>
             <button onClick={() => fileRef.current?.click()} className="flex items-center px-2.5 py-1.5 text-xs border border-neutral-300 rounded-lg hover:bg-neutral-100"><FileUp className="w-3.5 h-3.5 mr-1" />Importálás…</button>
             <button
               onClick={() => downloadFile(JSON.stringify(playbooksFile(own), null, 2), 'playbookok.json', 'application/json')}
@@ -124,7 +125,21 @@ export default function PlaybookPanel({ accessKey, onClose }: { accessKey: strin
               onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) importFile(file); }}
             />
           </div>
-          <p className="text-[11px] text-neutral-500">A minta csak a formát mutatja: a tartalmát az iroda jogászainak kell átírnia.</p>
+          {showSamples && (
+            <div className="border border-indigo-200 bg-indigo-50/50 rounded-lg p-2 space-y-1">
+              <p className="text-[11px] text-neutral-600">Melyiket töltsem be a sajátok közé? Utána szerkeszthető.</p>
+              {SAMPLE_PLAYBOOKS.map(sample => (
+                <button
+                  key={sample.id}
+                  onClick={() => { addCopy(sample); setShowSamples(false); }}
+                  className="w-full text-left text-xs px-2 py-1 rounded hover:bg-white"
+                >
+                  <span className="font-medium">{sample.name.replace(/^MINTA – /, '')}</span> <span className="text-neutral-500">· {sample.rules.length} pont</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-[11px] text-neutral-500">A minták kiindulópontok: a pozíciókat és az összegeket az iroda jogászainak kell az iroda gyakorlatához igazítaniuk.</p>
         </section>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { ArrowRightLeft, Download, ExternalLink, KeyRound, Languages, Loader2, RefreshCw, Square } from 'lucide-react';
+import { ArrowRightLeft, Download, ExternalLink, KeyRound, Languages, Loader2, RefreshCw, Square, TextSelect } from 'lucide-react';
 import type { AIRequestBody } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, needsSettings, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
@@ -9,9 +9,10 @@ import {
 } from '../services/bilingual';
 import { bilingualDocx, toBase64, type BilingualRow } from '../services/docxWriter';
 import { buildDocumentGraph } from '../services/structure';
-import { canOpenNewDocument, openNewDocument, readParagraphsForTranslation } from '../services/wordDocument';
+import { canOpenNewDocument, openNewDocument, readParagraphsForTranslation, readSelectionForTranslation, writeTranslatedRows, type SelectedForTranslation } from '../services/wordDocument';
 import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
 import { formatNumber } from '../services/format';
+import CopyButton from './CopyButton';
 import { readZipEntry } from '../services/docxText';
 import { documentName, downloadDocx } from '../services/download';
 import { playSound, primeSound } from '../services/sound';
@@ -101,6 +102,8 @@ export default function TranslatePanel({
       // The choice then lasts for this session only
     }
   };
+  /** The last „only the selection” run: the translations, and how many went straight into a bilingual table */
+  const [selectionResult, setSelectionResult] = useState<{ items: (SelectedForTranslation & { translation: string })[]; inTable: boolean; written: number; maskSummary: string } | null>(null);
   const previousInput = useRef<HTMLInputElement>(null);
   const running = progress !== null;
   const to = other(from);
@@ -151,21 +154,19 @@ export default function TranslatePanel({
     } catch (e) {
       console.error(e);
       setPrevious(null);
-      setError({ message: 'Ez nem a Word Writerrel készült kétnyelvű dokumentum (két oszlopos táblázat fejléccel).' });
+      setError({ message: 'Ez nem itt készült kétnyelvű dokumentum (két oszlopos táblázat).' });
     } finally {
       if (previousInput.current) previousInput.current.value = '';
     }
   };
 
-  const run = async () => {
-    if (!info || running || !info.units.length) return;
+  /** One run's sending: masking once for all its requests, the first one shown before sending, waits on rate limits */
+  const startRun = (allTexts: string[]) => {
     const controller = new AbortController();
     abortRef.current = controller;
     setError(null);
-    setOutput(null);
     setOpenError(null);
     if (settings.sound) primeSound();
-    const allTexts = info.units.map(u => u.text);
     let masker: Masker | null = settings.masking.enabled ? new Masker(parseExtraTerms(settings.masking.extraTerms), parseExtraTerms(settings.masking.neverHide)) : null;
     // Placeholder-like text anywhere in the document is never one of our own tokens, in any part
     masker?.reserve(allTexts);
@@ -198,27 +199,108 @@ export default function TranslatePanel({
     const isTooLong = (e: unknown) => e instanceof AIRequestError && e.code === 'INCOMPLETE' && e.reason === 'length';
     const base = { styleProfile: settings.styleProfile, depth: settings.depth };
 
+    /** The defined terms first, so every part uses the same words for them */
+    const translateGlossary = async (terms: string[]) => {
+      const glossary = new Map<string, string>();
+      if (!terms.length) return glossary;
+      setProgress('Fogalmak fordítása…');
+      const termUnits = terms.map((term, i) => ({ id: i + 1, text: term }));
+      const translated = await translateInParts(termUnits, {
+        ask: units => send({ mode: 'translate', instruction: glossaryInstruction(from, to), originalText: '', documentContext: formatUnits(units), ...base }),
+        unmask,
+        isTooLong,
+      });
+      termUnits.forEach(u => {
+        const text = translated.get(u.id);
+        if (text && !unresolvedPlaceholders(text, [u.text]).length) glossary.set(u.text, text);
+      });
+      return glossary;
+    };
+
+    const failed = (e: unknown) => {
+      setProgress(null);
+      if (e instanceof Cancelled || controller.signal.aborted) {
+        setError({ message: '⏹️ Leállítottad a fordítást. A megnyitott dokumentumhoz nem nyúltam.' });
+      } else {
+        console.error(e);
+        if (settings.sound) playSound('error');
+        setError({ message: describeRequestError(e), authProblem: needsSettings(e) });
+      }
+    };
+
+    return { send, unmask, isTooLong, base, translateGlossary, failed, maskSummary: () => masker?.summary() ?? '' };
+  };
+
+  /** Only the selected paragraphs: in a bilingual table straight into the right cells, otherwise shown here to copy */
+  const runSelection = async () => {
+    if (running) return;
+    setOutput(null);
+    setSelectionResult(null);
+    setError(null);
+    let selected: SelectedForTranslation[];
+    try {
+      selected = await readSelectionForTranslation();
+    } catch (e) {
+      console.error(e);
+      setError({ message: 'Nem sikerült beolvasni a kijelölést.' });
+      return;
+    }
+    if (!selected.length) {
+      setError({ message: 'Jelölj ki egy vagy több bekezdést (vagy kattints bele egybe), és nyomd meg újra.' });
+      return;
+    }
+    const units: TranslationUnit[] = selected.map((item, i) => ({ id: i + 1, text: item.text }));
+    if (units.reduce((n, u) => n + u.text.length, 0) > MAX_TRANSLATE_CHARS) {
+      setError({ message: 'A kijelölés túl hosszú; használd a teljes dokumentum fordítását.' });
+      return;
+    }
+    const r = startRun(units.map(u => u.text));
+    try {
+      // Only the defined terms that occur in the selection: a few words instead of the whole glossary
+      const selectedText = units.map(u => u.text).join('\n');
+      const glossary = await r.translateGlossary((info?.terms ?? []).filter(term => selectedText.includes(term)));
+      const glossaryText = formatGlossary(glossary);
+      setProgress(`Fordítás: ${formatNumber(selected.length)} kijelölt bekezdés`);
+      const translations = await translateInParts(units, {
+        ask: part => r.send({ mode: 'translate', instruction: translateInstruction(from, to), originalText: glossaryText, documentContext: formatUnits(part), ...r.base }),
+        unmask: r.unmask,
+        isTooLong: r.isTooLong,
+      });
+      const items = selected.map((item, i) => {
+        const text = translations.get(i + 1);
+        const ok = !!text && !unresolvedPlaceholders(text, [item.text, glossaryText]).length;
+        return { ...item, translation: ok ? text! : '' };
+      });
+      // In a bilingual table every selected row must have its translation, or none is written (no half update)
+      const inTable = items.length > 0 && items.every(item => item.row !== undefined);
+      const written = inTable && items.every(item => item.translation)
+        ? await writeTranslatedRows(items.map(item => ({ row: item.row!, left: item.text, right: item.translation })))
+        : 0;
+      setProgress(null);
+      if (settings.sound) playSound('done');
+      setSelectionResult({ items, inTable, written, maskSummary: r.maskSummary() });
+    } catch (e) {
+      r.failed(e);
+    } finally {
+      abortRef.current = null;
+    }
+  };
+
+  const run = async () => {
+    if (!info || running || !info.units.length) return;
+    setOutput(null);
+    setSelectionResult(null);
+    const allTexts = info.units.map(u => u.text);
+    const { send, unmask, isTooLong, base, translateGlossary, failed, maskSummary } = startRun(allTexts);
+
     // An update: rows whose original is unchanged keep their translation
     const updating = !!previous && syncUpdate && previousMatches;
     const reused = updating ? reuseTranslations(info.units, previous!.data) : new Map<number, string>();
     const toTranslate = info.units.filter(u => !reused.has(u.id));
 
     try {
-      // 1. The defined terms first, so every part uses the same words for them
-      const glossary = new Map<string, string>();
-      if (info.terms.length && toTranslate.length) {
-        setProgress('Fogalmak fordítása…');
-        const termUnits = info.terms.map((term, i) => ({ id: i + 1, text: term }));
-        const translated = await translateInParts(termUnits, {
-          ask: units => send({ mode: 'translate', instruction: glossaryInstruction(from, to), originalText: '', documentContext: formatUnits(units), ...base }),
-          unmask,
-          isTooLong,
-        });
-        termUnits.forEach(u => {
-          const text = translated.get(u.id);
-          if (text && !unresolvedPlaceholders(text, [u.text]).length) glossary.set(u.text, text);
-        });
-      }
+      // 1. The defined terms first (only when something is translated at all)
+      const glossary = toTranslate.length ? await translateGlossary(info.terms) : new Map<string, string>();
       const glossaryText = formatGlossary(glossary);
 
       // 2. The document, part by part
@@ -242,7 +324,6 @@ export default function TranslatePanel({
       });
       const name = documentName();
       const bytes = bilingualDocx({
-        title: `${name ? `${name} – ` : ''}kétnyelvű változat (${LANGUAGE_LABELS[from].name} → ${LANGUAGE_LABELS[to].name})`,
         leftLabel: LANGUAGE_LABELS[from].column,
         rightLabel: LANGUAGE_LABELS[to].column,
         rows,
@@ -254,7 +335,7 @@ export default function TranslatePanel({
         rows: rows.length,
         untranslated: rows.filter(r => r.warning).length,
         reused: reused.size,
-        maskSummary: masker?.summary() ?? '',
+        maskSummary: maskSummary(),
         opened: false,
       };
       setOutput(result);
@@ -262,14 +343,7 @@ export default function TranslatePanel({
       if (settings.sound) playSound('done');
       await open(result);
     } catch (e) {
-      setProgress(null);
-      if (e instanceof Cancelled || controller.signal.aborted) {
-        setError({ message: '⏹️ Leállítottad a fordítást. A megnyitott dokumentumhoz nem nyúltam.' });
-      } else {
-        console.error(e);
-        if (settings.sound) playSound('error');
-        setError({ message: describeRequestError(e), authProblem: needsSettings(e) });
-      }
+      failed(e);
     } finally {
       abortRef.current = null;
     }
@@ -315,6 +389,20 @@ export default function TranslatePanel({
         {info && info.guessed !== from && (
           <p className="text-[11px] text-amber-700">A dokumentum inkább {LANGUAGE_LABELS[info.guessed].name} nyelvűnek tűnik – biztosan jó az irány?</p>
         )}
+        <div className="border-t border-neutral-100 pt-2 space-y-1.5 text-xs">
+          <p className="font-medium text-neutral-700">Csak a kijelölt bekezdés</p>
+          <p className="text-[11px] text-neutral-500">
+            Egy-két bekezdéshez nem kell az egészet újrafordítani. Ha a kétnyelvű dokumentumban állsz, a kijelölt sor(ok) bal oldalát fordítom, és a
+            jobb oldali cellába írom (sárga háttérrel); máshol a fordítást itt mutatom, kimásolhatod.
+          </p>
+          <button
+            onClick={runSelection}
+            disabled={running || reading}
+            className="w-full flex items-center justify-center py-1.5 border border-blue-600 text-blue-700 hover:bg-blue-50 disabled:opacity-50 rounded-lg font-medium"
+          >
+            <TextSelect className="w-3.5 h-3.5 mr-1" />Kijelölt bekezdés(ek) fordítása
+          </button>
+        </div>
         {tooLong && (
           <p className="text-xs text-amber-700">A dokumentum túl hosszú ({formatNumber(info!.chars)} karakter, a korlát {formatNumber(MAX_TRANSLATE_CHARS)}). Fordítsd részenként: másold egy új dokumentumba a fordítandó részt.</p>
         )}
@@ -368,6 +456,32 @@ export default function TranslatePanel({
           </div>
         )}
       </div>
+
+      {selectionResult && (
+        <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2 text-xs">
+          {selectionResult.inTable && selectionResult.written > 0 && (
+            <p className="font-medium text-green-700">✅ {formatNumber(selectionResult.written)} sor fordítását beírtam a jobb oldali cellába (sárga háttér).</p>
+          )}
+          {selectionResult.inTable && selectionResult.written === 0 && (
+            <p className="text-amber-700">Nem írtam a táblázatba: {selectionResult.items.some(i => !i.translation) ? 'nem minden sort sikerült lefordítani' : 'közben máshová került a kijelölés, vagy megváltozott a bal oldal'}. A fordítás lent kimásolható.</p>
+          )}
+          {(!selectionResult.inTable || selectionResult.written === 0) && (
+            <>
+              <div className="flex items-center justify-between">
+                <p className="font-medium text-neutral-700">Fordítás ({LANGUAGE_LABELS[from].name} → {LANGUAGE_LABELS[to].name})</p>
+                <CopyButton text={selectionResult.items.map(i => `${i.number ? `${i.number} ` : ''}${i.translation || UNTRANSLATED}`).join('\n')} />
+              </div>
+              {selectionResult.items.map((item, i) => (
+                <p key={i} className={`whitespace-pre-wrap ${item.heading ? 'font-semibold' : ''} ${item.translation ? 'text-neutral-800' : 'text-red-700'}`}>
+                  {item.number ? `${item.number} ` : ''}{item.translation || UNTRANSLATED}
+                </p>
+              ))}
+            </>
+          )}
+          {selectionResult.maskSummary && <p className="text-neutral-500">Az AI elől elrejtve: {selectionResult.maskSummary}.</p>}
+          <p className="text-neutral-500">Gépi fordítás: aláírás vagy kiküldés előtt nézesd át.</p>
+        </div>
+      )}
 
       {output && (
         <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2 text-xs">

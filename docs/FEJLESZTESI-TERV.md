@@ -1,6 +1,6 @@
 # Fejlesztési terv (II. fázis)
 
-*Frissítve: 2026. október 3. Ez a fájl az állapotjelző: minden lépés után frissül.*
+*Frissítve: 2026. október 3. (este) Ez a fájl az állapotjelző: minden lépés után frissül.*
 
 **Az I. fázis és a 14 pontos fejlesztési lista** (kiküldés előtti ellenőrzés, szám–betű egyezés, hányadok, felek
 elnevezése, számozás, definiált fogalmak, élőfej/élőláb, aláírási blokk, tartalomjegyzék, irodai stílusok, kétnyelvű
@@ -14,7 +14,7 @@ lehet rájuk hivatkozni.
 |---|---|---|---|
 | `felho` | Felhős szerver (Cloud Run, EU) és központi kiadás a Microsoft 365-ben | kód kész, élesben nem kipróbálva | [FELHO-TELEPITES.md](FELHO-TELEPITES.md) |
 | `playbook` | Iroda szabálykönyve záradéktípusonként (standard, Fallback 1, Fallback 2, walk-away), egy gombnyomásos ellenőrzés emberi jóváhagyással, kísérőlevél | **kód kész**, valódi Wordben nem kipróbálva | a tartalmát jogász írja (van minta); Autopilot (beavatkozás nélküli beírás) nem lesz |
-| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás az njt.hu-n vagy a bírósági határozatok oldalán | **kód kész**, valódi Wordben nem kipróbálva | kulcs és licenc nélkül |
+| `jogref` | Jogszabály- és határozat-hivatkozások felismerése a Szerkezet fülön, megnyitás a Nemzeti Jogszabálytárban (njt.jog.gov.hu) | **kód kész**, valódi Wordben nem kipróbálva | kulcs és licenc nélkül |
 | `tobbagens` | Többágensű átvizsgálás: öt szakértő párhuzamosan, majd összegzés | **kód kész**, valódi Wordben nem kipróbálva | alapból ki; Beállításokban: ki / csak „Alapos”-nál / mindig; használatkor kb. 5–7-szeres tokenköltség |
 | `zaradektar` | Mintazáradék-tár egy SharePoint-mappából, a Microsoft-belépésre építve | **kód kész**, valódi Wordben és SharePointtal nem kipróbálva | előbb: ki gondozza, mi kerülhet bele |
 | `apijog` | Automatikus „létezik-e, hatályos-e” ellenőrzés kereskedelmi jogtár API-jával | **félretéve** | lásd lent |
@@ -32,7 +32,10 @@ lehet rájuk hivatkozni.
   mintaszöveg), minta betöltése, importálás/exportálás (.json). A sajátok ezen a gépen tárolódnak.
 - **Irodai playbookok:** az üzemeltető az exportált fájlt a szerverre teszi (`PLAYBOOKS_FILE`; felhőben a
   `playbooks` titok). Mindenkinél „Irodai” csoportban jelennek meg, nem szerkeszthetők, de lemásolhatók.
-- **A minta** („MINTA – Ingatlan-adásvétel, vevői oldal”) csak a formát mutatja; a tartalmát jogásznak kell megírnia.
+- **Minták** („Minta betöltése…”): Titoktartási megállapodás (NDA, átadó fél, 7 pont), Vállalkozási szerződés
+  (megrendelői oldal, 8 pont), Üzlethelyiség-bérlet (bérlői oldal, 8 pont), Ingatlan-adásvétel (vevői oldal, 5 pont).
+  Kiindulópontok: a pozíciókat és az összegeket az irodának kell a saját gyakorlatához igazítania. Csak biztos
+  Ptk.-helyre hivatkoznak (6:152. § a felelősségkorlátozás határa, 6:186. § kötbér).
 
 ## `tobbagens` – így működik
 
@@ -55,14 +58,14 @@ lehet rájuk hivatkozni.
 - **Mit ismer fel:** törvények („2013. évi V. törvény”, „tv.”), a gyakori rövidítések szakaszokkal (Ptk., Pp., Btk.,
   Mt., Ctv., Inytv., Ákr., Infotv., Ütv., Vht., Cstv., Tpvt., Áfa tv., Szja tv., Gt.), kormányrendeletek, AB-határozatok,
   jogegységi határozatok, BH/EBH/BDT/KGD, Kúria-ügyszámok, uniós rendeletek és irányelvek (GDPR is).
-- **Megnyitás:** törvény az njt.hu-n, uniós jog az EUR-Lexen; rendeletnél és bírósági döntésnél keresés a pontos
-  hivatkozásra. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
+- **Megnyitás:** törvény és kormányrendelet közvetlenül a Nemzeti Jogszabálytárban (`njt.jog.gov.hu/jogszabaly/2013-5-00-00`,
+  kormányrendeletnél `2008-176-20-22`), uniós jog az EUR-Lexen; miniszteri rendeletnél keresés a Jogszabálytár
+  oldalán, bírósági döntésnél a weben. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
 - **Ellenőrzés adatbázis nélkül** (a Problémák között): nem hatályos törvény (régi Ptk., Gt., Pp., Btk., Mt., Ket., Be.,
   adatvédelmi és ügyvédi törvény, a hatályvesztés dátumával és az utóddal), a régi Ptk.-számozás az új Ptk.-ra
   hivatkozva („Ptk. 318. §”), nem létező Ptk.-könyv („Ptk. 9:12. §”).
 - **Amit nem tud:** hogy egy bekezdés létezik-e és hatályos-e a szerződés dátumán: ez az `apijog`.
-- Valódi Wordben ellenőrizendő: az njt.hu-cím formája (`njt.hu/jogszabaly/2013-5-00-00`) és a megnyitás az asztali
-  Wordből (alapértelmezett böngészőben).
+- Valódi Wordben ellenőrizendő: a megnyitás az asztali Wordből (alapértelmezett böngészőben).
 
 ## `zaradektar` – így működik
 
@@ -96,3 +99,17 @@ ORAC) API-ja licencdíjas és szerződéses (API-kulcs). Erről üzleti döntés
 **Mire épülhet, ha újrakezdjük:** a `jogref` felismerője megtalálja a hivatkozásokat. Az `apijog` erre építve csak a
 lekérdezést és a jelzést adja hozzá. A hivatkozások jogszabályhelyek, nem személyes adatok, ezért maszkolás nélkül
 mehetnek a jogtárhoz, a dokumentum szövege nem.
+
+## Visszajelzések a valódi Wordből (2026. október 3.)
+
+| Mit | Állapot |
+|---|---|
+| Beállítások: „Mentés” gomb visszajelzéssel („✅ Elmentve ezen a gépen”) | **kész** |
+| Munkajelző a fogaskerék mellett, amíg bármelyik fülön AI-kérés fut (később a mozgó logó) | **kész** |
+| Jogszabály megnyitása közvetlenül a Nemzeti Jogszabálytárban (njt.jog.gov.hu), nem Google-keresésben | **kész** |
+| 3 új minta-playbook (NDA, vállalkozási szerződés, üzlethelyiség-bérlet) | **kész** |
+| Fordítás: csak a kijelölt bekezdés(ek); a kétnyelvű táblázatban a kijelölt sor jobb oldalába írja | **kész** |
+| Fordítás: nincs „Magyar / English” fejléc és cím a kétnyelvű dokumentumban | **kész** (a korábbi, fejléces fájlok is beolvashatók) |
+| Egész dokumentum szerkesztése: indoklás bekezdésenként (lenyitható), „Mindet elfogadom”, hivatkozások megtartása | folyamatban |
+| Jogszabály-hivatkozások egységesítése: első helyen teljes cím „(a továbbiakban: Ptk.)”, utána rövidítés | tervezve |
+| Súgó-asszisztens: kérdezni lehet, mit hol talál a bővítményben | tervezve |

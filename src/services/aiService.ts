@@ -1,6 +1,7 @@
 import { recordEvent } from './diagnostics';
 import { ACCESS_KEY_HEADER, type AIRequestBody, type ApiErrorCode } from '../shared/aiConfig';
 import { forgetAuthMode, microsoftToken, requestHeaders, SignInError } from './signIn';
+import { trackActivity } from './activity';
 
 export class AIRequestError extends Error {
   code?: ApiErrorCode;
@@ -79,7 +80,7 @@ export async function streamAIResponse(request: AIRequestBody, handlers: StreamH
   const started = Date.now();
   const size = request.originalText.length + request.documentContext.length;
   try {
-    const answer = await streamOnce(request, handlers, options);
+    const answer = await trackActivity(() => streamOnce(request, handlers, options));
     recordEvent('request', `${request.mode}: ok, ${size} karakter, ${Date.now() - started} ms`);
     return answer;
   } catch (error) {
@@ -234,7 +235,11 @@ export async function checkMicrosoftSignIn(interactive = true): Promise<SignInCh
 
 /** Hungarian explanation of a failed request, for the chat */
 /** Sends a dictated recording to the server and returns the transcript */
-export async function transcribeAudio(recording: Blob, accessKey: string, userId: string, riskAccepted: boolean, signal?: AbortSignal): Promise<string> {
+export function transcribeAudio(recording: Blob, accessKey: string, userId: string, riskAccepted: boolean, signal?: AbortSignal): Promise<string> {
+  return trackActivity(() => transcribeOnce(recording, accessKey, userId, riskAccepted, signal));
+}
+
+async function transcribeOnce(recording: Blob, accessKey: string, userId: string, riskAccepted: boolean, signal?: AbortSignal): Promise<string> {
   const bytes = new Uint8Array(await recording.arrayBuffer());
   let binary = '';
   // In chunks: String.fromCharCode with a huge argument list overflows the stack

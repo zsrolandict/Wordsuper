@@ -61,6 +61,7 @@ import PartyBar from './PartyBar';
 import SendPreview, { type PreviewDecision } from './SendPreview';
 import { loadParty, saveParty } from '../services/parties';
 import { DEFAULT_PRESETS, MODE_LABELS, PLACEHOLDERS, looksLikeReview, matchPreset, modeLabel, PRESET_INSTRUCTIONS, type PresetMatch } from './modes';
+import BusyIndicator from './BusyIndicator';
 
 interface Message {
   id: string;
@@ -1150,6 +1151,7 @@ export default function TaskPane() {
           </h1>
         </div>
         <div className="flex items-center space-x-1.5 shrink-0">
+          <BusyIndicator writing={isApplying} />
           {tab === 'assistant' && messages.length > 1 && (
             <button
               onClick={() => goToMainMenu()}

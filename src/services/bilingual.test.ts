@@ -38,7 +38,6 @@ test('every id must come back: the missing ones are named, unknown and duplicate
 test('the bilingual .docx is a valid zip with a two-column table, readable back', async () => {
   assert.equal(crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
   const bytes = bilingualDocx({
-    title: 'Kétnyelvű változat',
     leftLabel: 'Magyar',
     rightLabel: 'English',
     rows: [
@@ -48,9 +47,10 @@ test('the bilingual .docx is a valid zip with a two-column table, readable back'
   });
   const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const xml = new TextDecoder().decode((await readZipEntry(buffer, 'word/document.xml'))!);
-  assert.equal((xml.match(/<w:tr>/g) ?? []).length, 3);
+  assert.equal((xml.match(/<w:tr>/g) ?? []).length, 2, 'no language header row');
   assert.match(xml, /w:orient="landscape"/);
-  assert.match(xml, /<w:tblHeader\/>/);
+  assert.doesNotMatch(xml, /<w:tblHeader\/>|Kétnyelvű változat/, 'no title, no header');
+  assert.match(xml, /<w:tblCaption w:val="Kétnyelvű: Magyar → English"\/>/);
   const paragraphs = await readDocxParagraphs(buffer);
   assert.ok(paragraphs.includes('1. A Vevő fizet & <nem késik>.'));
   assert.ok(paragraphs.includes('1. The Buyer pays & <is not late>.'));
@@ -84,7 +84,7 @@ test('parts: any other error stops the run', async () => {
 
 test('an earlier bilingual document: unchanged paragraphs keep their translation, changed and red ones are translated anew', async () => {
   const bytes = bilingualDocx({
-    title: 'x', leftLabel: 'Magyar', rightLabel: 'English',
+    leftLabel: 'Magyar', rightLabel: 'English',
     rows: [
       { number: '1.', left: 'Fogalmak', right: 'Definitions', heading: true },
       { number: '1.1.', left: 'A Vevő fizet.', right: 'The Buyer pays.' },
@@ -105,4 +105,17 @@ test('an earlier bilingual document: unchanged paragraphs keep their translation
   ]);
   const reused = reuseTranslations(units, previous);
   assert.deepEqual([...reused], [[1, 'Definitions'], [2, 'The Buyer pays.']]);
+});
+
+test('an earlier bilingual file: direction from the alt text, from an old header row, or from the text itself', () => {
+  const cellXml = (text: string) => `<w:tc><w:p><w:r><w:t>${text}</w:t></w:r></w:p></w:tc>`;
+  const row = (a: string, b: string) => `<w:tr>${cellXml(a)}${cellXml(b)}</w:tr>`;
+  const body = row('A Vevő a vételárat a szerződés szerint fizeti meg.', 'The Buyer shall pay the price under this agreement.');
+  const old = parseBilingualDocumentXml(`<w:tbl>${row('Magyar', 'English')}${body}</w:tbl>`)!;
+  assert.deepEqual([old.leftLabel, old.rightLabel, old.rows.length], ['Magyar', 'English', 1]);
+  const guessed = parseBilingualDocumentXml(`<w:tbl>${body}</w:tbl>`)!;
+  assert.deepEqual([guessed.leftLabel, guessed.rightLabel, guessed.rows.length], ['Magyar', 'English', 1]);
+  const captioned = parseBilingualDocumentXml(`<w:tbl><w:tblPr><w:tblCaption w:val="Kétnyelvű: English → Magyar"/></w:tblPr>${body}</w:tbl>`)!;
+  assert.deepEqual([captioned.leftLabel, captioned.rightLabel], ['English', 'Magyar'], 'the alt text wins over guessing');
+  assert.equal(parseBilingualDocumentXml('<w:p/>'), null);
 });

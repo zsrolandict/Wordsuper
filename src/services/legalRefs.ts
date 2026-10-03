@@ -19,7 +19,7 @@ export interface LegalRef {
   kind: LegalRefKind;
   /** The act it belongs to, for grouping: "2013. évi V. törvény (Ptk.)", "BH 2019.123" */
   group: string;
-  /** Where it opens: the act on njt.hu, an EU act on EUR-Lex, otherwise a web search for the exact reference */
+  /** Where it opens: an act or a government decree on njt.jog.gov.hu, an EU act on EUR-Lex, otherwise a web search for the exact reference */
   url: string;
 }
 
@@ -66,7 +66,10 @@ const REPEALED: Record<string, { name: string; since: string; instead: string }>
   '1998-XI': { name: 'a régi ügyvédi törvény', since: '2018. január 1.', instead: 'a 2017. évi LXXVIII. törvény (Ütv.)' },
 };
 
-const njtAct = (year: number, roman: string) => `https://njt.hu/jogszabaly/${year}-${romanToNumber(roman)}-00-00`;
+// The Nemzeti Jogszabálytár's own address: year-number-kind-issuer ("00-00" an act, "20-22" a government decree)
+const NJT = 'https://njt.jog.gov.hu/jogszabaly';
+const njtAct = (year: number, roman: string) => `${NJT}/${year}-${romanToNumber(roman)}-00-00`;
+const njtGovernmentDecree = (number: string, year: string) => `${NJT}/${year}-${Number(number)}-20-22`;
 const search = (text: string, site = '') => `https://www.google.com/search?q=${encodeURIComponent(`"${text}"${site ? ` site:${site}` : ''}`)}`;
 const actGroup = (year: number, roman: string) => {
   const code = Object.values(CODES).find(c => c.year === year && c.number === roman);
@@ -99,7 +102,11 @@ export function findLegalRefs(paragraphs: { text: string }[]): LegalRef[] {
   };
   paragraphs.forEach(({ text }, paragraph) => {
     for (const m of text.matchAll(ACT)) add(paragraph, m, { kind: 'act', group: actGroup(Number(m[1]), m[2]), url: njtAct(Number(m[1]), m[2]) });
-    for (const m of text.matchAll(DECREE)) add(paragraph, m, { kind: 'decree', group: m[0].replace(/\s+/g, ' ').trim(), url: search(m[0].replace(/\s+/g, ' ').trim(), 'njt.hu') });
+    for (const m of text.matchAll(DECREE)) {
+      const name = m[0].replace(/\s+/g, ' ').trim();
+      // A ministerial decree's issuer code changes with every government, so it is looked up on the site
+      add(paragraph, m, { kind: 'decree', group: name, url: m[5]?.trim() === 'Korm.' ? njtGovernmentDecree(m[1], m[2]) : search(name, 'njt.jog.gov.hu') });
+    }
     for (const m of text.matchAll(AB)) add(paragraph, m, { kind: 'court', group: `${m[1]}/${m[2]}. AB határozat`, url: search(m[0].replace(/\s+/g, ' ').trim()) });
     for (const m of text.matchAll(UNIFORMITY)) add(paragraph, m, { kind: 'court', group: `${m[1]}/${m[2]}. ${m[3]}`, url: search(`${m[1]}/${m[2]}. ${m[3]}`) });
     for (const m of text.matchAll(COURT_DIGEST)) add(paragraph, m, { kind: 'court', group: `${m[1]} ${m[2]}.${m[3]}.`, url: search(`${m[1]} ${m[2]}.${m[3]}`) });

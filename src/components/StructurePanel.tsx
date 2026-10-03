@@ -286,7 +286,7 @@ export default function StructurePanel({ active, busy, documentVersion, onReques
         ) : (
           <>
             <p className="text-[11px] text-neutral-500">
-              A „Megnyitás” a jogszabályt a Nemzeti Jogszabálytárban (njt.hu), az uniós jogot az EUR-Lexen nyitja meg; bírósági döntésnél és rendeletnél a pontos hivatkozásra keres. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
+              A „Megnyitás” a törvényt és a kormányrendeletet a Nemzeti Jogszabálytárban (njt.jog.gov.hu), az uniós jogot az EUR-Lexen nyitja meg; miniszteri rendeletnél a Jogszabálytárban, bírósági döntésnél a weben keres a pontos hivatkozásra. Csak a hivatkozás kerül a címbe, a szerződés szövege nem.
               A hatályosságot és a bekezdés létezését nem ellenőrzöm (ehhez jogtár-hozzáférés kellene); a régi, már nem hatályos törvényekre és a régi Ptk.-számozásra a Problémák között figyelmeztetek.
             </p>
             {groupLegalRefs(graph.legalRefs).map(group => (

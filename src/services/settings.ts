@@ -118,11 +118,15 @@ export function loadSettings(): Settings {
   }
 }
 
-function saveSettings(settings: Settings) {
+/** Stores the settings on this machine; true when they could be read back the same (the Settings' Save button) */
+export function saveSettings(settings: Settings): boolean {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    const json = JSON.stringify(settings);
+    localStorage.setItem(STORAGE_KEY, json);
+    return localStorage.getItem(STORAGE_KEY) === json;
   } catch {
     // Not persisted, but the current session keeps working
+    return false;
   }
 }
 

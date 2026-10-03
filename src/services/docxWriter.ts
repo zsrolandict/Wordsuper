@@ -95,7 +95,6 @@ export interface BilingualRow {
 }
 
 export interface BilingualDocument {
-  title: string;
   leftLabel: string;
   rightLabel: string;
   rows: BilingualRow[];
@@ -114,9 +113,14 @@ function cell(text: string, number: string | undefined, options: { bold?: boolea
   return `<w:tc><w:tcPr><w:tcW w:w="${COLUMN}" w:type="dxa"/>${fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>` : ''}</w:tcPr><w:p><w:pPr><w:spacing w:after="60"/></w:pPr>${content}</w:p></w:tc>`;
 }
 
-/** document.xml of the bilingual table: a header row repeated on every page, rows that never break across pages */
+/** The invisible alt text of the table: it carries the direction, so an update can check it without a header row */
+export const bilingualCaption = (leftLabel: string, rightLabel: string) => `Kétnyelvű: ${leftLabel} → ${rightLabel}`;
+
+/**
+ * document.xml of the bilingual table: just the rows, no title and no language header (which language is which
+ * is plain to see); the direction sits in the table's alt text. Rows never break across pages.
+ */
 export function bilingualDocumentXml(doc: BilingualDocument): string {
-  const header = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${cell(doc.leftLabel, undefined, { bold: true, shade: true })}${cell(doc.rightLabel, undefined, { bold: true, shade: true })}</w:tr>`;
   const rows = doc.rows.map(row =>
     `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(row.left, row.number, { bold: row.heading })}${cell(row.right, row.number, { bold: row.heading, color: row.warning ? 'C00000' : undefined, fill: row.changed && !row.warning ? 'FFF2CC' : undefined })}</w:tr>`
   ).join('');
@@ -124,9 +128,8 @@ export function bilingualDocumentXml(doc: BilingualDocument): string {
   const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(border).join('');
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>`
-    + `<w:p><w:pPr><w:spacing w:after="200"/></w:pPr>${run(doc.title, { bold: true })}</w:p>`
-    + `<w:tbl><w:tblPr><w:tblW w:w="${2 * COLUMN}" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblBorders>${borders}</w:tblBorders><w:tblCellMar><w:left w:w="100" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr>`
-    + `<w:tblGrid><w:gridCol w:w="${COLUMN}"/><w:gridCol w:w="${COLUMN}"/></w:tblGrid>${header}${rows}</w:tbl>`
+    + `<w:tbl><w:tblPr><w:tblW w:w="${2 * COLUMN}" w:type="dxa"/><w:tblBorders>${borders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:left w:w="100" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar><w:tblCaption w:val="${escapeXml(bilingualCaption(doc.leftLabel, doc.rightLabel))}"/></w:tblPr>`
+    + `<w:tblGrid><w:gridCol w:w="${COLUMN}"/><w:gridCol w:w="${COLUMN}"/></w:tblGrid>${rows}</w:tbl>`
     + `<w:p/><w:sectPr><w:pgSz w:w="${PAGE.width}" w:h="${PAGE.height}" w:orient="landscape"/><w:pgMar w:top="${PAGE.margin}" w:right="${PAGE.margin}" w:bottom="${PAGE.margin}" w:left="${PAGE.margin}" w:header="567" w:footer="567" w:gutter="0"/></w:sectPr>`
     + `</w:body></w:document>`;
 }

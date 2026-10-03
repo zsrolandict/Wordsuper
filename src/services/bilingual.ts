@@ -151,20 +151,38 @@ export interface PreviousBilingual {
 const decodeXml = (text: string) => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
 const cellText = (cell: string) => decodeXml([...cell.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map(m => m[1]).join(''));
 
-/** The table of a bilingual document made here (its document.xml): the column labels and every row */
+const KNOWN_LABELS = Object.values(LANGUAGE_LABELS).map(l => l.column);
+
+/**
+ * The table of a bilingual document made here (its document.xml): the column labels and every row. The direction
+ * is read from the table's alt text; an older file has it in a header row instead; failing both, it is told from
+ * the text of the two columns.
+ */
 export function parseBilingualDocumentXml(xml: string): PreviousBilingual | null {
-  const rows = xml.split(/<w:tr[ >]/).slice(1).map(row => row.split(/<w:tc[ >]/).slice(1));
-  const header = rows[0];
-  if (!header || header.length !== 2) return null;
-  return {
-    leftLabel: cellText(header[0]).trim(),
-    rightLabel: cellText(header[1]).trim(),
-    rows: rows.slice(1).filter(cells => cells.length === 2).map(([left, right]) => ({
-      left: cellText(left),
-      right: cellText(right),
-      warning: /w:color w:val="C00000"/.test(right),
-    })),
-  };
+  let rows = xml.split(/<w:tr[ >]/).slice(1).map(row => row.split(/<w:tc[ >]/).slice(1));
+  if (!rows.length) return null;
+  let labels: [string, string] | null = null;
+  const caption = /<w:tblCaption w:val="[^"]*?:\s*([^"]+?)\s*→\s*([^"]+?)"/.exec(xml);
+  if (caption) labels = [decodeXml(caption[1]).trim(), decodeXml(caption[2]).trim()];
+  const first = rows[0].length === 2 ? rows[0].map(c => cellText(c).trim()) : null;
+  if (first && KNOWN_LABELS.includes(first[0]) && KNOWN_LABELS.includes(first[1]) && first[0] !== first[1]) {
+    labels ??= [first[0], first[1]];
+    rows = rows.slice(1);
+  }
+  const pairs = rows.filter(cells => cells.length === 2).map(([left, right]) => ({
+    left: cellText(left),
+    right: cellText(right),
+    warning: /w:color w:val="C00000"/.test(right),
+  }));
+  if (!pairs.length && !labels) return null;
+  if (!labels) {
+    const sample = (side: 'left' | 'right') => pairs.map(p => p[side]).join(' ').slice(0, 20000);
+    const left = guessLanguage(sample('left'));
+    const right = guessLanguage(sample('right'));
+    if (left === right) return null;
+    labels = [LANGUAGE_LABELS[left].column, LANGUAGE_LABELS[right].column];
+  }
+  return { leftLabel: labels[0], rightLabel: labels[1], rows: pairs };
 }
 
 const rowKey = (number: string | undefined, text: string) => `${number ? `${number} ` : ''}${text}`.replace(/\s+/g, ' ').trim();

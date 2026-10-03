@@ -32,11 +32,11 @@ test('acts, code sections, decrees, court decisions and EU acts are found, each 
     [4, 'eu', '(EU) 2019/1937 irányelv'],
   ]);
   assert.equal(refs[0].group, '2013. évi V. törvény (Ptk.)');
-  assert.equal(refs[0].url, 'https://njt.hu/jogszabaly/2013-5-00-00');
+  assert.equal(refs[0].url, 'https://njt.jog.gov.hu/jogszabaly/2013-5-00-00');
   assert.equal(refs[1].group, '2013. évi V. törvény (Ptk.)', 'the abbreviation goes with the act');
-  assert.equal(refs[2].url, 'https://njt.hu/jogszabaly/1997-141-00-00');
-  assert.equal(refs[3].url, 'https://njt.hu/jogszabaly/2007-127-00-00');
-  assert.match(refs[4].url, /google\.com\/search\?q=.*335%2F2005.*site%3Anjt\.hu/);
+  assert.equal(refs[2].url, 'https://njt.jog.gov.hu/jogszabaly/1997-141-00-00');
+  assert.equal(refs[3].url, 'https://njt.jog.gov.hu/jogszabaly/2007-127-00-00');
+  assert.equal(refs[4].url, 'https://njt.jog.gov.hu/jogszabaly/2005-335-20-22', 'a government decree opens directly');
   assert.equal(refs[10].url, 'https://eur-lex.europa.eu/eli/reg/2016/679/oj');
   assert.equal(refs[11].url, 'https://eur-lex.europa.eu/eli/dir/2019/1937/oj');
   const groups = groupLegalRefs(refs);
@@ -56,4 +56,15 @@ test('checks without a database: repealed acts, the old Ptk. numbering, a Ptk. b
   assert.match(issues[3].message, /^„Ptk\. 9:12\. §”: a Ptk\.-nak nincs 9\. könyve/);
   assert.deepEqual(issues.map(i => i.at.paragraph), [0, 0, 1, 1]);
   assert.ok(issues.every(i => i.kind === 'legal-ref'));
+});
+
+test('a ministerial decree is searched on the Nemzeti Jogszabálytár', () => {
+  const [ref] = findLegalRefs([{ text: 'a 25/2014. (III. 5.) BM rendelet szerint' }]);
+  assert.equal(ref.kind, 'decree');
+  assert.match(ref.url, /google\.com\/search\?q=.*25%2F2014.*site%3Anjt\.jog\.gov\.hu/);
+});
+
+test('the example address: a government decree from 2008', () => {
+  const [ref] = findLegalRefs([{ text: '176/2008. (VI. 30.) Korm. rendelet' }]);
+  assert.equal(ref.url, 'https://njt.jog.gov.hu/jogszabaly/2008-176-20-22');
 });

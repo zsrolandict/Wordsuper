@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { formatPlaybook, playbooksFile, readPlaybooksFile, sanitizePlaybook, MAX_PLAYBOOK_RULES } from '../shared/playbook';
-import { coverLetterChanges, parsePlaybookChecks, playbookFindings, SAMPLE_PLAYBOOK } from './playbook';
+import { coverLetterChanges, parsePlaybookChecks, playbookFindings, SAMPLE_PLAYBOOK, SAMPLE_PLAYBOOKS } from './playbook';
 
 test('playbook: checked field by field, rules without topic or standard left out, ids made unique', () => {
   assert.equal(sanitizePlaybook(null), null);
@@ -81,4 +81,11 @@ test('cover letter input: topic, reason, and the new wording only where it was w
     { topic: 'Birtok', comment: 'Birtok (Hiányzik): Hiányzik a birtokbaadás.', suggestion: 'új pont', fixApplied: false },
   ]);
   assert.equal(text, '1. Foglaló: A 30% túl magas, 10%-ra csökkentettük.\n   Új szöveg: „a foglaló 10%”\n2. Birtok: Hiányzik a birtokbaadás.');
+});
+
+test('the sample playbooks are whole after the checks (nothing cut, nothing dropped)', () => {
+  for (const sample of SAMPLE_PLAYBOOKS) {
+    assert.deepEqual(sanitizePlaybook(sample), sample, sample.name);
+  }
+  assert.equal(new Set(SAMPLE_PLAYBOOKS.map(p => p.id)).size, SAMPLE_PLAYBOOKS.length);
 });

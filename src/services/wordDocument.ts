@@ -938,6 +938,81 @@ export async function readParagraphsForTranslation(): Promise<(ParagraphInfo & {
   return Word.run(context => loadParagraphs(context, true, true));
 }
 
+/** One selected paragraph to translate; row: in a bilingual table, the row whose right cell gets the translation */
+export interface SelectedForTranslation {
+  text: string;
+  number?: string;
+  heading?: boolean;
+  row?: number;
+}
+
+/**
+ * Only the selected paragraphs, for a quick translation (a few paragraphs instead of the whole document). When the
+ * selection is inside a two-column table (a bilingual document made here), each selected row's left cell is taken
+ * once, with its row index: its translation then goes into the right cell (writeTranslatedRows).
+ */
+export async function readSelectionForTranslation(): Promise<SelectedForTranslation[]> {
+  return Word.run(async (context) => {
+    const paragraphs = context.document.getSelection().paragraphs;
+    paragraphs.load('items/text,items/isListItem,items/styleBuiltIn,items/tableNestingLevel');
+    await context.sync();
+    const inTable = isSupported('1.3') && paragraphs.items.length > 0 && paragraphs.items.every(p => p.tableNestingLevel === 1);
+    if (inTable) {
+      const table = paragraphs.items[0].parentTable;
+      const cells = paragraphs.items.map(p => p.parentTableCell);
+      table.load('values');
+      cells.forEach(c => c.load('rowIndex'));
+      await context.sync();
+      const values = table.values;
+      if (values.length && values.every(row => row.length === 2)) {
+        const rows = [...new Set(cells.map(c => c.rowIndex))].sort((a, b) => a - b);
+        return rows
+          .map(row => ({ text: readable(values[row][0] ?? '').replace(/\s+/g, ' ').trim(), row }))
+          .filter(item => item.text);
+      }
+    }
+    const listItems = paragraphs.items.map(p => (p.isListItem ? p.listItemOrNullObject : null));
+    listItems.forEach(item => item?.load('listString'));
+    const texts = paragraphs.items.map(p => p.getReviewedText('Current'));
+    await context.sync();
+    const result: SelectedForTranslation[] = [];
+    paragraphs.items.forEach((p, i) => {
+      const text = readable(texts[i].value || '').replace(/\s+/g, ' ').trim();
+      if (!text) return;
+      const item = listItems[i];
+      result.push({ text, ...(item && !item.isNullObject ? { number: item.listString.trim() } : {}), ...(HEADING_STYLE.test(String(p.styleBuiltIn)) ? { heading: true } : {}) });
+    });
+    return result;
+  });
+}
+
+/**
+ * Writes translations into the right cells of the bilingual table the selection is in, on a light yellow ground
+ * (as an update marks its new rows). A row is only written when its left cell still reads as it did: if the
+ * selection moved to another table meanwhile, nothing is written. Returns how many rows were written.
+ */
+export async function writeTranslatedRows(rows: { row: number; left: string; right: string }[]): Promise<number> {
+  return Word.run(async (context) => {
+    const paragraph = context.document.getSelection().paragraphs.getFirst();
+    paragraph.load('tableNestingLevel');
+    await context.sync();
+    if (paragraph.tableNestingLevel !== 1) return 0;
+    const table = paragraph.parentTable;
+    table.load('values');
+    await context.sync();
+    const same = (a: string, b: string) => readable(a).replace(/\s+/g, ' ').trim() === b;
+    const writable = rows.filter(r => table.values[r.row]?.length === 2 && same(table.values[r.row][0], r.left));
+    if (writable.length !== rows.length) return 0;
+    for (const r of writable) {
+      const cell = table.getCell(r.row, 1);
+      cell.value = r.right;
+      cell.shadingColor = '#FFF2CC';
+    }
+    await context.sync();
+    return writable.length;
+  });
+}
+
 /** Word's search treats ^ as a special character */
 const wordSearchText = (text: string) => text.replace(/\^/g, '^^');
 
