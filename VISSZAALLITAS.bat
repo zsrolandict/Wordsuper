@@ -1,6 +1,12 @@
 @echo off
 setlocal
-cd /d "%~dp0"
+rem Ideiglenes masolatbol fut: valtaskor a mappaban levo fajl lecserelodhet vagy eltunhet
+if "%~1"=="" (
+  copy /y "%~f0" "%TEMP%\ww-visszaallitas.bat" >nul
+  "%TEMP%\ww-visszaallitas.bat" "%~dp0"
+  exit /b
+)
+cd /d "%~1"
 title Word Writer - visszaallitas
 rem Valtas a rogzitett stabil valtozat es a legfrissebb valtozat kozott. A .env es a kulcsok nem erintettek.
 
@@ -24,10 +30,15 @@ if errorlevel 2 goto legfrissebb
 
 git checkout -q %STABIL%
 if errorlevel 1 goto hiba
+rem A stabil valtozatban ez a fajl meg nincs benne: visszateszem, hogy vissza is lehessen jonni
+copy /y "%TEMP%\ww-visszaallitas.bat" "VISSZAALLITAS.bat" >nul
 echo Kesz: a stabil valtozat van beallitva.
 goto telepites
 
 :legfrissebb
+rem A visszatett masolat ne akadalyozza a valtast (a legfrissebb valtozat a sajatjat hozza)
+git ls-files --error-unmatch VISSZAALLITAS.bat >nul 2>nul
+if errorlevel 1 del /q VISSZAALLITAS.bat >nul 2>nul
 git checkout -q phase-1
 if errorlevel 1 goto hiba
 git pull --ff-only
