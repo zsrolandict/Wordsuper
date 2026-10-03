@@ -11,12 +11,12 @@ if errorlevel 1 (
   exit /b 1
 )
 
-set "STABIL=stabil-2026-10-03"
+rem A stabil valtozat: a 2026-10-03-i allapot, a formazas-egysegesites es a ketnyelvu forditas elott
+set "STABIL=97690efa91a7ff08f9efc2da8cf1e5302c559814"
 for /f %%h in ('git rev-parse HEAD 2^>nul') do set "OLDHEAD=%%h"
-git fetch --tags -q origin
 
 echo.
-echo 1 - Vissza a stabil valtozatra (%STABIL%), ha az uj funkciok nem valnak be
+echo 1 - Vissza a stabil valtozatra (2026-10-03, 97690ef), ha az uj funkciok nem valnak be
 echo 2 - Vissza a legfrissebb valtozatra (phase-1)
 echo.
 choice /c 12 /n /m "Valassz (1 vagy 2): "
