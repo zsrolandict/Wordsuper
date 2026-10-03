@@ -1122,7 +1122,7 @@ export async function insertCommentsAtParagraphs(items: { paragraph: number; exp
   });
 }
 
-const FORMAT_PROPERTIES = 'items/text,items/styleBuiltIn,items/alignment,items/spaceAfter,items/spaceBefore,items/lineSpacing,items/tableNestingLevel,items/font/name,items/font/size,items/font/bold';
+const FORMAT_PROPERTIES = 'items/text,items/styleBuiltIn,items/alignment,items/spaceAfter,items/spaceBefore,items/lineSpacing,items/firstLineIndent,items/tableNestingLevel,items/font/name,items/font/size,items/font/bold';
 
 /** Reading and changing the footnotes needs WordApi 1.5 */
 export const canFormatFootnotes = () => isSupported('1.5');
@@ -1148,6 +1148,7 @@ export async function readFormatAudit(): Promise<FormatAudit> {
         spaceBefore: p.spaceBefore || 0,
         spaceAfter: p.spaceAfter || 0,
         lineSpacing: p.lineSpacing || 0,
+        firstLineIndent: p.firstLineIndent || 0,
       })),
       footnotes: notes ? notes.items.map(n => ({ font: n.body.font.name || null, size: n.body.font.size || null })) : null,
     };
@@ -1155,12 +1156,12 @@ export async function readFormatAudit(): Promise<FormatAudit> {
 }
 
 /** The font, size and spacing of the paragraph the cursor is in: "like this one" for the style profile */
-export async function readSelectionFormat(): Promise<{ font: string | null; size: number | null; spaceAfter: number; lineSpacing: number; alignment: string }> {
+export async function readSelectionFormat(): Promise<{ font: string | null; size: number | null; spaceBefore: number; spaceAfter: number; lineSpacing: number; firstLineIndent: number; alignment: string }> {
   return Word.run(async (context) => {
     const paragraph = context.document.getSelection().paragraphs.getFirst();
-    paragraph.load('alignment,spaceAfter,lineSpacing,font/name,font/size');
+    paragraph.load('alignment,spaceBefore,spaceAfter,lineSpacing,firstLineIndent,font/name,font/size');
     await context.sync();
-    return { font: paragraph.font.name || null, size: paragraph.font.size || null, spaceAfter: paragraph.spaceAfter || 0, lineSpacing: paragraph.lineSpacing || 0, alignment: String(paragraph.alignment) };
+    return { font: paragraph.font.name || null, size: paragraph.font.size || null, spaceBefore: paragraph.spaceBefore || 0, spaceAfter: paragraph.spaceAfter || 0, lineSpacing: paragraph.lineSpacing || 0, firstLineIndent: paragraph.firstLineIndent || 0, alignment: String(paragraph.alignment) };
   });
 }
 
@@ -1200,6 +1201,7 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         if (change.spaceBefore !== undefined) p.spaceBefore = change.spaceBefore;
         if (change.spaceAfter !== undefined) p.spaceAfter = change.spaceAfter;
         if (change.lineSpacing !== undefined) p.lineSpacing = change.lineSpacing;
+        if (change.firstLineIndent !== undefined) p.firstLineIndent = change.firstLineIndent;
         if (change.alignment !== undefined) p.alignment = change.alignment;
       }
       if (plan.footnotes && canFormatFootnotes()) {

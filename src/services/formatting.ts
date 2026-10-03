@@ -20,6 +20,8 @@ export interface ParagraphFormat {
   spaceAfter: number;
   /** In points */
   lineSpacing: number;
+  /** First-line indent in points (negative: hanging); 0 when absent */
+  firstLineIndent?: number;
 }
 
 export interface FootnoteFormat {
@@ -83,7 +85,7 @@ export interface AuditSummary {
   doubleSpaces: number;
   /** Footnote sizes; null when they can't be read */
   footnoteSizes: [number, number][] | null;
-  dominant: { font: string; size: number; lineSpacing: number; spaceAfter: number; alignment: 'Left' | 'Justified' };
+  dominant: { font: string; size: number; lineSpacing: number; spaceBefore: number; spaceAfter: number; alignment: 'Left' | 'Justified' };
 }
 
 export function summarize(audit: FormatAudit): AuditSummary {
@@ -111,6 +113,7 @@ export function summarize(audit: FormatAudit): AuditSummary {
       font: fonts.find(([f]) => f)?.[0] ?? 'Calibri',
       size: sizes[0]?.[0] ?? 11,
       lineSpacing: tally(body.map(p => round(p.lineSpacing)).filter(n => n > 0))[0]?.[0] ?? 0,
+      spaceBefore: tally(body.map(p => round(p.spaceBefore)))[0]?.[0] ?? 0,
       spaceAfter: tally(body.map(p => round(p.spaceAfter)))[0]?.[0] ?? 6,
       alignment: alignments[0]?.[0] === 'Left' ? 'Left' : 'Justified',
     },
@@ -130,11 +133,16 @@ export interface FormatProfile {
   /** The largest heading; with separate levels the lower ones step down from it */
   headingSize: number;
   footnoteSize: number;
+  /** Empty: headings use the body font (a serif body with sans-serif headings is the classic pairing) */
+  headingFont: string;
+  bodySpaceBefore: number;
   bodySpaceAfter: number;
   headingSpaceBefore: number;
   headingSpaceAfter: number;
   /** Points; 0: left as it is */
   lineSpacing: number;
+  /** First-line indent of body paragraphs in points; 0: left as it is */
+  firstLineIndent: number;
   alignment: 'Left' | 'Justified';
 }
 
@@ -145,10 +153,13 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
     bodySize: body,
     headingSize: body + 2,
     footnoteSize: Math.max(8, body - 2),
+    headingFont: '',
+    bodySpaceBefore: summary.dominant.spaceBefore,
     bodySpaceAfter: summary.dominant.spaceAfter,
     headingSpaceBefore: 12,
     headingSpaceAfter: 6,
     lineSpacing: summary.dominant.lineSpacing,
+    firstLineIndent: 0,
     alignment: summary.dominant.alignment,
   };
 }
@@ -182,6 +193,7 @@ export interface ParagraphChange {
   spaceBefore?: number;
   spaceAfter?: number;
   lineSpacing?: number;
+  firstLineIndent?: number;
   alignment?: 'Left' | 'Justified';
 }
 
@@ -226,9 +238,11 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
       change[key] = value;
       counted.add(category);
     };
-    set('font', 'font', profile.font, p.font !== profile.font);
+    const isHeading = role.kind === 'heading' || role.kind === 'fake-heading' || role.kind === 'title';
+    const font = isHeading && profile.headingFont ? profile.headingFont : profile.font;
+    set('font', 'font', font, p.font !== font);
 
-    if (role.kind === 'heading' || role.kind === 'fake-heading' || role.kind === 'title') {
+    if (isHeading) {
       const size = role.kind === 'title' ? profile.headingSize + 2 : headingSize(role.kind === 'heading' ? role.level : 'fake', profile, options.unifyHeadings, levels);
       set('headings', 'size', size, differs(p.size, size));
       set('headings', 'bold', true, p.bold !== true);
@@ -240,9 +254,10 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
       set('size', 'size', profile.bodySize, differs(p.size, profile.bodySize));
       // Table cells: only the font, so the table keeps its own layout
       if (role.kind === 'body') {
-        set('spacing', 'spaceBefore', 0, differs(p.spaceBefore, 0));
+        set('spacing', 'spaceBefore', profile.bodySpaceBefore, differs(p.spaceBefore, profile.bodySpaceBefore));
         set('spacing', 'spaceAfter', profile.bodySpaceAfter, differs(p.spaceAfter, profile.bodySpaceAfter));
         if (profile.lineSpacing > 0) set('spacing', 'lineSpacing', profile.lineSpacing, differs(p.lineSpacing, profile.lineSpacing));
+        if (profile.firstLineIndent !== 0) set('spacing', 'firstLineIndent', profile.firstLineIndent, differs(p.firstLineIndent ?? 0, profile.firstLineIndent));
         // A centered or right-aligned paragraph (a title, a signature) is meant to be so
         if (p.alignment === 'Left' || p.alignment === 'Justified') set('alignment', 'alignment', profile.alignment, p.alignment !== profile.alignment);
       }
@@ -278,30 +293,30 @@ export const STYLE_PRESETS: StylePreset[] = [
     id: 'classic',
     name: 'Klasszikus',
     description: 'Garamond 12 pt, sorkizárt, egyenletes, hagyományos szerződés',
-    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, alignment: 'Justified' },
+    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, firstLineIndent: 0, alignment: 'Justified' },
   },
   {
     id: 'modern',
     name: 'Modern',
     description: 'Calibri 11 pt, balra zárt, levegős térközökkel',
-    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, alignment: 'Left' },
+    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, alignment: 'Left' },
   },
   {
     id: 'compact',
     name: 'Kompakt',
     description: 'Arial 10 pt, sorkizárt, szűk térközök: hosszú szerződéshez, kevesebb oldal',
-    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, alignment: 'Justified' },
+    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, firstLineIndent: 0, alignment: 'Justified' },
   },
   {
     id: 'premium',
     name: 'Prémium',
-    description: 'Cambria 11 pt, balra zárt, bőséges térközök és sorköz: tanácsadói jelentések, ajánlatok',
-    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, alignment: 'Left' },
+    description: 'Cambria 11 pt szöveg, Calibri címek, balra zárt, bőséges térközök: tanácsadói jelentések, ajánlatok',
+    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: 'Calibri', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, alignment: 'Left' },
   },
   {
     id: 'legal',
     name: 'Jogi (angolszász)',
     description: 'Times New Roman 11 pt, sorkizárt, szűk, egyenletes térközök: nemzetközi szerződések',
-    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, alignment: 'Justified' },
+    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, firstLineIndent: 0, alignment: 'Justified' },
   },
 ];

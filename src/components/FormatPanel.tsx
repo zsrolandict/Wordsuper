@@ -127,7 +127,9 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
           ...p,
           ...(format.font ? { font: format.font } : {}),
           ...(format.size ? { bodySize: format.size } : {}),
+          bodySpaceBefore: format.spaceBefore,
           bodySpaceAfter: format.spaceAfter,
+          firstLineIndent: format.firstLineIndent,
           ...(format.lineSpacing ? { lineSpacing: format.lineSpacing } : {}),
           ...(format.alignment === 'Left' || format.alignment === 'Justified' ? { alignment: format.alignment } : {}),
         };
@@ -270,11 +272,23 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                 {fonts.map(f => <option key={f} value={f}>{f}</option>)}
               </select>
             </label>
+            <label className="flex items-center justify-between space-x-2">
+              <span className="text-neutral-600">Címsorok betűtípusa</span>
+              <select value={profile.headingFont} disabled={busy} onChange={e => setProfileValue('headingFont', e.target.value)} aria-label="Címsorok betűtípusa" className="p-1 border border-neutral-300 rounded-md bg-neutral-50 max-w-[60%]">
+                <option value="">Mint a szöveg</option>
+                {fonts.map(f => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </label>
             <PointsInput label="Szöveg mérete" value={profile.bodySize} disabled={busy} onChange={n => setProfileValue('bodySize', Math.max(6, n))} />
             <PointsInput label={askHeadings && headingAnswer !== 'unified' ? 'Legnagyobb címsor mérete' : 'Címsor mérete'} value={profile.headingSize} disabled={busy} onChange={n => setProfileValue('headingSize', Math.max(6, n))} />
             {footnotesKnown && <PointsInput label="Lábjegyzet mérete" value={profile.footnoteSize} disabled={busy} onChange={n => setProfileValue('footnoteSize', Math.max(6, n))} />}
+            <PointsInput label="Bekezdés előtti térköz" value={profile.bodySpaceBefore} disabled={busy} onChange={n => setProfileValue('bodySpaceBefore', n)} />
             <PointsInput label="Bekezdés utáni térköz" value={profile.bodySpaceAfter} disabled={busy} onChange={n => setProfileValue('bodySpaceAfter', n)} />
             <PointsInput label="Címsor előtti térköz" value={profile.headingSpaceBefore} disabled={busy} onChange={n => setProfileValue('headingSpaceBefore', n)} />
+            <PointsInput label="Címsor utáni térköz" value={profile.headingSpaceAfter} disabled={busy} onChange={n => setProfileValue('headingSpaceAfter', n)} />
+            <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
+            <p className="text-neutral-500">Pontban: a szöveg méretének kb. 1,2-szerese a megszokott (11 pt-nál 13–14 pt).</p>
+            <PointsInput label="Első sor behúzása (0 = nem változtat)" value={profile.firstLineIndent} disabled={busy} onChange={n => setProfileValue('firstLineIndent', n)} />
             <label className="flex items-center justify-between space-x-2">
               <span className="text-neutral-600">Igazítás</span>
               <select value={profile.alignment} disabled={busy} onChange={e => setProfileValue('alignment', e.target.value as FormatProfile['alignment'])} aria-label="Igazítás" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
@@ -282,8 +296,6 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                 <option value="Left">Balra zárt</option>
               </select>
             </label>
-            <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
-            <p className="text-neutral-500">Pontban: a szöveg méretének kb. 1,2-szerese a megszokott (11 pt-nál 13–14 pt).</p>
             <div className="flex flex-wrap gap-1.5 pt-1">
               <button onClick={() => takeFromSelection('body')} disabled={busy} className="flex items-center px-2 py-1 border border-neutral-300 rounded-md hover:bg-neutral-100 disabled:opacity-50" title="Kattints egy jól formázott szövegbekezdésbe, majd ide">
                 <MousePointerClick className="w-3 h-3 mr-1" />Szöveg: mint a kijelölt

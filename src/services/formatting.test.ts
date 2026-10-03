@@ -95,3 +95,15 @@ test('the ready-made styles: a Garamond classic, and all of them usable', () => 
     assert.ok(planFormatting(audit, preset.profile, defaultOptions()).changes.length > 0, preset.id);
   }
 });
+
+test('heading font, space before body paragraphs and first-line indent', () => {
+  const profile = { ...defaultProfile(summarize(audit)), headingFont: 'Arial', bodySpaceBefore: 3, firstLineIndent: 18 };
+  const plan = planFormatting(audit, profile, defaultOptions());
+  const at = (i: number) => plan.changes.find(c => c.index === i);
+  assert.equal(at(1)?.font, 'Arial');
+  assert.equal(at(7)?.font, 'Arial');
+  assert.equal(at(2)?.font, undefined);
+  assert.deepEqual(at(2), { index: 2, spaceBefore: 3, firstLineIndent: 18 });
+  assert.equal(at(8)?.firstLineIndent, undefined, 'tables keep their layout');
+  assert.equal(at(1)?.firstLineIndent, undefined);
+});
