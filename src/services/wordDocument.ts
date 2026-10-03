@@ -1700,3 +1700,83 @@ export async function clearDocumentProperties(keys: (keyof DocumentPropertiesInf
     await context.sync();
   });
 }
+
+/** The text of the first section's header and footer: is there something the new ones would replace? */
+export async function readHeaderFooter(): Promise<{ header: string; footer: string }> {
+  return Word.run(async (context) => {
+    const sections = context.document.sections;
+    sections.load('items');
+    await context.sync();
+    const first = sections.items[0];
+    if (!first) return { header: '', footer: '' };
+    const header = first.getHeader('Primary');
+    const footer = first.getFooter('Primary');
+    header.load('text');
+    footer.load('text');
+    await context.sync();
+    return { header: (header.text || '').trim(), footer: (footer.text || '').trim() };
+  });
+}
+
+/**
+ * Puts the header and/or footer (OOXML packages) into every section, replacing what was there. Without Track
+ * Changes: it is the page's frame, not the contract's text. Word's own setting is put back.
+ */
+export async function applyHeaderFooter(headerPackage: string | null, footerPackage: string | null): Promise<number> {
+  return Word.run(async (context) => {
+    const doc = context.document;
+    doc.load('changeTrackingMode');
+    const sections = doc.sections;
+    sections.load('items');
+    await context.sync();
+    const previous = doc.changeTrackingMode;
+    try {
+      if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+      sections.items.forEach(section => {
+        if (headerPackage) {
+          const header = section.getHeader('Primary');
+          header.clear();
+          header.insertOoxml(headerPackage, 'Start');
+        }
+        if (footerPackage) {
+          const footer = section.getFooter('Primary');
+          footer.clear();
+          footer.insertOoxml(footerPackage, 'Start');
+        }
+      });
+      await context.sync();
+      return sections.items.length;
+    } finally {
+      if (previous !== 'Off') {
+        doc.changeTrackingMode = previous;
+        await context.sync().catch(() => {});
+      }
+    }
+  });
+}
+
+/** Inserts an OOXML package at the cursor (a signature block, a table of contents), by the usual Track Changes rule */
+export async function insertPackageAtCursor(ooxmlPackageText: string): Promise<WriteMode> {
+  return Word.run(async (context) => {
+    const selection = context.document.getSelection();
+    const { write } = await withTrackChanges(context, async () => {
+      selection.insertOoxml(ooxmlPackageText, 'Replace');
+      await context.sync();
+    });
+    return write;
+  });
+}
+
+/** Updates every table of contents in the document (WordApi 1.5); 0 when there is none or this Word can't */
+export async function updateTablesOfContents(): Promise<number> {
+  if (!isSupported('1.5')) return 0;
+  return Word.run(async (context) => {
+    const fields = context.document.body.fields;
+    fields.load('items/code');
+    await context.sync();
+    const tocs = fields.items.filter(f => /^\s*TOC\b/.test(f.code || ''));
+    tocs.forEach(f => f.updateResult());
+    await context.sync();
+    return tocs.length;
+  });
+}

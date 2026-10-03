@@ -8,6 +8,8 @@ import { UserFacingError, applyFormatPlan, canOpenNewDocument, jumpToParagraph, 
 import { AI_MARK_LABELS, findAiMarks, type AiMarkKind } from '../services/aiMarks';
 import { MAX_STYLE_NAME, loadCustomStyles, newStyleId, saveCustomStyles, type CustomStyle } from '../services/customStyles';
 import { toBase64 } from '../services/docxWriter';
+import { buildDocumentGraph } from '../services/structure';
+import FormatElements from './FormatElements';
 import { documentName, downloadDocx } from '../services/download';
 import { formatNumber } from '../services/format';
 
@@ -203,7 +205,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   const [presetId, setPresetId] = useState(DOCUMENT_PRESET);
   const [customized, setCustomized] = useState(false);
   /** The panel's own tabs: choose a style, set it by hand, clean the text, choose what to unify */
-  const [view, setView] = useState<'styles' | 'manual' | 'text' | 'scope'>('styles');
+  const [view, setView] = useState<'styles' | 'manual' | 'text' | 'elements' | 'scope'>('styles');
   const [ownStyles, setOwnStyles] = useState<CustomStyle[]>(loadCustomStyles);
   const [styleName, setStyleName] = useState('');
   const [options, setOptions] = useState<FormatOptions>(defaultOptions);
@@ -219,6 +221,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   const [snapshotError, setSnapshotError] = useState<string | null>(null);
 
   const summary: AuditSummary | null = useMemo(() => (audit ? summarize(audit) : null), [audit]);
+  const definedTerms = useMemo(() => (audit ? buildDocumentGraph(audit.paragraphs.map(p => ({ text: p.text }))).terms.map(t => t.term) : []), [audit]);
 
   const read = useCallback(async (keepProfile = false) => {
     setReading(true);
@@ -388,6 +391,19 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
   };
 
 
+  /** The previous state, saved before the Elemek tab changes the header or footer */
+  const saveSnapshot = async () => {
+    try {
+      const bytes = await readDocumentFile();
+      const taken = { bytes, base64: toBase64(bytes), takenAt: new Date() };
+      setSnapshots(previous => (previous.length ? [previous[0], taken] : [taken]));
+      return true;
+    } catch (e) {
+      console.error(e);
+      return false;
+    }
+  };
+
   const jump = async (paragraph: number) => {
     try {
       await jumpToParagraph(paragraph, false);
@@ -436,6 +452,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
     { id: 'styles', label: 'Stílusok' },
     { id: 'manual', label: 'Kézi' },
     { id: 'text', label: 'Szöveg', badge: aiMarks.length || undefined },
+    { id: 'elements', label: 'Elemek' },
     { id: 'scope', label: 'Kategóriák' },
   ];
 
@@ -702,6 +719,18 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
                 ))}
               </div>
             </>
+          )}
+
+          {view === 'elements' && (
+            <FormatElements
+              profile={profile}
+              terms={definedTerms}
+              documentName={documentName()}
+              margins={audit?.margins?.[0] ? { left: audit.margins[0].left, right: audit.margins[0].right } : null}
+              busy={busy}
+              takeSnapshot={saveSnapshot}
+              onChanged={() => { onDocumentChanged(); read(true); }}
+            />
           )}
 
           {view === 'scope' && (
