@@ -90,6 +90,8 @@ export interface BilingualRow {
   heading?: boolean;
   /** The right side could not be translated: shown in red, so it is not overlooked */
   warning?: boolean;
+  /** Translated anew in an update (the original changed): the right side on a light yellow ground */
+  changed?: boolean;
 }
 
 export interface BilingualDocument {
@@ -106,16 +108,17 @@ const run = (text: string, options: { bold?: boolean; color?: string } = {}) =>
 const PAGE = { width: 16838, height: 11906, margin: 1134 };
 const COLUMN = Math.floor((PAGE.width - 2 * PAGE.margin) / 2);
 
-function cell(text: string, number: string | undefined, options: { bold?: boolean; color?: string; shade?: boolean }) {
+function cell(text: string, number: string | undefined, options: { bold?: boolean; color?: string; shade?: boolean; fill?: string }) {
   const content = (number ? run(`${number} `, { bold: options.bold }) : '') + run(text, options);
-  return `<w:tc><w:tcPr><w:tcW w:w="${COLUMN}" w:type="dxa"/>${options.shade ? '<w:shd w:val="clear" w:color="auto" w:fill="EDEDED"/>' : ''}</w:tcPr><w:p><w:pPr><w:spacing w:after="60"/></w:pPr>${content}</w:p></w:tc>`;
+  const fill = options.shade ? 'EDEDED' : options.fill;
+  return `<w:tc><w:tcPr><w:tcW w:w="${COLUMN}" w:type="dxa"/>${fill ? `<w:shd w:val="clear" w:color="auto" w:fill="${fill}"/>` : ''}</w:tcPr><w:p><w:pPr><w:spacing w:after="60"/></w:pPr>${content}</w:p></w:tc>`;
 }
 
 /** document.xml of the bilingual table: a header row repeated on every page, rows that never break across pages */
 export function bilingualDocumentXml(doc: BilingualDocument): string {
   const header = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${cell(doc.leftLabel, undefined, { bold: true, shade: true })}${cell(doc.rightLabel, undefined, { bold: true, shade: true })}</w:tr>`;
   const rows = doc.rows.map(row =>
-    `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(row.left, row.number, { bold: row.heading })}${cell(row.right, row.number, { bold: row.heading, color: row.warning ? 'C00000' : undefined })}</w:tr>`
+    `<w:tr><w:trPr><w:cantSplit/></w:trPr>${cell(row.left, row.number, { bold: row.heading })}${cell(row.right, row.number, { bold: row.heading, color: row.warning ? 'C00000' : undefined, fill: row.changed && !row.warning ? 'FFF2CC' : undefined })}</w:tr>`
   ).join('');
   const border = (side: string) => `<w:${side} w:val="single" w:sz="4" w:space="0" w:color="BFBFBF"/>`;
   const borders = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map(border).join('');

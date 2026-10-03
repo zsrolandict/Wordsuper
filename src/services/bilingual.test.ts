@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { chunkUnits, formatUnits, guessLanguage, parseTranslations, translateInParts, translationUnits } from './bilingual';
+import { chunkUnits, formatUnits, guessLanguage, parseBilingualDocumentXml, parseTranslations, reuseTranslations, translateInParts, translationUnits } from './bilingual';
 import { bilingualDocx, crc32 } from './docxWriter';
 import { readDocxParagraphs, readZipEntry } from './docxText';
 
@@ -80,4 +80,29 @@ test('parts: any other error stops the run', async () => {
     unmask: t => t,
     isTooLong: () => false,
   }), /unauthorized/);
+});
+
+test('an earlier bilingual document: unchanged paragraphs keep their translation, changed and red ones are translated anew', async () => {
+  const bytes = bilingualDocx({
+    title: 'x', leftLabel: 'Magyar', rightLabel: 'English',
+    rows: [
+      { number: '1.', left: 'Fogalmak', right: 'Definitions', heading: true },
+      { number: '1.1.', left: 'A Vevő fizet.', right: 'The Buyer pays.' },
+      { left: 'Zárás.', right: '⚠ Nem sikerült lefordítani – fordítsd kézzel.', warning: true },
+      { left: 'Régi bekezdés.', right: 'Old paragraph.', changed: true },
+    ],
+  });
+  const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  const xml = new TextDecoder().decode((await readZipEntry(buffer, 'word/document.xml'))!);
+  assert.match(xml, /w:fill="FFF2CC"/);
+  const previous = parseBilingualDocumentXml(xml)!;
+  assert.deepEqual([previous.leftLabel, previous.rightLabel, previous.rows.length], ['Magyar', 'English', 4]);
+  const units = translationUnits([
+    { text: 'Fogalmak', listString: '1.' },
+    { text: 'A Vevő fizet.', listString: '1.1.' },
+    { text: 'A Vevő fizet, azonnal.', listString: '1.2.' },
+    { text: 'Zárás.' },
+  ]);
+  const reused = reuseTranslations(units, previous);
+  assert.deepEqual([...reused], [[1, 'Definitions'], [2, 'The Buyer pays.']]);
 });

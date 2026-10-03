@@ -141,3 +141,56 @@ export const translateInstruction = (from: Language, to: Language) =>
 
 export const glossaryInstruction = (from: Language, to: Language) =>
   `Ezek egy szerződés definiált fogalmai. Fordítsd le őket ${LANGUAGE_LABELS[from].name} nyelvről ${LANGUAGE_LABELS[to].name} nyelvre, a jogi szaknyelvben szokásos, nagy kezdőbetűs fogalomként (pl. Vevő → Buyer).`;
+
+export interface PreviousBilingual {
+  leftLabel: string;
+  rightLabel: string;
+  rows: { left: string; right: string; warning: boolean }[];
+}
+
+const decodeXml = (text: string) => text.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&');
+const cellText = (cell: string) => decodeXml([...cell.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g)].map(m => m[1]).join(''));
+
+/** The table of a bilingual document made here (its document.xml): the column labels and every row */
+export function parseBilingualDocumentXml(xml: string): PreviousBilingual | null {
+  const rows = xml.split(/<w:tr[ >]/).slice(1).map(row => row.split(/<w:tc[ >]/).slice(1));
+  const header = rows[0];
+  if (!header || header.length !== 2) return null;
+  return {
+    leftLabel: cellText(header[0]).trim(),
+    rightLabel: cellText(header[1]).trim(),
+    rows: rows.slice(1).filter(cells => cells.length === 2).map(([left, right]) => ({
+      left: cellText(left),
+      right: cellText(right),
+      warning: /w:color w:val="C00000"/.test(right),
+    })),
+  };
+}
+
+const rowKey = (number: string | undefined, text: string) => `${number ? `${number} ` : ''}${text}`.replace(/\s+/g, ' ').trim();
+
+/**
+ * Translations to take over from an earlier bilingual document: a paragraph whose text is exactly the same as a
+ * row's left side keeps that row's translation (a row marked untranslated is translated again). Repeated identical
+ * paragraphs take the rows in order. Everything else is translated anew.
+ */
+export function reuseTranslations(units: TranslationUnit[], previous: PreviousBilingual): Map<number, string> {
+  const byLeft = new Map<string, string[]>();
+  for (const row of previous.rows) {
+    if (row.warning) continue;
+    const list = byLeft.get(row.left.replace(/\s+/g, ' ').trim()) ?? [];
+    list.push(row.right);
+    byLeft.set(row.left.replace(/\s+/g, ' ').trim(), list);
+  }
+  const reused = new Map<number, string>();
+  for (const unit of units) {
+    const list = byLeft.get(rowKey(unit.number, unit.text));
+    const right = list?.shift();
+    if (right === undefined) continue;
+    // The right side starts with the same automatic number; the translation is what follows it
+    const prefix = unit.number ? `${unit.number} ` : '';
+    const text = (right.startsWith(prefix) ? right.slice(prefix.length) : right).trim();
+    if (text) reused.set(unit.id, text);
+  }
+  return reused;
+}

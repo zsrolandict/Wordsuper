@@ -4,13 +4,15 @@ import type { AIRequestBody } from '../shared/aiConfig';
 import { AIRequestError, describeRequestError, streamAIResponse, type RateLimitInfo } from '../services/aiService';
 import {
   LANGUAGE_LABELS, MAX_TRANSLATE_CHARS, PART_CHARS, chunkUnits, formatGlossary, formatUnits, glossaryInstruction, guessLanguage,
-  translateInParts, translateInstruction, translationUnits, type Language, type TranslationUnit,
+  parseBilingualDocumentXml, reuseTranslations, translateInParts, translateInstruction, translationUnits,
+  type Language, type PreviousBilingual, type TranslationUnit,
 } from '../services/bilingual';
 import { bilingualDocx, toBase64, type BilingualRow } from '../services/docxWriter';
 import { buildDocumentGraph } from '../services/structure';
 import { canOpenNewDocument, openNewDocument, readParagraphsForTranslation } from '../services/wordDocument';
 import { Masker, maskRequest, parseExtraTerms, unresolvedPlaceholders } from '../services/masking';
 import { formatNumber } from '../services/format';
+import { readZipEntry } from '../services/docxText';
 import { documentName, downloadDocx } from '../services/download';
 import { playSound, primeSound } from '../services/sound';
 import type { Settings } from '../services/settings';
@@ -37,11 +39,16 @@ interface Output {
   rows: number;
   /** Rows whose right side is the warning */
   untranslated: number;
+  /** Rows taken over from the earlier bilingual document (an update) */
+  reused: number;
   maskSummary: string;
   opened: boolean;
 }
 
 class Cancelled extends Error {}
+
+/** Remembered on this machine: an update translates only the changed paragraphs */
+const SYNC_KEY = 'word-writer-bilingual-sync';
 
 const other = (language: Language): Language => (language === 'hu' ? 'en' : 'hu');
 
@@ -77,8 +84,28 @@ export default function TranslatePanel({
   const [output, setOutput] = useState<Output | null>(null);
   const [openError, setOpenError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  /** An earlier bilingual document: its unchanged rows are taken over, only the rest is translated again */
+  const [previous, setPrevious] = useState<{ name: string; data: PreviousBilingual } | null>(null);
+  const [syncUpdate, setSyncUpdateState] = useState(() => {
+    try {
+      return localStorage.getItem(SYNC_KEY) !== 'off';
+    } catch {
+      return true;
+    }
+  });
+  const setSyncUpdate = (on: boolean) => {
+    setSyncUpdateState(on);
+    try {
+      localStorage.setItem(SYNC_KEY, on ? 'on' : 'off');
+    } catch {
+      // The choice then lasts for this session only
+    }
+  };
+  const previousInput = useRef<HTMLInputElement>(null);
   const running = progress !== null;
   const to = other(from);
+  // The earlier document must have the same direction (its column labels)
+  const previousMatches = !!previous && previous.data.leftLabel === LANGUAGE_LABELS[from].column && previous.data.rightLabel === LANGUAGE_LABELS[to].column;
 
   const read = useCallback(async () => {
     setReading(true);
@@ -111,6 +138,22 @@ export default function TranslatePanel({
     } catch (e) {
       console.error(e);
       setOpenError('Nem sikerült új dokumentumként megnyitni. Töltsd le, és nyisd meg a letöltött fájlt.');
+    }
+  };
+
+  const loadPrevious = async (file: File) => {
+    setError(null);
+    try {
+      const xml = await readZipEntry(await file.arrayBuffer(), 'word/document.xml');
+      const data = xml && parseBilingualDocumentXml(new TextDecoder().decode(xml));
+      if (!data || !data.rows.length) throw new Error('not bilingual');
+      setPrevious({ name: file.name, data });
+    } catch (e) {
+      console.error(e);
+      setPrevious(null);
+      setError({ message: 'Ez nem a Word Writerrel készült kétnyelvű dokumentum (két oszlopos táblázat fejléccel).' });
+    } finally {
+      if (previousInput.current) previousInput.current.value = '';
     }
   };
 
@@ -155,10 +198,15 @@ export default function TranslatePanel({
     const isTooLong = (e: unknown) => e instanceof AIRequestError && e.code === 'INCOMPLETE' && e.reason === 'length';
     const base = { styleProfile: settings.styleProfile, depth: settings.depth };
 
+    // An update: rows whose original is unchanged keep their translation
+    const updating = !!previous && syncUpdate && previousMatches;
+    const reused = updating ? reuseTranslations(info.units, previous!.data) : new Map<number, string>();
+    const toTranslate = info.units.filter(u => !reused.has(u.id));
+
     try {
       // 1. The defined terms first, so every part uses the same words for them
       const glossary = new Map<string, string>();
-      if (info.terms.length) {
+      if (info.terms.length && toTranslate.length) {
         setProgress('Fogalmak fordítása…');
         const termUnits = info.terms.map((term, i) => ({ id: i + 1, text: term }));
         const translated = await translateInParts(termUnits, {
@@ -174,20 +222,23 @@ export default function TranslatePanel({
       const glossaryText = formatGlossary(glossary);
 
       // 2. The document, part by part
-      const parts = chunkUnits(info.units, PART_CHARS).length;
+      const parts = chunkUnits(toTranslate, PART_CHARS).length;
       setProgress(`Fordítás: 0/${parts} rész`);
-      const translations = await translateInParts(info.units, {
+      const translations = toTranslate.length ? await translateInParts(toTranslate, {
         ask: units => send({ mode: 'translate', instruction: translateInstruction(from, to), originalText: glossaryText, documentContext: formatUnits(units), ...base }),
         unmask,
         isTooLong,
         onProgress: (done, total) => setProgress(`Fordítás: ${done}/${total} rész`),
-      });
+      }) : new Map<number, string>();
 
       // 3. One row per paragraph; a missing translation, or one with a placeholder nothing stands behind, is marked
       const rows: BilingualRow[] = info.units.map(unit => {
+        const kept = reused.get(unit.id);
+        if (kept !== undefined) return { number: unit.number, left: unit.text, right: kept, heading: unit.heading };
         const text = translations.get(unit.id);
         const ok = !!text && !unresolvedPlaceholders(text, [unit.text, glossaryText]).length;
-        return { number: unit.number, left: unit.text, right: ok ? text! : UNTRANSLATED, heading: unit.heading, ...(ok ? {} : { warning: true }) };
+        // In an update, the rows translated anew are marked, so the reviewer reads only those
+        return { number: unit.number, left: unit.text, right: ok ? text! : UNTRANSLATED, heading: unit.heading, ...(ok ? {} : { warning: true }), ...(updating ? { changed: true } : {}) };
       });
       const name = documentName();
       const bytes = bilingualDocx({
@@ -202,6 +253,7 @@ export default function TranslatePanel({
         fileName: `${name || 'Dokumentum'} ${from.toUpperCase()}-${to.toUpperCase()}.docx`,
         rows: rows.length,
         untranslated: rows.filter(r => r.warning).length,
+        reused: reused.size,
         maskSummary: masker?.summary() ?? '',
         opened: false,
       };
@@ -266,6 +318,26 @@ export default function TranslatePanel({
         {tooLong && (
           <p className="text-xs text-amber-700">A dokumentum túl hosszú ({formatNumber(info!.chars)} karakter, a korlát {formatNumber(MAX_TRANSLATE_CHARS)}). Fordítsd részenként: másold egy új dokumentumba a fordítandó részt.</p>
         )}
+        <div className="border-t border-neutral-100 pt-2 space-y-1.5 text-xs">
+          <p className="font-medium text-neutral-700">Korábbi kétnyelvű változat frissítése</p>
+          <input ref={previousInput} type="file" accept=".docx" className="hidden" aria-label="Korábbi kétnyelvű változat" onChange={e => e.target.files?.[0] && loadPrevious(e.target.files[0])} />
+          {previous ? (
+            <div className="flex items-center justify-between">
+              <span className="truncate text-neutral-700">📄 {previous.name} ({formatNumber(previous.data.rows.length)} sor, {previous.data.leftLabel} → {previous.data.rightLabel})</span>
+              <button onClick={() => setPrevious(null)} disabled={running} className="ml-2 text-neutral-500 hover:text-neutral-900" aria-label="Korábbi változat elvetése">✕</button>
+            </div>
+          ) : (
+            <button onClick={() => previousInput.current?.click()} disabled={running} className="w-full py-1.5 border border-neutral-300 rounded-lg text-neutral-700 hover:bg-neutral-100 disabled:opacity-50">
+              Korábbi kétnyelvű változat feltöltése (.docx)
+            </button>
+          )}
+          <label className="flex items-start space-x-2 cursor-pointer">
+            <input type="checkbox" className="mt-0.5" checked={syncUpdate} disabled={running} onChange={e => setSyncUpdate(e.target.checked)} />
+            <span>Szinkron frissítés: csak a megváltozott bekezdéseket fordítom újra, a többi fordítása marad (az újak sárga hátteret kapnak)</span>
+          </label>
+          {previous && !previousMatches && <p className="text-amber-700">A korábbi változat iránya ({previous.data.leftLabel} → {previous.data.rightLabel}) más, mint a mostani: mindent újrafordítok.</p>}
+          {previous && previousMatches && !syncUpdate && <p className="text-neutral-500">A szinkron frissítés ki van kapcsolva: mindent újrafordítok.</p>}
+        </div>
         {running ? (
           <div className="flex items-center space-x-2">
             <p className="flex-1 flex items-center text-xs text-neutral-600"><Loader2 className="w-3.5 h-3.5 mr-1 animate-spin text-blue-600" />{progress}</p>
@@ -300,7 +372,7 @@ export default function TranslatePanel({
       {output && (
         <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-2 text-xs">
           <p className="font-medium text-green-700">
-            ✅ Elkészült: {formatNumber(output.rows)} sor.{output.opened ? ' Új dokumentumként megnyitottam (még nincs elmentve).' : ''}
+            ✅ Elkészült: {formatNumber(output.rows)} sor{output.reused ? `, ebből ${formatNumber(output.reused)} a korábbi változatból átvéve, ${formatNumber(output.rows - output.reused)} újrafordítva (sárga háttér)` : ''}.{output.opened ? ' Új dokumentumként megnyitottam (még nincs elmentve).' : ''}
           </p>
           {output.untranslated > 0 && (
             <p className="text-red-700">⚠ {formatNumber(output.untranslated)} bekezdést nem sikerült lefordítani: ezeknél a jobb oldalon piros figyelmeztetés áll, fordítsd kézzel.</p>
