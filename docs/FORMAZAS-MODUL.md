@@ -1,6 +1,6 @@
 # Word Writer – Formázás modul (leírás egyeztetéshez)
 
-*Állapot: 2026. október 3., `phase-1` ág. A leírás egy másik AI-val vagy fejlesztővel való egyeztetéshez készült: mit csinál a modul, hogyan működik, mire figyel, és mit nem tud még. A modul AI-t nem használ, minden szabályalapú és a gépen fut.*
+*Állapot: 2026. október 3., `phase-1` ág (a négy utolsó bővítéssel együtt). A leírás egy másik AI-val vagy fejlesztővel való egyeztetéshez készült: mit csinál a modul, hogyan működik, mire figyel, és mit nem tud még. A modul AI-t nem használ, minden szabályalapú és a gépen fut.*
 
 ## 1. Cél
 
@@ -46,7 +46,7 @@ Ha több címsorszint van (az ál-címek egy további szintnek számítanak), a 
 Fontos: **a stílus szintje (Címsor 1/2/3) mindkét esetben marad**, tehát a tartalomjegyzék és a navigációs ablak nem változik; csak a megjelenés. Amíg a kérdésre nincs válasz, az „Egységesítés” gomb tiltott.
 
 ### 3.4 Stílusprofil
-A profil mezői: betűtípus, szöveg mérete, címsor mérete, lábjegyzet mérete, **címsorok betűtípusa** (üres: mint a szöveg), bekezdés előtti és utáni térköz, címsor előtti és utáni térköz, sorköz (pont; 0 = nem változtat), első sor behúzása (pont; 0 = nem változtat), igazítás (sorkizárt / balra zárt).
+A profil mezői: betűtípus, szöveg mérete, címsor mérete, lábjegyzet mérete, **címsorok betűtípusa** (üres: mint a szöveg), **címek színe** (nem változtat / fekete / sötétkék / sötétszürke / bordó / sötétzöld), bekezdés előtti és utáni térköz, címsor előtti és utáni térköz, sorköz (pont; 0 = nem változtat), első sor, bal és jobb behúzás (pont; 0 = nem változtat), **oldalmargók** (cm; 0 = nem változtat; csak ha a Word engedi), igazítás (sorkizárt / balra zárt).
 
 Az alapérték a dokumentum leggyakoribb beállítása („Ebből a dokumentumból”). Egy jól formázott bekezdésre kattintva a „Szöveg: mint a kijelölt” és „Cím: mint a kijelölt” gombbal az onnan átvehető.
 
@@ -63,14 +63,16 @@ Az alapérték a dokumentum leggyakoribb beállítása („Ebből a dokumentumb�
 A stílus kitölti a profilt; utána bármelyik érték átírható.
 
 ### 3.6 Kategóriák
-Kategóriánként kapcsolható, a darabszámmal együtt („9 helyen”, „rendben”): betűtípus, betűméret, címsorok, lábjegyzetek, térközök, igazítás. Külön csoport, **alapból kikapcsolva**, mert a szöveget módosítják: többszörös üres sorok törlése (egy marad; képet tartalmazó bekezdést nem töröl), dupla szóközök cseréje.
+Kategóriánként kapcsolható, a darabszámmal együtt („9 helyen”, „rendben”): betűtípus, betűméret, címsorok, lábjegyzetek, térközök, igazítás, címek színe, behúzások, „címsor együtt marad a következővel”, oldalmargók. Külön csoport, **alapból kikapcsolva**, mert a szöveget módosítják: többszörös üres sorok törlése (egy marad; képet tartalmazó bekezdést nem töröl), dupla szóközök cseréje.
 
 ### 3.7 A terv (`planFormatting`)
 A terv csak azt tartalmazza, ami **most eltér** a profiltól, így az újrafuttatás nem csinál semmit („rendben”). Szabályok szerepenként:
-- **Címsor / ál-cím / Cím:** betűtípus (a címsorok betűtípusa vagy a szöveg betűtípusa), méret (szint szerint), félkövér; előtte/utána térköz (a Cím kivételével). Az ál-cím félkövér lesz.
-- **Szövegtörzs:** betűtípus, méret, térközök, sorköz, első sor behúzása, igazítás. A **középre vagy jobbra igazított** bekezdés (cím, keltezés, aláírás) igazítása marad.
+- **Címsor / ál-cím / Cím:** betűtípus (a címsorok betűtípusa vagy a szöveg betűtípusa), méret (szint szerint), félkövér, szín (ha választottál); előtte/utána térköz (a Cím kivételével). Az ál-cím félkövér lesz.
+- **Szövegtörzs:** betűtípus, méret, térközök, sorköz, első sor / bal / jobb behúzás, igazítás. **Számozott vagy felsorolásos bekezdés behúzásához nem nyúl** (az a listához tartozik). A **középre vagy jobbra igazított** bekezdés (cím, keltezés, aláírás) igazítása marad.
 - **Táblázat:** csak betűtípus és méret, hogy a táblázat elrendezése ne változzon.
 - **Lábjegyzet:** betűtípus és méret.
+- **„Címsor együtt marad a következő bekezdéssel”:** nem bekezdésenként, hanem a címsorstílusokon (Címsor 1, 2…, Cím) állítja be egyszer (`Style.paragraphFormat.keepWithNext`, WordApi 1.5), így a stílust használó összes cím ilyen lesz. Az ál-címekre (Normál stílus) nem hat, mert azok stílusa a szövegtörzsé is.
+- **Oldalmargók:** minden szakaszra (`Section.pageSetup`, WordApiDesktop 1.3); csak azt az oldalt állítja, amelyiknek értéket adtál meg és eltér. Ha a Word ezt nem támogatja, a mezők el sem jelennek.
 - Minden más (félkövér, dőlt, aláhúzott kiemelések egy bekezdésen belül, számozás, hivatkozások, mezők) érintetlen.
 
 ### 3.8 Alkalmazás (`applyFormatPlan`)
@@ -93,7 +95,7 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 
 ## 5. Tesztelés
 
-- Egységtesztek (`formatting.test.ts`): szerepek, összegzés, terv (címsorlépcső, táblázat, igazítás, lábjegyzet), kategóriák, kész stílusok, címsor-betűtípus és behúzás.
+- Egységtesztek (`formatting.test.ts`): szerepek, összegzés, terv (címsorlépcső, táblázat, igazítás, lábjegyzet), kategóriák, kész stílusok, címsor-betűtípus, behúzás, szín, listák kihagyása, címsor együtt marad, margók.
 - Böngészős teszt Word-szimulátorral (`ui-format.mjs`): átvilágítás, címsor-kérdés, alkalmazás korrektúra nélkül, a Word-beállítás visszaállítása, szöveg érintetlensége, előző állapot, szöveget módosító opciók, megváltozott dokumentum, mentés nélküli folytatás, profil a kijelölésből.
 - **Valódi Wordben még nem lett kipróbálva.** A szimulátor az Office.js viselkedését modellezi, de nem azonos vele.
 
@@ -105,14 +107,12 @@ Alkalmazás előtt `Office.context.document.getFileAsync(Compressed)` szeletekbe
 4. **Számozott listák:** a lista bal behúzása és függő behúzása a Wordben a számozáshoz tartozik; az első sor behúzásának változtatása listaelemen kerülendő.
 5. **Ál-cím felismerés:** heurisztika (rövid, félkövér vagy csupa nagybetű, nincs záró írásjel); téves találat lehetséges (pl. aláírásnál egy név), ezért ki lehet venni a pipát.
 6. **Vegyes betűtípusú bekezdés:** az egész bekezdés egy betűtípust kap (a kiemelések megmaradnak).
-7. **Nem kezeli:** oldalmargók, élőfej/élőláb, táblázatstílusok, színek, felsorolásjelek, szövegdobozok, szakaszonkénti eltérések.
+7. **Nem kezeli:** élőfej/élőláb, táblázatstílusok, a szövegtörzs színe, felsorolásjelek, szövegdobozok, szakaszonként eltérő margók (mindegyik szakaszra ugyanazt állítja).
+8. **A „címsor együtt marad” a stílust módosítja,** nem a bekezdéseket: ha a dokumentum a címsorstílusokat más célra is használja, mindenhol érvényes lesz. A mentett előző állapot ezt is visszaadja.
+9. **A margók és a stílus szabálya még ellenőrizendő valódi Wordben** (az API-k újabb Word-változatokat igényelnek, és a szimulátor nem azonos a Worddel).
 
-## 7. Tervezett bővítések (a kért sorrendben)
-
-1. **Címek színe** (visszafogott paletta, pl. sötétkék, sötétszürke; „nem változtat” az alapérték).
-2. **Bal és jobb behúzás** a szövegtörzsre (listaelemek kihagyásával).
-3. **„Címsor együtt marad a következő bekezdéssel”** tördelési szabály (címsorstílusokra, hogy a cím ne maradjon a lap alján egyedül).
-4. **Oldalmargók** (cm-ben; WordApiDesktop 1.3 kell hozzá, ahol nincs, ott a mező rejtett).
+## 7. Utólag bekerült bővítések
+A második körben kerültek be: címek színe, bal és jobb behúzás, „címsor együtt marad a következő bekezdéssel”, oldalmargók. Mind kategóriánként kapcsolható, és ugyanazt a védelmet kapja, mint a többi (átvilágítás, terv, mentés előtte, korrektúra nélküli írás, a Word-beállítás visszaállítása).
 
 ## 8. Kérdések, amiket érdemes megbeszélni
 

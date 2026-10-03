@@ -107,3 +107,28 @@ test('heading font, space before body paragraphs and first-line indent', () => {
   assert.equal(at(8)?.firstLineIndent, undefined, 'tables keep their layout');
   assert.equal(at(1)?.firstLineIndent, undefined);
 });
+
+test('heading colour, indents (lists left alone), keep with next, margins in points', () => {
+  const withMargins: FormatAudit = {
+    ...audit,
+    margins: [{ top: 72, bottom: 72, left: 85.04, right: 85.04 }],
+    paragraphs: [...audit.paragraphs.map((p, i) => (i === 1 ? { ...p, style: 'Címsor 1' } : i === 3 ? { ...p, style: 'Címsor 2' } : p)), para('1. pont szöveg', { isList: true })],
+  };
+  const profile = { ...defaultProfile(summarize(withMargins)), headingColor: '#1F3864', leftIndent: 14, rightIndent: 7, marginLeft: 2.5, marginRight: 3 };
+  const plan = planFormatting(withMargins, profile, defaultOptions());
+  const at = (i: number) => plan.changes.find(c => c.index === i);
+  assert.equal(at(1)?.color, '#1F3864');
+  assert.equal(at(7)?.color, '#1F3864', 'fake headings too');
+  assert.equal(at(2)?.color, undefined);
+  assert.deepEqual([at(2)?.leftIndent, at(2)?.rightIndent], [14, 7]);
+  assert.equal(at(11)?.leftIndent, undefined, 'a list item keeps its indent');
+  assert.equal(at(8)?.leftIndent, undefined, 'a table cell too');
+  assert.deepEqual(plan.keepWithNextStyles.sort(), ['Címsor 1', 'Címsor 2']);
+  assert.deepEqual(plan.margins, { left: 70.9 }, 'the right margin is already 3 cm');
+  const off = defaultOptions();
+  off.categories.pagination = false;
+  off.categories.margins = false;
+  off.categories.color = false;
+  const plan2 = planFormatting(withMargins, profile, off);
+  assert.deepEqual([plan2.keepWithNextStyles, plan2.margins, plan2.changes.find(c => c.index === 1)?.color], [[], null, undefined]);
+});

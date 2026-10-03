@@ -22,6 +22,14 @@ export interface ParagraphFormat {
   lineSpacing: number;
   /** First-line indent in points (negative: hanging); 0 when absent */
   firstLineIndent?: number;
+  leftIndent?: number;
+  rightIndent?: number;
+  /** Font color as "#RRGGBB"; null when mixed */
+  color?: string | null;
+  /** Localized style name ("Címsor 1"), to set page-break rules on the style */
+  style?: string;
+  /** A numbered or bulleted paragraph: its indents belong to the list */
+  isList?: boolean;
 }
 
 export interface FootnoteFormat {
@@ -29,8 +37,12 @@ export interface FootnoteFormat {
   size: number | null;
 }
 
+export interface PageMargins { top: number; bottom: number; left: number; right: number }
+
 export interface FormatAudit {
   paragraphs: ParagraphFormat[];
+  /** Page margins per section in points; null when this Word can't read them */
+  margins?: PageMargins[] | null;
   /** Footnote texts' paragraphs; null when this Word can't read them (before WordApi 1.5) */
   footnotes: FootnoteFormat[] | null;
 }
@@ -143,6 +155,16 @@ export interface FormatProfile {
   lineSpacing: number;
   /** First-line indent of body paragraphs in points; 0: left as it is */
   firstLineIndent: number;
+  /** Body paragraphs' left/right indent in points; 0: left as it is */
+  leftIndent: number;
+  rightIndent: number;
+  /** Heading color "#RRGGBB"; empty: left as it is */
+  headingColor: string;
+  /** Page margins in cm; 0: left as it is */
+  marginTop: number;
+  marginBottom: number;
+  marginLeft: number;
+  marginRight: number;
   alignment: 'Left' | 'Justified';
 }
 
@@ -160,11 +182,18 @@ export function defaultProfile(summary: AuditSummary): FormatProfile {
     headingSpaceAfter: 6,
     lineSpacing: summary.dominant.lineSpacing,
     firstLineIndent: 0,
+    leftIndent: 0,
+    rightIndent: 0,
+    headingColor: '',
+    marginTop: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    marginRight: 0,
     alignment: summary.dominant.alignment,
   };
 }
 
-export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'emptyParagraphs' | 'doubleSpaces';
+export type Category = 'font' | 'size' | 'headings' | 'footnotes' | 'spacing' | 'alignment' | 'color' | 'indent' | 'pagination' | 'margins' | 'emptyParagraphs' | 'doubleSpaces';
 
 export interface FormatOptions {
   categories: Record<Category, boolean>;
@@ -175,12 +204,12 @@ export interface FormatOptions {
 }
 
 /** Changes the formatting only: the text is never touched by these */
-export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment'];
+export const FORMAT_CATEGORIES: Category[] = ['font', 'size', 'headings', 'footnotes', 'spacing', 'alignment', 'color', 'indent', 'pagination', 'margins'];
 /** These change the text (so they go in like any other text change, by the Track Changes rule) */
 export const TEXT_CATEGORIES: Category[] = ['emptyParagraphs', 'doubleSpaces'];
 
 export const defaultOptions = (): FormatOptions => ({
-  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, emptyParagraphs: false, doubleSpaces: false },
+  categories: { font: true, size: true, headings: true, footnotes: true, spacing: true, alignment: true, color: true, indent: true, pagination: true, margins: true, emptyParagraphs: false, doubleSpaces: false },
   fakeHeadings: true,
   unifyHeadings: false,
 });
@@ -194,6 +223,9 @@ export interface ParagraphChange {
   spaceAfter?: number;
   lineSpacing?: number;
   firstLineIndent?: number;
+  leftIndent?: number;
+  rightIndent?: number;
+  color?: string;
   alignment?: 'Left' | 'Justified';
 }
 
@@ -203,6 +235,10 @@ export interface FormatPlan {
   /** Paragraphs to delete (the extra empty lines) */
   deleteEmpty: number[];
   doubleSpaces: boolean;
+  /** Localized names of the heading styles that get "keep with next" */
+  keepWithNextStyles: string[];
+  /** New page margins in points (only the ones to change); null: none */
+  margins: Partial<PageMargins> | null;
   /** Per category: how many paragraphs (footnotes, places) it changes */
   counts: Record<Category, number>;
 }
@@ -246,6 +282,7 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
       const size = role.kind === 'title' ? profile.headingSize + 2 : headingSize(role.kind === 'heading' ? role.level : 'fake', profile, options.unifyHeadings, levels);
       set('headings', 'size', size, differs(p.size, size));
       set('headings', 'bold', true, p.bold !== true);
+      if (profile.headingColor) set('color', 'color', profile.headingColor, (p.color ?? '').toLowerCase() !== profile.headingColor.toLowerCase());
       if (role.kind !== 'title') {
         set('spacing', 'spaceBefore', profile.headingSpaceBefore, differs(p.spaceBefore, profile.headingSpaceBefore));
         set('spacing', 'spaceAfter', profile.headingSpaceAfter, differs(p.spaceAfter, profile.headingSpaceAfter));
@@ -257,7 +294,12 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
         set('spacing', 'spaceBefore', profile.bodySpaceBefore, differs(p.spaceBefore, profile.bodySpaceBefore));
         set('spacing', 'spaceAfter', profile.bodySpaceAfter, differs(p.spaceAfter, profile.bodySpaceAfter));
         if (profile.lineSpacing > 0) set('spacing', 'lineSpacing', profile.lineSpacing, differs(p.lineSpacing, profile.lineSpacing));
-        if (profile.firstLineIndent !== 0) set('spacing', 'firstLineIndent', profile.firstLineIndent, differs(p.firstLineIndent ?? 0, profile.firstLineIndent));
+        // A list's indents belong to its numbering: left alone
+        if (!p.isList) {
+          if (profile.firstLineIndent !== 0) set('indent', 'firstLineIndent', profile.firstLineIndent, differs(p.firstLineIndent ?? 0, profile.firstLineIndent));
+          if (profile.leftIndent !== 0) set('indent', 'leftIndent', profile.leftIndent, differs(p.leftIndent ?? 0, profile.leftIndent));
+          if (profile.rightIndent !== 0) set('indent', 'rightIndent', profile.rightIndent, differs(p.rightIndent ?? 0, profile.rightIndent));
+        }
         // A centered or right-aligned paragraph (a title, a signature) is meant to be so
         if (p.alignment === 'Left' || p.alignment === 'Justified') set('alignment', 'alignment', profile.alignment, p.alignment !== profile.alignment);
       }
@@ -274,10 +316,33 @@ export function planFormatting(audit: FormatAudit, profile: FormatProfile, optio
     if (font) counts.font += audit.footnotes.length;
     if (size) counts.footnotes = audit.footnotes.length;
   }
+  // Headings stay on the page with the paragraph after them: set once on each heading style
+  const keepWithNextStyles = on.pagination
+    ? [...new Set(audit.paragraphs.flatMap((p, i) => {
+      const role = roleOf(p);
+      return (role.kind === 'heading' || role.kind === 'title') && p.style ? [p.style] : [];
+    }))]
+    : [];
+  counts.pagination = keepWithNextStyles.length;
+
+  let margins: FormatPlan['margins'] = null;
+  if (on.margins && audit.margins?.length) {
+    const wanted: Partial<PageMargins> = {};
+    const cm = (value: number) => Math.round(value * 28.3465 * 10) / 10;
+    (['top', 'bottom', 'left', 'right'] as const).forEach(side => {
+      const value = profile[`margin${side[0].toUpperCase()}${side.slice(1)}` as 'marginTop'];
+      if (value > 0 && audit.margins!.some(m => differs(m[side], cm(value)))) wanted[side] = cm(value);
+    });
+    if (Object.keys(wanted).length) {
+      margins = wanted;
+      counts.margins = audit.margins.length;
+    }
+  }
+
   const deleteEmpty = on.emptyParagraphs ? summary.extraEmpty : [];
   counts.emptyParagraphs = deleteEmpty.length;
   counts.doubleSpaces = on.doubleSpaces ? summary.doubleSpaces : 0;
-  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, counts };
+  return { changes, footnotes, deleteEmpty, doubleSpaces: counts.doubleSpaces > 0, keepWithNextStyles, margins, counts };
 }
 
 export interface StylePreset {
@@ -293,30 +358,30 @@ export const STYLE_PRESETS: StylePreset[] = [
     id: 'classic',
     name: 'Klasszikus',
     description: 'Garamond 12 pt, sorkizárt, egyenletes, hagyományos szerződés',
-    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, firstLineIndent: 0, alignment: 'Justified' },
+    profile: { font: 'Garamond', bodySize: 12, headingSize: 14, footnoteSize: 10, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 14, headingSpaceAfter: 6, lineSpacing: 14.4, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
   {
     id: 'modern',
     name: 'Modern',
     description: 'Calibri 11 pt, balra zárt, levegős térközökkel',
-    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, alignment: 'Left' },
+    profile: { font: 'Calibri', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 16, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
   },
   {
     id: 'compact',
     name: 'Kompakt',
     description: 'Arial 10 pt, sorkizárt, szűk térközök: hosszú szerződéshez, kevesebb oldal',
-    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, firstLineIndent: 0, alignment: 'Justified' },
+    profile: { font: 'Arial', bodySize: 10, headingSize: 11, footnoteSize: 8, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 4, headingSpaceBefore: 10, headingSpaceAfter: 4, lineSpacing: 12, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
   {
     id: 'premium',
     name: 'Prémium',
     description: 'Cambria 11 pt szöveg, Calibri címek, balra zárt, bőséges térközök: tanácsadói jelentések, ajánlatok',
-    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: 'Calibri', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, alignment: 'Left' },
+    profile: { font: 'Cambria', bodySize: 11, headingSize: 14, footnoteSize: 9, headingFont: 'Calibri', bodySpaceBefore: 0, bodySpaceAfter: 8, headingSpaceBefore: 18, headingSpaceAfter: 8, lineSpacing: 15.5, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '#1F3864', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Left' },
   },
   {
     id: 'legal',
     name: 'Jogi (angolszász)',
     description: 'Times New Roman 11 pt, sorkizárt, szűk, egyenletes térközök: nemzetközi szerződések',
-    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, firstLineIndent: 0, alignment: 'Justified' },
+    profile: { font: 'Times New Roman', bodySize: 11, headingSize: 12, footnoteSize: 9, headingFont: '', bodySpaceBefore: 0, bodySpaceAfter: 6, headingSpaceBefore: 12, headingSpaceAfter: 6, lineSpacing: 13.2, firstLineIndent: 0, leftIndent: 0, rightIndent: 0, headingColor: '', marginTop: 0, marginBottom: 0, marginLeft: 0, marginRight: 0, alignment: 'Justified' },
   },
 ];

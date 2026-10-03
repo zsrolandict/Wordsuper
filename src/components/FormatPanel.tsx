@@ -15,11 +15,23 @@ const CATEGORY_LABELS: Record<Category, { label: string; title: string }> = {
   headings: { label: 'Címsorok', title: 'A címsorok nagyobbak és félkövérek' },
   footnotes: { label: 'Lábjegyzetek', title: 'A lábjegyzetek kisebbek' },
   spacing: { label: 'Térközök', title: 'Egységes bekezdés előtti/utáni térköz és sorköz (táblázaton kívül)' },
+  color: { label: 'Címek színe', title: 'A címek egyforma színűek (csak ha választasz színt)' },
+  indent: { label: 'Behúzások', title: 'Első sor, bal és jobb behúzás a szövegbekezdéseken (számozott listákhoz nem nyúl)' },
+  pagination: { label: 'Címsor együtt marad a következővel', title: 'A címsor stílusa: a cím nem maradhat egyedül a lap alján' },
+  margins: { label: 'Oldalmargók', title: 'Felső, alsó, bal és jobb margó (csak ha megadsz értéket; asztali Word kell)' },
   alignment: { label: 'Igazítás', title: 'A balra zárt és sorkizárt bekezdések egyformán; a középre és jobbra igazítotthoz nem nyúl' },
   emptyParagraphs: { label: 'Többszörös üres sorok törlése', title: 'Ahol két vagy több üres bekezdés áll egymás után, csak egy marad' },
   doubleSpaces: { label: 'Dupla szóközök cseréje', title: 'Két vagy több szóköz helyett egy' },
 };
 
+const HEADING_COLORS: [string, string][] = [
+  ['', 'Nem változtat'],
+  ['#000000', 'Fekete'],
+  ['#1F3864', 'Sötétkék'],
+  ['#404040', 'Sötétszürke'],
+  ['#7B1E3A', 'Bordó'],
+  ['#1E4D2B', 'Sötétzöld'],
+];
 const COMMON_FONTS = ['Calibri', 'Arial', 'Times New Roman', 'Garamond', 'Cambria', 'Georgia', 'Tahoma', 'Verdana'];
 const LEVEL_NAMES = (level: number) => `Címsor ${level}`;
 const pt = (n: number) => `${formatNumber(Math.round(n * 10) / 10)} pt`;
@@ -51,6 +63,32 @@ function PointsInput({ label, value, onChange, disabled }: { label: string; valu
           className="w-16 p-1 text-right border border-neutral-300 rounded-md bg-neutral-50 disabled:opacity-50"
         />
         <span className="ml-1 text-neutral-400">pt</span>
+      </span>
+    </label>
+  );
+}
+
+/** A number field in centimetres */
+function CmInput({ label, value, onChange, disabled }: { label: string; value: number; onChange: (n: number) => void; disabled?: boolean }) {
+  return (
+    <label className="flex items-center justify-between space-x-1">
+      <span className="text-neutral-600">{label.replace(' margó', '')}</span>
+      <span className="flex items-center">
+        <input
+          type="number"
+          min={0}
+          max={15}
+          step={0.1}
+          value={value}
+          disabled={disabled}
+          aria-label={label}
+          onChange={e => {
+            const n = Number(e.target.value);
+            if (Number.isFinite(n) && n >= 0 && n <= 15) onChange(n);
+          }}
+          className="w-14 p-1 text-right border border-neutral-300 rounded-md bg-neutral-50 disabled:opacity-50"
+        />
+        <span className="ml-1 text-neutral-400">cm</span>
       </span>
     </label>
   );
@@ -109,7 +147,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
     () => (audit && profile ? planFormatting(audit, profile, { ...options, unifyHeadings: headingAnswer === 'unified' }) : null),
     [audit, profile, options, headingAnswer]
   );
-  const total = plan ? plan.changes.length + (plan.footnotes ? 1 : 0) + plan.deleteEmpty.length + (plan.doubleSpaces ? 1 : 0) : 0;
+  const total = plan ? plan.changes.length + (plan.footnotes ? 1 : 0) + plan.keepWithNextStyles.length + (plan.margins ? 1 : 0) + plan.deleteEmpty.length + (plan.doubleSpaces ? 1 : 0) : 0;
   const busy = reading || applying;
 
   const setCategory = (category: Category, on: boolean) => setOptions(o => ({ ...o, categories: { ...o.categories, [category]: on } }));
@@ -127,6 +165,8 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
           ...p,
           ...(format.font ? { font: format.font } : {}),
           ...(format.size ? { bodySize: format.size } : {}),
+          leftIndent: format.leftIndent,
+          rightIndent: format.rightIndent,
           bodySpaceBefore: format.spaceBefore,
           bodySpaceAfter: format.spaceAfter,
           firstLineIndent: format.firstLineIndent,
@@ -166,11 +206,13 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
       const parts = [
         outcome.formatted ? `${formatNumber(outcome.formatted)} bekezdés formázása` : '',
         outcome.footnotes ? `${formatNumber(outcome.footnotes)} lábjegyzet` : '',
+        outcome.keepWithNext ? `${outcome.keepWithNext} címsorstílus együtt marad a következő bekezdéssel` : '',
+        outcome.margins ? `oldalmargók (${outcome.margins} szakasz)` : '',
         outcome.deleted ? `${formatNumber(outcome.deleted)} üres sor törölve` : '',
         outcome.spaces ? `${formatNumber(outcome.spaces)} dupla szóköz cserélve` : '',
       ].filter(Boolean);
       const how = outcome.write ? ` A szöveg változásai ${outcome.write.tracked ? 'korrektúrával' : 'korrektúra nélkül'} kerültek be${outcome.write.forced ? ' (a dokumentumban el nem fogadott korrektúra van, ezért mindenképp korrektúrával)' : ''}.` : '';
-      setStatus(`✅ Kész: ${parts.join(', ')}. A formázás korrektúra nélkül került be.${how}`);
+      setStatus(`✅ Kész: ${parts.join(', ')}. A formázás korrektúra nélkül került be.${how}${outcome.notes.length ? ` ${outcome.notes.join(' ')}` : ''}`);
       await read(true);
     } catch (e) {
       console.error(e);
@@ -199,6 +241,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
 
   const fonts = summary ? [...new Set([...summary.fonts.map(([f]) => f).filter(Boolean), ...COMMON_FONTS])] : COMMON_FONTS;
   const footnotesKnown = !!audit?.footnotes?.length;
+  const marginsKnown = !!audit?.margins?.length;
   const textCategories = TEXT_CATEGORIES.filter(c => (c === 'emptyParagraphs' ? summary?.extraEmpty.length : summary?.doubleSpaces));
 
   return (
@@ -289,6 +332,25 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
             <PointsInput label="Sorköz (0 = nem változtat)" value={profile.lineSpacing} disabled={busy} onChange={n => setProfileValue('lineSpacing', n)} />
             <p className="text-neutral-500">Pontban: a szöveg méretének kb. 1,2-szerese a megszokott (11 pt-nál 13–14 pt).</p>
             <PointsInput label="Első sor behúzása (0 = nem változtat)" value={profile.firstLineIndent} disabled={busy} onChange={n => setProfileValue('firstLineIndent', n)} />
+            <PointsInput label="Bal behúzás (0 = nem változtat)" value={profile.leftIndent} disabled={busy} onChange={n => setProfileValue('leftIndent', n)} />
+            <PointsInput label="Jobb behúzás (0 = nem változtat)" value={profile.rightIndent} disabled={busy} onChange={n => setProfileValue('rightIndent', n)} />
+            <label className="flex items-center justify-between space-x-2">
+              <span className="text-neutral-600">Címek színe</span>
+              <select value={profile.headingColor} disabled={busy} onChange={e => setProfileValue('headingColor', e.target.value)} aria-label="Címek színe" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
+                {HEADING_COLORS.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+              </select>
+            </label>
+            {marginsKnown && (
+              <div className="pt-1 space-y-1.5">
+                <p className="text-neutral-500">Oldalmargók cm-ben (0 = nem változtat):</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
+                  <CmInput label="Felső margó" value={profile.marginTop} disabled={busy} onChange={n => setProfileValue('marginTop', n)} />
+                  <CmInput label="Alsó margó" value={profile.marginBottom} disabled={busy} onChange={n => setProfileValue('marginBottom', n)} />
+                  <CmInput label="Bal margó" value={profile.marginLeft} disabled={busy} onChange={n => setProfileValue('marginLeft', n)} />
+                  <CmInput label="Jobb margó" value={profile.marginRight} disabled={busy} onChange={n => setProfileValue('marginRight', n)} />
+                </div>
+              </div>
+            )}
             <label className="flex items-center justify-between space-x-2">
               <span className="text-neutral-600">Igazítás</span>
               <select value={profile.alignment} disabled={busy} onChange={e => setProfileValue('alignment', e.target.value as FormatProfile['alignment'])} aria-label="Igazítás" className="p-1 border border-neutral-300 rounded-md bg-neutral-50">
@@ -308,7 +370,7 @@ export default function FormatPanel({ active, onDocumentChanged }: { active: boo
 
           <div className="bg-white border border-neutral-200 rounded-xl p-3 space-y-1.5">
             <p className="font-semibold text-neutral-700">Mit egységesítsek?</p>
-            {FORMAT_CATEGORIES.filter(c => c !== 'footnotes' || footnotesKnown).map(c => (
+            {FORMAT_CATEGORIES.filter(c => (c !== 'footnotes' || footnotesKnown) && (c !== 'margins' || marginsKnown)).map(c => (
               <label key={c} className="flex items-center justify-between cursor-pointer" title={CATEGORY_LABELS[c].title}>
                 <span className="flex items-center space-x-2">
                   <input type="checkbox" checked={options.categories[c]} disabled={busy} onChange={e => setCategory(c, e.target.checked)} />

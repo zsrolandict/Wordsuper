@@ -5,7 +5,7 @@ import { reviewCommentText, reviewFix, searchCandidates } from './review';
 import { planDocumentEdits, summarizeDocumentEdits, type DocumentEditOp } from './documentEdit';
 import { formatNumber } from './format';
 import { withAutoNumbers, type ParagraphInfo } from './structure';
-import type { FormatAudit, FormatPlan } from './formatting';
+import type { FormatAudit, FormatPlan, PageMargins } from './formatting';
 
 /** An error whose message is meant for the user as is */
 export class UserFacingError extends Error {}
@@ -1122,7 +1122,7 @@ export async function insertCommentsAtParagraphs(items: { paragraph: number; exp
   });
 }
 
-const FORMAT_PROPERTIES = 'items/text,items/styleBuiltIn,items/alignment,items/spaceAfter,items/spaceBefore,items/lineSpacing,items/firstLineIndent,items/tableNestingLevel,items/font/name,items/font/size,items/font/bold';
+const FORMAT_PROPERTIES = 'items/text,items/styleBuiltIn,items/alignment,items/spaceAfter,items/spaceBefore,items/lineSpacing,items/firstLineIndent,items/leftIndent,items/rightIndent,items/isListItem,items/style,items/tableNestingLevel,items/font/name,items/font/size,items/font/bold,items/font/color';
 
 /** Reading and changing the footnotes needs WordApi 1.5 */
 export const canFormatFootnotes = () => isSupported('1.5');
@@ -1135,7 +1135,9 @@ export async function readFormatAudit(): Promise<FormatAudit> {
     const notes = canFormatFootnotes() ? context.document.body.footnotes : null;
     notes?.load('items/body/font/name,items/body/font/size');
     await context.sync();
+    const margins = await readMargins();
     return {
+      margins,
       paragraphs: paragraphs.items.map(p => ({
         text: p.text,
         styleBuiltIn: String(p.styleBuiltIn),
@@ -1149,24 +1151,59 @@ export async function readFormatAudit(): Promise<FormatAudit> {
         spaceAfter: p.spaceAfter || 0,
         lineSpacing: p.lineSpacing || 0,
         firstLineIndent: p.firstLineIndent || 0,
+        leftIndent: p.leftIndent || 0,
+        rightIndent: p.rightIndent || 0,
+        color: p.font.color || null,
+        style: p.style || undefined,
+        isList: !!p.isListItem,
       })),
       footnotes: notes ? notes.items.map(n => ({ font: n.body.font.name || null, size: n.body.font.size || null })) : null,
     };
   });
 }
 
+/** Page margins need WordApiDesktop 1.3 (desktop Word); elsewhere they are not offered */
+export const canSetMargins = () => typeof Office !== 'undefined' && !!Office.context?.requirements?.isSetSupported('WordApiDesktop', '1.3');
+
+async function readMargins(): Promise<PageMargins[] | null> {
+  if (!canSetMargins()) return null;
+  try {
+    return await Word.run(async (context) => {
+      const sections = context.document.sections;
+      sections.load('items');
+      await context.sync();
+      const setups = sections.items.map(section => {
+        const setup = (section as unknown as { pageSetup: Word.PageSetup }).pageSetup;
+        setup.load('topMargin,bottomMargin,leftMargin,rightMargin');
+        return setup;
+      });
+      await context.sync();
+      return setups.map(m => ({ top: m.topMargin, bottom: m.bottomMargin, left: m.leftMargin, right: m.rightMargin }));
+    });
+  } catch (e) {
+    console.error(e);
+    return null;
+  }
+}
+
 /** The font, size and spacing of the paragraph the cursor is in: "like this one" for the style profile */
-export async function readSelectionFormat(): Promise<{ font: string | null; size: number | null; spaceBefore: number; spaceAfter: number; lineSpacing: number; firstLineIndent: number; alignment: string }> {
+export async function readSelectionFormat(): Promise<{ font: string | null; size: number | null; spaceBefore: number; spaceAfter: number; lineSpacing: number; firstLineIndent: number; leftIndent: number; rightIndent: number; alignment: string }> {
   return Word.run(async (context) => {
     const paragraph = context.document.getSelection().paragraphs.getFirst();
-    paragraph.load('alignment,spaceBefore,spaceAfter,lineSpacing,firstLineIndent,font/name,font/size');
+    paragraph.load('alignment,spaceBefore,spaceAfter,lineSpacing,firstLineIndent,leftIndent,rightIndent,font/name,font/size');
     await context.sync();
-    return { font: paragraph.font.name || null, size: paragraph.font.size || null, spaceBefore: paragraph.spaceBefore || 0, spaceAfter: paragraph.spaceAfter || 0, lineSpacing: paragraph.lineSpacing || 0, firstLineIndent: paragraph.firstLineIndent || 0, alignment: String(paragraph.alignment) };
+    return { font: paragraph.font.name || null, size: paragraph.font.size || null, spaceBefore: paragraph.spaceBefore || 0, spaceAfter: paragraph.spaceAfter || 0, lineSpacing: paragraph.lineSpacing || 0, firstLineIndent: paragraph.firstLineIndent || 0, leftIndent: paragraph.leftIndent || 0, rightIndent: paragraph.rightIndent || 0, alignment: String(paragraph.alignment) };
   });
 }
 
 export interface FormatOutcome {
   formatted: number;
+  /** Heading styles that now keep their paragraph with the next one */
+  keepWithNext: number;
+  /** Sections whose margins were set */
+  margins: number;
+  /** What this Word could not do (said to the user) */
+  notes: string[];
   footnotes: number;
   deleted: number;
   spaces: number;
@@ -1202,6 +1239,9 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         if (change.spaceAfter !== undefined) p.spaceAfter = change.spaceAfter;
         if (change.lineSpacing !== undefined) p.lineSpacing = change.lineSpacing;
         if (change.firstLineIndent !== undefined) p.firstLineIndent = change.firstLineIndent;
+        if (change.leftIndent !== undefined) p.leftIndent = change.leftIndent;
+        if (change.rightIndent !== undefined) p.rightIndent = change.rightIndent;
+        if (change.color !== undefined) p.font.color = change.color;
         if (change.alignment !== undefined) p.alignment = change.alignment;
       }
       if (plan.footnotes && canFormatFootnotes()) {
@@ -1222,6 +1262,72 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
           fresh.document.changeTrackingMode = previous;
           await fresh.sync();
         }).catch(() => {}));
+      }
+    }
+
+    // Page-break rule and margins: a part of Word that is missing gives a note, not a failure of the rest
+    const notes: string[] = [];
+    let keepWithNext = 0;
+    let marginSections = 0;
+    if (plan.keepWithNextStyles.length) {
+      if (!isSupported('1.5')) {
+        notes.push('A „címsor együtt marad a következő bekezdéssel” szabályhoz újabb Word kell (WordApi 1.5).');
+      } else {
+        try {
+          if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+          const styles = doc.getStyles();
+          const found = plan.keepWithNextStyles.map(name => {
+            const style = styles.getByNameOrNullObject(name);
+            style.load('isNullObject');
+            return style;
+          });
+          await context.sync();
+          found.forEach(style => {
+            if (!style.isNullObject) {
+              style.paragraphFormat.keepWithNext = true;
+              keepWithNext++;
+            }
+          });
+          await context.sync();
+        } catch (e) {
+          console.error(e);
+          keepWithNext = 0;
+          notes.push('A „címsor együtt marad a következő bekezdéssel” szabályt nem sikerült beállítani.');
+        } finally {
+          if (previous !== 'Off') {
+            doc.changeTrackingMode = previous;
+            await context.sync().catch(() => {});
+          }
+        }
+      }
+    }
+    if (plan.margins) {
+      if (!canSetMargins()) {
+        notes.push('Az oldalmargókat ez a Word nem engedi beállítani innen (asztali Word kell hozzá).');
+      } else {
+        try {
+          if (previous !== 'Off') doc.changeTrackingMode = 'Off';
+          const sections = doc.sections;
+          sections.load('items');
+          await context.sync();
+          sections.items.forEach(section => {
+            const setup = (section as unknown as { pageSetup: Word.PageSetup }).pageSetup;
+            if (plan.margins!.top !== undefined) setup.topMargin = plan.margins!.top;
+            if (plan.margins!.bottom !== undefined) setup.bottomMargin = plan.margins!.bottom;
+            if (plan.margins!.left !== undefined) setup.leftMargin = plan.margins!.left;
+            if (plan.margins!.right !== undefined) setup.rightMargin = plan.margins!.right;
+          });
+          await context.sync();
+          marginSections = sections.items.length;
+        } catch (e) {
+          console.error(e);
+          notes.push('Az oldalmargókat nem sikerült beállítani.');
+        } finally {
+          if (previous !== 'Off') {
+            doc.changeTrackingMode = previous;
+            await context.sync().catch(() => {});
+          }
+        }
       }
     }
 
@@ -1258,7 +1364,7 @@ export async function applyFormatPlan(plan: FormatPlan, expectedTexts: string[])
         }
       }));
     }
-    return { formatted: plan.changes.length, footnotes, deleted, spaces, write };
+    return { formatted: plan.changes.length, keepWithNext, margins: marginSections, notes, footnotes, deleted, spaces, write };
   });
 }
 
